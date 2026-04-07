@@ -1,9 +1,9 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 local LDB = LibStub("LibDataBroker-1.1")
 local LDBIcon = LibStub("LibDBIcon-1.0")
 
-local dataObj = LDB:NewDataObject("WoWGuildSync", {
+local dataObj = LDB:NewDataObject("GuildHall", {
     type = "launcher",
     text = "GuildHall",
     icon = "Interface\\Icons\\INV_Misc_Gear_01",
@@ -46,5 +46,5 @@ local dataObj = LDB:NewDataObject("WoWGuildSync", {
 
 -- Called from Core.lua OnInitialize
 function WGS:SetupMinimapIcon()
-    LDBIcon:Register("WoWGuildSync", dataObj, self.db.profile.minimap)
+    LDBIcon:Register("GuildHall", dataObj, self.db.profile.minimap)
 end

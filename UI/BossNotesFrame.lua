@@ -1,10 +1,10 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 local bossNotesFrame = nil
 
 local function CreateBossNotesFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncBossNotesFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallBossNotesFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(400, 300)
     f:SetPoint("CENTER", UIParent, "CENTER", 300, 0)
     f:SetMovable(true)

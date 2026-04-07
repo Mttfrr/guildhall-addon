@@ -1,6 +1,6 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 ---@class WGSLootModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("Loot", "AceEvent-3.0")

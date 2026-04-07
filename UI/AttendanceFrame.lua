@@ -1,11 +1,11 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 -- Lightweight attendance HUD shown during raids when tracking is active
 local hudFrame = nil
 
 local function CreateAttendanceHUD()
-    local f = CreateFrame("Frame", "WoWGuildSyncAttendanceHUD", UIParent, "BackdropTemplate")
+    local f = CreateFrame("Frame", "GuildHallAttendanceHUD", UIParent, "BackdropTemplate")
     f:SetSize(180, 60)
     f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -250, -10)
     f:SetMovable(true)
@@ -90,7 +90,7 @@ end
 local reminderFrame = nil
 
 local function CreateExportReminder()
-    local f = CreateFrame("Frame", "WoWGuildSyncExportReminder", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallExportReminder", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(340, 200)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
     f:SetMovable(true)

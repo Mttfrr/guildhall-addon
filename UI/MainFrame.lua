@@ -1,6 +1,6 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 local mainFrame = nil
 
@@ -220,7 +220,7 @@ end
 -- Main frame
 ---------------------------------------------------------------------------
 local function CreateMainFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncMainFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallMainFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(500, 560)
     f:SetPoint("CENTER")
     f:SetMovable(true)

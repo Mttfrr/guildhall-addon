@@ -1,10 +1,10 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 local eventsFrame = nil
 
 local function CreateEventsFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncEventsFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallEventsFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(360, 400)
     f:SetPoint("CENTER")
     f:SetMovable(true)

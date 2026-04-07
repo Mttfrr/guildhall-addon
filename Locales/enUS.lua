@@ -14,4 +14,4 @@ L["GOLD_CHANGE"] = "Guild bank gold changed: %s"
 L["NO_GUILD"] = "You are not in a guild."
 L["NOT_IN_RAID"] = "You are not in a raid group."
 
-WoWGuildSync_L = L
+GuildHall_L = L

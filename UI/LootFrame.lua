@@ -1,13 +1,13 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 -- Export/Import frame (shared for both operations)
 local exportFrame = nil
 local importFrame = nil
 
 local function CreateExportFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncExportFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallExportFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(450, 350)
     f:SetPoint("CENTER")
     f:SetMovable(true)
@@ -93,7 +93,7 @@ local function CreateExportFrame()
 end
 
 local function CreateImportFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncImportFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallImportFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(450, 350)
     f:SetPoint("CENTER")
     f:SetMovable(true)

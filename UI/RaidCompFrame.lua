@@ -1,5 +1,5 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 local raidCompFrame = nil
 
@@ -12,7 +12,7 @@ local ROLE_LABELS = {
 }
 
 local function CreateRaidCompFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncRaidCompFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallRaidCompFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(320, 450)
     f:SetPoint("CENTER")
     f:SetMovable(true)

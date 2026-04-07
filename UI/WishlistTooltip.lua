@@ -1,5 +1,5 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 -- Hook item tooltips to show wishlist information from imported web data
 -- Modern API passes (tooltip, data); legacy OnTooltipSetItem passes (tooltip) only

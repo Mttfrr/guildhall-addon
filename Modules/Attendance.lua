@@ -1,6 +1,6 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 ---@class WGSAttendanceModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("Attendance", "AceEvent-3.0")
@@ -280,7 +280,7 @@ function WGS:ShowTeamPicker(callback)
 end
 
 function WGS:CreateTeamPickerFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncTeamPicker", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallTeamPicker", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(260, 50)  -- Will resize based on team count
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
     f:SetMovable(true)

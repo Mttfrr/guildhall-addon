@@ -1,6 +1,6 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 local options = {
     name = "GuildHall |cffff8800[BETA]|r",
@@ -108,9 +108,9 @@ local options = {
                     set = function(_, val)
                         WGS.db.profile.minimap.hide = not val
                         if val then
-                            LibStub("LibDBIcon-1.0"):Show("WoWGuildSync")
+                            LibStub("LibDBIcon-1.0"):Show("GuildHall")
                         else
-                            LibStub("LibDBIcon-1.0"):Hide("WoWGuildSync")
+                            LibStub("LibDBIcon-1.0"):Hide("GuildHall")
                         end
                     end,
                 },
@@ -216,12 +216,12 @@ local options = {
 }
 
 function WGS:SetupConfig()
-    LibStub("AceConfigRegistry-3.0"):RegisterOptionsTable("WoWGuildSync", options)
-    LibStub("AceConfigDialog-3.0"):AddToBlizOptions("WoWGuildSync", "WoWGuildSync")
+    LibStub("AceConfigRegistry-3.0"):RegisterOptionsTable("GuildHall", options)
+    LibStub("AceConfigDialog-3.0"):AddToBlizOptions("GuildHall", "GuildHall")
 end
 
 function WGS:OpenConfig()
-    LibStub("AceConfigDialog-3.0"):Open("WoWGuildSync")
+    LibStub("AceConfigDialog-3.0"):Open("GuildHall")
 end
 
 -- SetupConfig is called from Core.lua OnInitialize

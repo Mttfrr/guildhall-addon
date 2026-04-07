@@ -1,10 +1,10 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 local readinessFrame = nil
 
 local function CreateReadinessFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncReadinessFrame", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallReadinessFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(380, 400)
     f:SetPoint("CENTER")
     f:SetMovable(true)

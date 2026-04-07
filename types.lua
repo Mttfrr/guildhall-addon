@@ -43,10 +43,10 @@
 ---@field playerId string           -- Opaque player ID from web platform
 ---@field main string               -- Main character in "CharName-Realm" format
 
----@class WoWGuildSync: AceAddon-3.0, AceConsole-3.0, AceEvent-3.0
+---@class GuildHall: AceAddon-3.0, AceConsole-3.0, AceEvent-3.0
 ---@field db AceDB-3.0
 ---@field version string
 ---@field CLASS_COLORS table<string, string>
----@field BuildCharacterLookup fun(self: WoWGuildSync): table<string, string>
----@field ResolvePlayerForCharacter fun(self: WoWGuildSync, characterName: string): string?, WGSPlayerInfo?
+---@field BuildCharacterLookup fun(self: GuildHall): table<string, string>
+---@field ResolvePlayerForCharacter fun(self: GuildHall, characterName: string): string?, WGSPlayerInfo?
 ---@field [string] any

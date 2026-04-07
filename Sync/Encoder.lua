@@ -1,5 +1,5 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 -- Export format version (for future compatibility)
 local EXPORT_VERSION = 2

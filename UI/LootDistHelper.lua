@@ -1,6 +1,6 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
-local L = WoWGuildSync_L
+---@type GuildHall
+local WGS = GuildHall
+local L = GuildHall_L
 
 local helperFrame = nil
 local POPUP_DURATION = 30  -- auto-hide after 30 seconds if no action
@@ -14,7 +14,7 @@ local priorityColors = {
 local priorityOrder = { BiS = 1, High = 2, Medium = 3, Low = 4 }
 
 local function CreateHelperFrame()
-    local f = CreateFrame("Frame", "WoWGuildSyncLootDistHelper", UIParent, "BasicFrameTemplateWithInset")
+    local f = CreateFrame("Frame", "GuildHallLootDistHelper", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(320, 50) -- resized dynamically
     f:SetPoint("TOP", UIParent, "TOP", 0, -120)
     f:SetMovable(true)

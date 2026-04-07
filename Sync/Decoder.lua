@@ -1,5 +1,5 @@
----@type WoWGuildSync
-local WGS = WoWGuildSync
+---@type GuildHall
+local WGS = GuildHall
 
 local EXPORT_HEADER = "WGS"
 

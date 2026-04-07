@@ -1,12 +1,12 @@
-local ADDON_NAME = "WoWGuildSync"
+local ADDON_NAME = "GuildHall"
 
----@type WoWGuildSync
+---@type GuildHall
 local WGS = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME, "AceConsole-3.0", "AceEvent-3.0")
-local L = WoWGuildSync_L
+local L = GuildHall_L
 
 -- Make globally accessible
-WoWGuildSync = WGS
-_G["WoWGuildSync"] = WGS
+GuildHall = WGS
+_G["GuildHall"] = WGS
 
 -- Version
 WGS.version = "0.4.0-beta"
@@ -54,7 +54,7 @@ local dbDefaults = {
 }
 
 function WGS:OnInitialize()
-    self.db = LibStub("AceDB-3.0"):New("WoWGuildSyncDB", dbDefaults, true)
+    self.db = LibStub("AceDB-3.0"):New("GuildHallDB", dbDefaults, true)
 
     -- Register slash commands
     self:RegisterChatCommand("wgs", "SlashCommand")
@@ -115,7 +115,7 @@ function WGS:SlashCommand(input)
 end
 
 -- Addon compartment (minimap menu) click handler
-function WoWGuildSync_OnAddonCompartmentClick()
+function GuildHall_OnAddonCompartmentClick()
     WGS:ToggleMainFrame()
 end
 
