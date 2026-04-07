@@ -118,6 +118,8 @@ function module:OnLootMessage(_, msg, ...)
     local itemID = self:GetItemIDFromLink(itemLink)
     if not itemID then return end
 
+    local playerId = WGS:ResolvePlayerForCharacter(player)
+
     local itemName, _, itemQuality, itemLevel = C_Item.GetItemInfo(itemLink)
 
     -- If quality is known and below threshold, skip
@@ -127,6 +129,7 @@ function module:OnLootMessage(_, msg, ...)
     local entry = {
         timestamp = WGS:GetTimestamp(),
         player = player,
+        playerId = playerId, -- nil if character not in player map
         itemLink = itemLink,
         itemID = itemID,
         itemName = itemName or "",

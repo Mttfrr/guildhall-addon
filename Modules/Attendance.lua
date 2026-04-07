@@ -47,8 +47,10 @@ function module:OnGroupRosterUpdate()
 
     for name, info in pairs(members) do
         if not currentSession.members[name] then
+            local playerId = WGS:ResolvePlayerForCharacter(name)
             currentSession.members[name] = {
                 name = name,
+                playerId = playerId, -- nil if character not in player map
                 class = info.class,
                 role = info.role,
                 subgroup = info.subgroup,
@@ -130,8 +132,10 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
     }
 
     for name, info in pairs(members) do
+        local playerId = self:ResolvePlayerForCharacter(name)
         currentSession.members[name] = {
             name = name,
+            playerId = playerId, -- nil if character not in player map
             class = info.class,
             role = info.role,
             subgroup = info.subgroup,

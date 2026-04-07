@@ -17,6 +17,18 @@ function WGS:ProcessImport(data)
 
     local count = 0
 
+    -- Import player-character mapping (must come before teams so lookup is ready)
+    if data.characters then
+        self.db.global.characters = data.characters
+        self:BuildCharacterLookup()
+        local playerCount = 0
+        for _ in pairs(data.characters) do playerCount = playerCount + 1 end
+        if playerCount > 0 then
+            self:Print("Player-character map imported: " .. playerCount .. " players.")
+        end
+        count = count + playerCount
+    end
+
     -- Import teams
     if data.teams then
         self.db.global.teams = data.teams
@@ -127,6 +139,12 @@ function WGS:ProcessImport(data)
         if data.motd ~= "" then
             self:Print("|cffffd100[Guild Web MOTD]|r " .. data.motd)
         end
+    end
+
+    -- Ensure character lookup is current (handles partial imports where
+    -- characters weren't included but are already stored in DB)
+    if self.db.global.characters and next(self.db.global.characters) then
+        self:BuildCharacterLookup()
     end
 
     self.db.global.lastImport = self:GetTimestamp()

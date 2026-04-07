@@ -69,6 +69,12 @@ function WGS:BuildExportData(modules)
         data.bankGoldCopper = lastGold
     end
 
+    -- Include character map version so the web knows which mapping was active
+    local characters = self.db.global.characters
+    if characters and next(characters) ~= nil then
+        data.characterMapVersion = self.db.global.lastImport
+    end
+
     return data
 end
 

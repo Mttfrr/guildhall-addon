@@ -58,6 +58,8 @@ local function PopulateTeamsPanel(panel)
     local yOffset = 0
     local contentWidth = panel.scrollFrame:GetWidth() - 5
 
+    local characters = WGS.db.global.characters or {}
+
     for _, team in ipairs(teams) do
         -- Team header row
         local teamRow = CreateFrame("Frame", nil, panel.content)
@@ -66,40 +68,123 @@ local function PopulateTeamsPanel(panel)
 
         local teamName = teamRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         teamName:SetPoint("LEFT", teamRow, "LEFT", 5, 0)
-        local memberCount = team.members and #team.members or 0
-        teamName:SetText("|cffffd100" .. (team.name or "?") .. "|r  |cff888888(" .. (team.type or "Team") .. " — " .. memberCount .. " members)|r")
+        local memberCount = team.playerMembers and #team.playerMembers
+            or (team.members and #team.members or 0)
+        teamName:SetText("|cffffd100" .. (team.name or "?") .. "|r  |cff888888("
+            .. (team.type or "Team") .. " \226\128\148 " .. memberCount .. " members)|r")
 
         yOffset = yOffset - 22
 
-        -- Member list
-        if team.members and #team.members > 0 then
+        if team.playerMembers and #team.playerMembers > 0 then
+            -- Player-based rendering: show main character with alt info
+            for _, pm in ipairs(team.playerMembers) do
+                local playerInfo = characters[pm.playerId]
+                local mainName = pm.main or (playerInfo and playerInfo.main) or "Unknown"
+                local shortMain = mainName:match("^([^%-]+)") or mainName
+                local mainGuild = roster[shortMain]
+
+                -- Check if any character (main or alts) is online
+                local anyOnline = mainGuild and mainGuild.online
+                if not anyOnline and playerInfo and playerInfo.alts then
+                    for _, alt in ipairs(playerInfo.alts) do
+                        local altShort = alt:match("^([^%-]+)")
+                        local altGuild = roster[altShort]
+                        if altGuild and altGuild.online then
+                            anyOnline = true
+                            break
+                        end
+                    end
+                end
+
+                local memberRow = CreateFrame("Frame", nil, panel.content)
+                memberRow:SetSize(contentWidth, 16)
+                memberRow:SetPoint("TOPLEFT", panel.content, "TOPLEFT", 0, yOffset)
+
+                -- Online indicator
+                local indicator = memberRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                indicator:SetPoint("LEFT", memberRow, "LEFT", 12, 0)
+                if mainGuild then
+                    indicator:SetText(anyOnline and "|cff00ff00\194\183|r" or "|cff555555\194\183|r")
+                else
+                    indicator:SetText("|cffff4444\194\183|r")
+                end
+
+                -- Main character name (class-colored)
+                local nameText = memberRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                nameText:SetPoint("LEFT", indicator, "RIGHT", 4, 0)
+                if mainGuild then
+                    local colorHex = WGS.CLASS_COLORS[mainGuild.class] or "ffffffff"
+                    nameText:SetText("|c" .. colorHex .. shortMain .. "|r")
+                else
+                    nameText:SetText("|cff666666" .. shortMain .. "|r")
+                end
+
+                -- Alt count badge
+                local altCount = playerInfo and playerInfo.alts and #playerInfo.alts or 0
+                if altCount > 0 then
+                    local altBadge = memberRow:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    altBadge:SetPoint("LEFT", nameText, "RIGHT", 6, 0)
+                    altBadge:SetText("|cff888888+" .. altCount .. " alt" .. (altCount > 1 and "s" or "") .. "|r")
+                end
+
+                -- Level and rank for main
+                if mainGuild then
+                    local infoText = memberRow:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    infoText:SetPoint("RIGHT", memberRow, "RIGHT", -4, 0)
+                    infoText:SetText("|cff555555Lv" .. mainGuild.level .. " " .. mainGuild.rank .. "|r")
+                end
+
+                -- Tooltip showing all characters on hover
+                if altCount > 0 then
+                    memberRow:EnableMouse(true)
+                    -- Store refs for the tooltip closure (avoid upvalue mutation)
+                    memberRow._playerAlts = playerInfo.alts
+                    memberRow._mainName = mainName
+                    memberRow._shortMain = shortMain
+                    memberRow:SetScript("OnEnter", function(self)
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:AddLine(self._shortMain .. "'s Characters")
+                        GameTooltip:AddLine("Main: " .. self._mainName, 1, 1, 1)
+                        for _, alt in ipairs(self._playerAlts) do
+                            local altShort = alt:match("^([^%-]+)")
+                            local altGuild = roster[altShort]
+                            if altGuild then
+                                local c = WGS.CLASS_COLORS[altGuild.class] or "ffffffff"
+                                local status = altGuild.online and "|cff00ff00online|r" or "|cff555555offline|r"
+                                GameTooltip:AddLine("|c" .. c .. altShort .. "|r  " .. status)
+                            else
+                                GameTooltip:AddLine("|cff666666" .. altShort .. "|r  (not in guild)")
+                            end
+                        end
+                        GameTooltip:Show()
+                    end)
+                    memberRow:SetScript("OnLeave", function()
+                        GameTooltip:Hide()
+                    end)
+                end
+
+                yOffset = yOffset - 16
+            end
+        elseif team.members and #team.members > 0 then
+            -- Legacy flat member list (backward compatibility)
             for _, memberName in ipairs(team.members) do
                 local memberRow = CreateFrame("Frame", nil, panel.content)
                 memberRow:SetSize(contentWidth, 16)
                 memberRow:SetPoint("TOPLEFT", panel.content, "TOPLEFT", 0, yOffset)
 
-                -- Look up in guild roster (strip realm from member name for matching)
                 local shortName = memberName:match("^([^%-]+)")
                 local guildInfo = roster[shortName]
 
-                -- Online indicator
                 local indicator = memberRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 indicator:SetPoint("LEFT", memberRow, "LEFT", 12, 0)
-
                 if guildInfo then
-                    if guildInfo.online then
-                        indicator:SetText("|cff00ff00\194\183|r") -- green dot
-                    else
-                        indicator:SetText("|cff555555\194\183|r") -- grey dot
-                    end
+                    indicator:SetText(guildInfo.online and "|cff00ff00\194\183|r" or "|cff555555\194\183|r")
                 else
-                    indicator:SetText("|cffff4444\194\183|r") -- red dot (not in guild)
+                    indicator:SetText("|cffff4444\194\183|r")
                 end
 
-                -- Character name (class-colored if in guild)
                 local nameText = memberRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 nameText:SetPoint("LEFT", indicator, "RIGHT", 4, 0)
-
                 if guildInfo then
                     local colorHex = WGS.CLASS_COLORS[guildInfo.class] or "ffffffff"
                     nameText:SetText("|c" .. colorHex .. shortName .. "|r")
@@ -107,7 +192,6 @@ local function PopulateTeamsPanel(panel)
                     nameText:SetText("|cff666666" .. shortName .. "|r")
                 end
 
-                -- Level and rank if in guild
                 if guildInfo then
                     local infoText = memberRow:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
                     infoText:SetPoint("LEFT", nameText, "RIGHT", 6, 0)

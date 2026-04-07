@@ -34,8 +34,19 @@
 ---@field Hide fun(self: WGSTeamPickerFrame)
 ---@field [string] any
 
+---@class WGSPlayerInfo
+---@field displayName string        -- Human-readable player label
+---@field main string               -- Main character in "CharName-Realm" format
+---@field alts string[]             -- Array of alt characters in "CharName-Realm" format
+
+---@class WGSPlayerMember
+---@field playerId string           -- Opaque player ID from web platform
+---@field main string               -- Main character in "CharName-Realm" format
+
 ---@class WoWGuildSync: AceAddon-3.0, AceConsole-3.0, AceEvent-3.0
 ---@field db AceDB-3.0
 ---@field version string
 ---@field CLASS_COLORS table<string, string>
+---@field BuildCharacterLookup fun(self: WoWGuildSync): table<string, string>
+---@field ResolvePlayerForCharacter fun(self: WoWGuildSync, characterName: string): string?, WGSPlayerInfo?
 ---@field [string] any

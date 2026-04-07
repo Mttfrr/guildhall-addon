@@ -176,6 +176,8 @@ local options = {
                         WGS.db.global.raidComps = {}
                         WGS.db.global.events = {}
                         WGS.db.global.gearAudit = {}
+                        WGS.db.global.characters = {}
+                        WGS.db.global.characterLookup = {}
                         WGS.db.global.webMOTD = ""
                         WGS.db.global.targetIlvl = 0
                         WGS:Print("Imported web data cleared.")
@@ -201,6 +203,8 @@ local options = {
                         WGS.db.global.raidComps = {}
                         WGS.db.global.events = {}
                         WGS.db.global.gearAudit = {}
+                        WGS.db.global.characters = {}
+                        WGS.db.global.characterLookup = {}
                         WGS.db.global.webMOTD = ""
                         WGS.db.global.targetIlvl = 0
                         WGS:Print("All data cleared.")

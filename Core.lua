@@ -9,7 +9,7 @@ WoWGuildSync = WGS
 _G["WoWGuildSync"] = WGS
 
 -- Version
-WGS.version = "0.3.0-beta"
+WGS.version = "0.4.0-beta"
 
 -- Database defaults
 local dbDefaults = {
@@ -39,6 +39,9 @@ local dbDefaults = {
         bossNotes = {},
         raidComps = {},
         events = {},
+        -- Player-character mapping (imported from web platform)
+        characters = {},        -- { [playerId] = { displayName, main, alts = {} } }
+        characterLookup = {},   -- reverse: { ["CharName-Realm"] = playerId }
         -- Web platform data
         gearAudit = {},
         targetIlvl = 0,
@@ -406,6 +409,41 @@ function WGS:GetGuildRosterLookup()
     return roster
 end
 
+-- Build a reverse lookup table: CharName-Realm -> playerId
+-- Called once per import; the result is stored in db.global.characterLookup
+function WGS:BuildCharacterLookup()
+    local lookup = {}
+    local characters = self.db.global.characters
+    if characters then
+        for playerId, info in pairs(characters) do
+            if info.main then
+                lookup[info.main] = playerId
+            end
+            if info.alts then
+                for _, alt in ipairs(info.alts) do
+                    lookup[alt] = playerId
+                end
+            end
+        end
+    end
+    self.db.global.characterLookup = lookup
+    return lookup
+end
+
+-- Resolve a character name to its owning player (O(1) via cached lookup)
+-- Returns: playerId (string|nil), playerInfo (table|nil)
+function WGS:ResolvePlayerForCharacter(characterName)
+    if not characterName then return nil, nil end
+    local lookup = self.db.global.characterLookup
+    if not lookup then return nil, nil end
+
+    local playerId = lookup[characterName]
+    if not playerId then return nil, nil end
+
+    local playerInfo = self.db.global.characters[playerId]
+    return playerId, playerInfo
+end
+
 -- WoW class colors for display
 -- All WoW 12.0 Midnight class colors (matching Blizzard RAID_CLASS_COLORS)
 WGS.CLASS_COLORS = {
@@ -431,11 +469,23 @@ function WGS:ListTeams()
         self:Print("No teams imported. Use /wgs import to paste the export string from the web platform.")
         return
     end
+    local characters = self.db.global.characters or {}
     self:Print("--- Imported Teams ---")
     for i, team in ipairs(teams) do
-        local memberCount = team.members and #team.members or 0
-        self:Print(string.format("  %d. %s (%s) — %d members", team.id or i, team.name or "?", team.type or "?", memberCount))
-        if team.members and #team.members > 0 then
+        local memberCount = team.playerMembers and #team.playerMembers
+            or (team.members and #team.members or 0)
+        self:Print(string.format("  %d. %s (%s) — %d members",
+            team.id or i, team.name or "?", team.type or "?", memberCount))
+
+        if team.playerMembers and #team.playerMembers > 0 then
+            for _, pm in ipairs(team.playerMembers) do
+                local info = characters[pm.playerId]
+                local mainShort = (pm.main or ""):match("^([^%-]+)") or "?"
+                local altCount = info and info.alts and #info.alts or 0
+                local altStr = altCount > 0 and (" (+" .. altCount .. " alts)") or ""
+                self:Print("     " .. mainShort .. altStr)
+            end
+        elseif team.members and #team.members > 0 then
             self:Print("     " .. table.concat(team.members, ", "))
         end
     end
@@ -487,11 +537,15 @@ function WGS:IsGuildGroup()
         end
     end
 
-    -- If we couldn't check most members (loading screen etc.), assume guild group
-    if checkedCount < total * 0.5 then return true end
+    -- If we couldn't check most members (loading screen etc.), don't track to be safe
+    if checkedCount < total * 0.5 then
+        guildGroupCache.result = false
+        guildGroupCache.expiry = now + 5
+        return false
+    end
 
-    -- Guild group = at least half the group are guildmates
-    local result = (guildCount / checkedCount) >= 0.5
+    -- Guild group = at least 80% of the group are guildmates (allows 1-2 pug fills)
+    local result = (guildCount / checkedCount) >= 0.8
     guildGroupCache.result = result
     guildGroupCache.expiry = now + 5
     return result

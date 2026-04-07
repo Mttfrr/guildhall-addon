@@ -2,7 +2,7 @@
 ## Title: GuildHall
 ## Notes: [BETA] GuildHall companion addon — sync loot, attendance, bank gold, and more with guildhall.run. Early beta — please report issues on the web app.
 ## Author: WoWGuildManager
-## Version: 0.3.0-beta
+## Version: 0.4.0-beta
 ## SavedVariables: WoWGuildSyncDB
 ## IconTexture: Interface\Icons\INV_Misc_Gear_01
 ## AddonCompartmentFunc: WoWGuildSync_OnAddonCompartmentClick
