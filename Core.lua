@@ -4,14 +4,11 @@ local ADDON_NAME = "GuildHall"
 local WGS = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME, "AceConsole-3.0", "AceEvent-3.0")
 local L = GuildHall_L
 
--- Make globally accessible
 GuildHall = WGS
 _G["GuildHall"] = WGS
 
--- Version
 WGS.version = "0.4.0-beta"
 
--- Database defaults
 local dbDefaults = {
     profile = {
         minimap = { hide = false },
@@ -19,34 +16,28 @@ local dbDefaults = {
         autoTrackLoot = true,
         guildGroupsOnly = true,
         guildWebId = "",
-        -- Feature toggles
         showLootDistHelper = true,
         showReadinessCheck = true,
         showBossNotes = true,
         showWebMOTD = true,
     },
     global = {
-        -- Captured data awaiting export (in-game only data)
         attendance = {},
         loot = {},
         guildBankMoneyChanges = {},
         guildBankTransactions = {},
         encounters = {},
         lastKnownGold = nil,
-        -- Imported data from web
         teams = {},
         wishlists = {},
         bossNotes = {},
         raidComps = {},
         events = {},
-        -- Player-character mapping (imported from web platform)
-        characters = {},        -- { [playerId] = { displayName, main, alts = {} } }
-        characterLookup = {},   -- reverse: { ["CharName-Realm"] = playerId }
-        -- Web platform data
+        characters = {},        -- { [playerId] = { displayName, main, alts } }
+        characterLookup = {},   -- reverse: { [charName-realm] = playerId }
         gearAudit = {},
         targetIlvl = 0,
         webMOTD = "",
-        -- Sync metadata
         lastExport = 0,
         lastImport = 0,
         exportHistory = {},
@@ -55,17 +46,11 @@ local dbDefaults = {
 
 function WGS:OnInitialize()
     self.db = LibStub("AceDB-3.0"):New("GuildHallDB", dbDefaults, true)
-
-    -- Register slash commands
-    self:RegisterChatCommand("wgs", "SlashCommand")
-    self:RegisterChatCommand("wowguildsync", "SlashCommand")
-
-    -- Setup config panel and minimap icon (called here to avoid fragile hook chains)
+    self:RegisterChatCommand("gh", "SlashCommand")
+    self:RegisterChatCommand("guildhall", "SlashCommand")
     self:SetupConfig()
     self:SetupMinimapIcon()
-
-    self:Print("GuildHall v" .. self.version .. " loaded. |cffff8800[BETA] Early development — verify exported data before relying on it. Feedback: guildhall.run|r")
-    self:Print("Type /wgs help for commands.")
+    self:Print("GuildHall v" .. self.version .. " loaded. Type /gh help for commands.")
 end
 
 function WGS:OnEnable()
@@ -73,12 +58,9 @@ function WGS:OnEnable()
     self:SetupTooltipHooks()
 end
 
-function WGS:OnDisable()
-end
+function WGS:OnDisable() end
 
-function WGS:PLAYER_ENTERING_WORLD()
-    -- Nothing needed on login — modules self-register for their events
-end
+function WGS:PLAYER_ENTERING_WORLD() end
 
 function WGS:SlashCommand(input)
     local cmd = self:GetArgs(input, 1)
@@ -101,26 +83,26 @@ function WGS:SlashCommand(input)
         if bossName and bossName ~= "" then
             self:ShowBossNotes(bossName)
         else
-            self:Print("Usage: /wgs bossnotes <boss name>")
+            self:Print("Usage: /gh bossnotes <boss name>")
         end
     elseif cmd == "events" then
         self:ToggleEventsFrame()
     elseif cmd == "readiness" or cmd == "ready" then
         self:ToggleReadinessFrame()
-    elseif cmd == "help" then
-        self:Print(L["SLASH_HELP"])
     else
         self:Print(L["SLASH_HELP"])
     end
 end
 
--- Addon compartment (minimap menu) click handler
 function GuildHall_OnAddonCompartmentClick()
     WGS:ToggleMainFrame()
 end
 
--- Utility: get player-realm identifier (cached after first successful call)
-local cachedPlayerKey = nil
+---------------------------------------------------------------------------
+-- Player identity
+---------------------------------------------------------------------------
+
+local cachedPlayerKey
 function WGS:GetPlayerKey()
     if cachedPlayerKey then return cachedPlayerKey end
     local name, realm = UnitFullName("player")
@@ -132,62 +114,70 @@ function WGS:GetPlayerKey()
     return (name or "Unknown") .. "-" .. realm
 end
 
--- Utility: get current timestamp
 function WGS:GetTimestamp()
     return time()
 end
 
+--- Reverse lookup: CharName-Realm → playerId. Rebuilt on each import.
+function WGS:BuildCharacterLookup()
+    local lookup = {}
+    local chars = self.db.global.characters
+    if chars then
+        for pid, info in pairs(chars) do
+            if info.main then lookup[info.main] = pid end
+            if info.alts then
+                for _, alt in ipairs(info.alts) do lookup[alt] = pid end
+            end
+        end
+    end
+    self.db.global.characterLookup = lookup
+    return lookup
+end
+
+--- O(1) character → player resolution via cached lookup.
+function WGS:ResolvePlayerForCharacter(charName)
+    if not charName then return nil, nil end
+    local lookup = self.db.global.characterLookup
+    if not lookup then return nil, nil end
+    local pid = lookup[charName]
+    if not pid then return nil, nil end
+    return pid, self.db.global.characters[pid]
+end
+
 ---------------------------------------------------------------------------
--- JSON utilities (needed for web-compatible export/import)
+-- JSON
 ---------------------------------------------------------------------------
 
--- Lookup table for single-pass JSON string escaping
 WGS._jsonEscapes = { ['\\'] = '\\\\', ['"'] = '\\"', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
 
--- Lua table → JSON string
 function WGS:ToJson(val)
-    if val == nil or val == self.JSON_NULL then
-        return "null"
-    end
+    if val == nil or val == self.JSON_NULL then return "null" end
     local t = type(val)
-    if t == "boolean" then
-        return val and "true" or "false"
+    if t == "boolean" then return val and "true" or "false"
     elseif t == "number" then
-        if val ~= val then return "null" end -- NaN
-        if val == math.huge or val == -math.huge then return "null" end
+        if val ~= val or val == math.huge or val == -math.huge then return "null" end
         return tostring(val)
     elseif t == "string" then
-        -- Single-pass escaping via lookup table (avoids 5 intermediate strings)
         return '"' .. val:gsub('[\\"\n\r\t]', self._jsonEscapes) .. '"'
     elseif t == "table" then
-        -- Empty table: default to empty array (use val._isObject = true to force {})
-        if next(val) == nil then
-            return val._isObject and "{}" or "[]"
-        end
+        if next(val) == nil then return val._isObject and "{}" or "[]" end
 
-        -- Detect array vs object
         local isArray = true
         local maxIdx = 0
         for k in pairs(val) do
-            if type(k) ~= "number" or k ~= math.floor(k) or k < 1 then
-                isArray = false
-                break
-            end
+            if type(k) ~= "number" or k ~= math.floor(k) or k < 1 then isArray = false; break end
             if k > maxIdx then maxIdx = k end
         end
         if maxIdx ~= #val then isArray = false end
 
         local parts = {}
         if isArray then
-            for _, v in ipairs(val) do
-                table.insert(parts, self:ToJson(v))
-            end
+            for _, v in ipairs(val) do parts[#parts + 1] = self:ToJson(v) end
             return "[" .. table.concat(parts, ",") .. "]"
         else
             for k, v in pairs(val) do
-                local key = type(k) == "string" and k or tostring(k)
-                key = key:gsub('[\\"\n\r\t]', self._jsonEscapes)
-                table.insert(parts, '"' .. key .. '":' .. self:ToJson(v))
+                local key = (type(k) == "string" and k or tostring(k)):gsub('[\\"\n\r\t]', self._jsonEscapes)
+                parts[#parts + 1] = '"' .. key .. '":' .. self:ToJson(v)
             end
             return "{" .. table.concat(parts, ",") .. "}"
         end
@@ -195,10 +185,8 @@ function WGS:ToJson(val)
     return "null"
 end
 
--- Sentinel for JSON null (Lua nil creates holes in arrays)
 WGS.JSON_NULL = setmetatable({}, { __tostring = function() return "null" end })
 
--- JSON string → Lua table
 function WGS:FromJson(str)
     if not str or str == "" then return nil end
     local pos = 1
@@ -207,37 +195,29 @@ function WGS:FromJson(str)
     local function skipWs()
         while pos <= len do
             local c = str:sub(pos, pos)
-            if c == " " or c == "\t" or c == "\n" or c == "\r" then
-                pos = pos + 1
-            else
-                break
-            end
+            if c ~= " " and c ~= "\t" and c ~= "\n" and c ~= "\r" then break end
+            pos = pos + 1
         end
     end
 
-    local parseValue -- forward declaration
+    local parseValue
 
     local function parseString()
-        pos = pos + 1 -- skip opening "
+        pos = pos + 1
         local parts = {}
         while pos <= len do
             local c = str:sub(pos, pos)
             if c == "\\" then
                 pos = pos + 1
                 local esc = str:sub(pos, pos)
-                if esc == "n" then parts[#parts + 1] = "\n"
-                elseif esc == "r" then parts[#parts + 1] = "\r"
-                elseif esc == "t" then parts[#parts + 1] = "\t"
-                elseif esc == '"' then parts[#parts + 1] = '"'
+                if     esc == "n"  then parts[#parts + 1] = "\n"
+                elseif esc == "r"  then parts[#parts + 1] = "\r"
+                elseif esc == "t"  then parts[#parts + 1] = "\t"
+                elseif esc == '"'  then parts[#parts + 1] = '"'
                 elseif esc == "\\" then parts[#parts + 1] = "\\"
-                elseif esc == "/" then parts[#parts + 1] = "/"
-                elseif esc == "u" then
-                    -- Skip unicode escape, replace with ?
-                    pos = pos + 4
-                    parts[#parts + 1] = "?"
-                else
-                    parts[#parts + 1] = esc
-                end
+                elseif esc == "/"  then parts[#parts + 1] = "/"
+                elseif esc == "u"  then pos = pos + 4; parts[#parts + 1] = "?"
+                else parts[#parts + 1] = esc end
                 pos = pos + 1
             elseif c == '"' then
                 pos = pos + 1
@@ -267,135 +247,116 @@ function WGS:FromJson(str)
     end
 
     local function parseArray()
-        pos = pos + 1 -- skip [
-        skipWs()
+        pos = pos + 1; skipWs()
         local arr = {}
         if str:sub(pos, pos) == "]" then pos = pos + 1; return arr end
         while true do
-            skipWs()
-            arr[#arr + 1] = parseValue()
-            skipWs()
+            skipWs(); arr[#arr + 1] = parseValue(); skipWs()
             if str:sub(pos, pos) == "]" then pos = pos + 1; return arr end
-            pos = pos + 1 -- skip ,
+            pos = pos + 1
         end
     end
 
     local function parseObject()
-        pos = pos + 1 -- skip {
-        skipWs()
+        pos = pos + 1; skipWs()
         local obj = {}
         if str:sub(pos, pos) == "}" then pos = pos + 1; return obj end
         while true do
-            skipWs()
-            local key = parseString()
-            skipWs()
-            pos = pos + 1 -- skip :
-            skipWs()
-            obj[key] = parseValue()
-            skipWs()
+            skipWs(); local key = parseString(); skipWs()
+            pos = pos + 1; skipWs()
+            obj[key] = parseValue(); skipWs()
             if str:sub(pos, pos) == "}" then pos = pos + 1; return obj end
-            pos = pos + 1 -- skip ,
+            pos = pos + 1
         end
     end
 
     parseValue = function()
         skipWs()
         local c = str:sub(pos, pos)
-        if c == '"' then return parseString()
+        if     c == '"' then return parseString()
         elseif c == "{" then return parseObject()
         elseif c == "[" then return parseArray()
         elseif c == "t" then pos = pos + 4; return true
         elseif c == "f" then pos = pos + 5; return false
         elseif c == "n" then pos = pos + 4; return WGS.JSON_NULL
-        else return parseNumber()
-        end
+        else return parseNumber() end
     end
 
     local ok, result = pcall(parseValue)
-    if ok then return result end
-    return nil
+    return ok and result or nil
 end
 
 ---------------------------------------------------------------------------
--- Base64 utilities
+-- Base64
 ---------------------------------------------------------------------------
+
 local b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
--- Pre-built array lookup for encode (index 0..63 → character)
-local b64encode = {}
-for i = 1, 64 do b64encode[i - 1] = b64chars:sub(i, i) end
--- Pre-built decode lookup (character → 0..63)
-local b64lookup = {}
-for i = 1, 64 do b64lookup[b64chars:sub(i, i)] = i - 1 end
+local b64encode, b64lookup = {}, {}
+for i = 1, 64 do
+    b64encode[i - 1] = b64chars:sub(i, i)
+    b64lookup[b64chars:sub(i, i)] = i - 1
+end
 
 local floor = math.floor
 
 function WGS:Base64Encode(data)
-    local result = {}
-    local n = 0
-    local len = #data
-    for i = 1, len, 3 do
-        local a = data:byte(i)
-        local b = (i + 1 <= len) and data:byte(i + 1) or 0
-        local c = (i + 2 <= len) and data:byte(i + 2) or 0
-        local val = a * 65536 + b * 256 + c
-
-        n = n + 1; result[n] = b64encode[floor(val / 262144) % 64]
-        n = n + 1; result[n] = b64encode[floor(val / 4096) % 64]
-        n = n + 1; result[n] = (i + 1 <= len) and b64encode[floor(val / 64) % 64] or "="
-        n = n + 1; result[n] = (i + 2 <= len) and b64encode[val % 64] or "="
+    local out, n = {}, 0
+    for i = 1, #data, 3 do
+        local a, b, c = data:byte(i), 0, 0
+        if i + 1 <= #data then b = data:byte(i + 1) end
+        if i + 2 <= #data then c = data:byte(i + 2) end
+        local v = a * 65536 + b * 256 + c
+        n = n + 1; out[n] = b64encode[floor(v / 262144) % 64]
+        n = n + 1; out[n] = b64encode[floor(v / 4096) % 64]
+        n = n + 1; out[n] = (i + 1 <= #data) and b64encode[floor(v / 64) % 64] or "="
+        n = n + 1; out[n] = (i + 2 <= #data) and b64encode[v % 64] or "="
     end
-    return table.concat(result)
+    return table.concat(out)
 end
 
 function WGS:Base64Decode(str)
     str = str:gsub("%s+", ""):gsub("=", "")
-    local result = {}
-    local n = 0
-    local len = #str
-    for i = 1, len, 4 do
+    local out, n = {}, 0
+    for i = 1, #str, 4 do
         local a = b64lookup[str:sub(i, i)] or 0
-        local b = (i + 1 <= len) and (b64lookup[str:sub(i + 1, i + 1)] or 0) or 0
-        local c = (i + 2 <= len) and (b64lookup[str:sub(i + 2, i + 2)] or 0) or nil
-        local d = (i + 3 <= len) and (b64lookup[str:sub(i + 3, i + 3)] or 0) or nil
-
+        local b = (i + 1 <= #str) and (b64lookup[str:sub(i + 1, i + 1)] or 0) or 0
+        local c = (i + 2 <= #str) and (b64lookup[str:sub(i + 2, i + 2)] or 0) or nil
+        local d = (i + 3 <= #str) and (b64lookup[str:sub(i + 3, i + 3)] or 0) or nil
         if c and d then
-            local val = a * 262144 + b * 4096 + c * 64 + d
-            n = n + 1; result[n] = string.char(floor(val / 65536) % 256)
-            n = n + 1; result[n] = string.char(floor(val / 256) % 256)
-            n = n + 1; result[n] = string.char(val % 256)
+            local v = a * 262144 + b * 4096 + c * 64 + d
+            n = n + 1; out[n] = string.char(floor(v / 65536) % 256)
+            n = n + 1; out[n] = string.char(floor(v / 256) % 256)
+            n = n + 1; out[n] = string.char(v % 256)
         elseif c then
-            local val = a * 262144 + b * 4096 + c * 64
-            n = n + 1; result[n] = string.char(floor(val / 65536) % 256)
-            n = n + 1; result[n] = string.char(floor(val / 256) % 256)
+            local v = a * 262144 + b * 4096 + c * 64
+            n = n + 1; out[n] = string.char(floor(v / 65536) % 256)
+            n = n + 1; out[n] = string.char(floor(v / 256) % 256)
         else
-            local val = a * 262144 + b * 4096
-            n = n + 1; result[n] = string.char(floor(val / 65536) % 256)
+            local v = a * 262144 + b * 4096
+            n = n + 1; out[n] = string.char(floor(v / 65536) % 256)
         end
     end
-    return table.concat(result)
+    return table.concat(out)
 end
 
 ---------------------------------------------------------------------------
+-- Guild roster
+---------------------------------------------------------------------------
 
--- Build a lookup table of guild members: { ["CharName"] = { class, online, level, rank } }
--- Cached for 10 seconds to avoid iterating full roster on every UI refresh
 local rosterCache = { data = nil, expiry = 0 }
+
 function WGS:GetGuildRosterLookup()
     local now = time()
-    if rosterCache.data and now < rosterCache.expiry then
-        return rosterCache.data
-    end
+    if rosterCache.data and now < rosterCache.expiry then return rosterCache.data end
 
     local roster = {}
     if not IsInGuild() then return roster end
 
-    local numMembers = GetNumGuildMembers()
-    for i = 1, numMembers do
+    for i = 1, GetNumGuildMembers() do
         local name, rankName, _, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
         if name then
-            -- Strip realm suffix for matching
-            local shortName = name:match("^([^%-]+)")
-            roster[shortName] = {
+            local short = name:match("^([^%-]+)")
+            roster[short] = {
                 fullName = name,
                 class = classFile or "",
                 online = online or false,
@@ -409,81 +370,43 @@ function WGS:GetGuildRosterLookup()
     return roster
 end
 
--- Build a reverse lookup table: CharName-Realm -> playerId
--- Called once per import; the result is stored in db.global.characterLookup
-function WGS:BuildCharacterLookup()
-    local lookup = {}
-    local characters = self.db.global.characters
-    if characters then
-        for playerId, info in pairs(characters) do
-            if info.main then
-                lookup[info.main] = playerId
-            end
-            if info.alts then
-                for _, alt in ipairs(info.alts) do
-                    lookup[alt] = playerId
-                end
-            end
-        end
-    end
-    self.db.global.characterLookup = lookup
-    return lookup
-end
+---------------------------------------------------------------------------
+-- Class colors (Blizzard RAID_CLASS_COLORS hex values)
+---------------------------------------------------------------------------
 
--- Resolve a character name to its owning player (O(1) via cached lookup)
--- Returns: playerId (string|nil), playerInfo (table|nil)
-function WGS:ResolvePlayerForCharacter(characterName)
-    if not characterName then return nil, nil end
-    local lookup = self.db.global.characterLookup
-    if not lookup then return nil, nil end
-
-    local playerId = lookup[characterName]
-    if not playerId then return nil, nil end
-
-    local playerInfo = self.db.global.characters[playerId]
-    return playerId, playerInfo
-end
-
--- WoW class colors for display
--- All WoW 12.0 Midnight class colors (matching Blizzard RAID_CLASS_COLORS)
 WGS.CLASS_COLORS = {
-    WARRIOR     = "ffc69b6d",
-    PALADIN     = "fff48cba",
-    HUNTER      = "ffaad372",
-    ROGUE       = "fffff468",
-    PRIEST      = "ffffffff",
-    DEATHKNIGHT = "ffc41e3a",
-    SHAMAN      = "ff0070dd",
-    MAGE        = "ff3fc7eb",
-    WARLOCK     = "ff8788ee",
-    MONK        = "ff00ff98",
-    DRUID       = "ffff7c0a",
-    DEMONHUNTER = "ffa330c9",
+    WARRIOR     = "ffc69b6d", PALADIN     = "fff48cba",
+    HUNTER      = "ffaad372", ROGUE       = "fffff468",
+    PRIEST      = "ffffffff", DEATHKNIGHT = "ffc41e3a",
+    SHAMAN      = "ff0070dd", MAGE        = "ff3fc7eb",
+    WARLOCK     = "ff8788ee", MONK        = "ff00ff98",
+    DRUID       = "ffff7c0a", DEMONHUNTER = "ffa330c9",
     EVOKER      = "ff33937f",
 }
 
--- List imported teams
+---------------------------------------------------------------------------
+-- Teams
+---------------------------------------------------------------------------
+
 function WGS:ListTeams()
     local teams = self.db.global.teams
     if not teams or #teams == 0 then
-        self:Print("No teams imported. Use /wgs import to paste the export string from the web platform.")
+        self:Print("No teams imported. Use /gh import.")
         return
     end
-    local characters = self.db.global.characters or {}
+
+    local chars = self.db.global.characters or {}
     self:Print("--- Imported Teams ---")
     for i, team in ipairs(teams) do
-        local memberCount = team.playerMembers and #team.playerMembers
-            or (team.members and #team.members or 0)
-        self:Print(string.format("  %d. %s (%s) — %d members",
-            team.id or i, team.name or "?", team.type or "?", memberCount))
+        local count = team.playerMembers and #team.playerMembers or (team.members and #team.members or 0)
+        self:Print(string.format("  %d. %s (%s) — %d members", team.id or i, team.name or "?", team.type or "?", count))
 
-        if team.playerMembers and #team.playerMembers > 0 then
+        if team.playerMembers then
             for _, pm in ipairs(team.playerMembers) do
-                local info = characters[pm.playerId]
-                local mainShort = (pm.main or ""):match("^([^%-]+)") or "?"
-                local altCount = info and info.alts and #info.alts or 0
-                local altStr = altCount > 0 and (" (+" .. altCount .. " alts)") or ""
-                self:Print("     " .. mainShort .. altStr)
+                local info = chars[pm.playerId]
+                local main = (pm.main or ""):match("^([^%-]+)") or "?"
+                local nAlts = info and info.alts and #info.alts or 0
+                self:Print("     " .. main .. (nAlts > 0 and (" (+" .. nAlts .. " alts)") or ""))
             end
         elseif team.members and #team.members > 0 then
             self:Print("     " .. table.concat(team.members, ", "))
@@ -491,9 +414,12 @@ function WGS:ListTeams()
     end
 end
 
--- Utility: check if current group is a guild group (majority are guildmates)
--- Cached for 5 seconds to avoid re-scanning on rapid loot events
+---------------------------------------------------------------------------
+-- Guild group check (>=80% guildmates required, cached 5s)
+---------------------------------------------------------------------------
+
 local guildGroupCache = { result = nil, expiry = 0 }
+
 function WGS:IsGuildGroup()
     local now = time()
     if guildGroupCache.result ~= nil and now < guildGroupCache.expiry then
@@ -505,49 +431,36 @@ function WGS:IsGuildGroup()
     if not myGuild then guildGroupCache.result = false; guildGroupCache.expiry = now + 5; return false end
 
     local total = GetNumGroupMembers()
-    if total <= 1 then return true end -- solo or just you, allow tracking
+    if total <= 1 then return true end
 
-    local guildCount = 0
-    local checkedCount = 0
+    local guildCount, checked = 0, 0
     if IsInRaid() then
         for i = 1, total do
             local unit = "raid" .. i
             if UnitExists(unit) then
-                checkedCount = checkedCount + 1
-                local unitGuild = GetGuildInfo(unit)
-                if unitGuild and unitGuild == myGuild then
-                    guildCount = guildCount + 1
-                end
+                checked = checked + 1
+                if GetGuildInfo(unit) == myGuild then guildCount = guildCount + 1 end
             end
         end
     elseif IsInGroup() then
-        -- Count self
-        checkedCount = checkedCount + 1
-        guildCount = guildCount + 1
-
+        checked, guildCount = 1, 1
         for i = 1, total - 1 do
             local unit = "party" .. i
             if UnitExists(unit) then
-                checkedCount = checkedCount + 1
-                local unitGuild = GetGuildInfo(unit)
-                if unitGuild and unitGuild == myGuild then
-                    guildCount = guildCount + 1
-                end
+                checked = checked + 1
+                if GetGuildInfo(unit) == myGuild then guildCount = guildCount + 1 end
             end
         end
     end
 
-    -- If we couldn't check most members (loading screen etc.), don't track to be safe
-    if checkedCount < total * 0.5 then
+    if checked < total * 0.5 then
         guildGroupCache.result = false
         guildGroupCache.expiry = now + 5
         return false
     end
 
-    -- Guild group = at least 80% of the group are guildmates (allows 1-2 pug fills)
-    local result = (guildCount / checkedCount) >= 0.8
+    local result = (guildCount / checked) >= 0.8
     guildGroupCache.result = result
     guildGroupCache.expiry = now + 5
     return result
 end
-

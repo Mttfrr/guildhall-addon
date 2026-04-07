@@ -1,0 +1,12 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <Script file="MinimapButton.lua"/>
+    <Script file="MainFrame.lua"/>
+    <Script file="LootFrame.lua"/>
+    <Script file="AttendanceFrame.lua"/>
+    <Script file="WishlistTooltip.lua"/>
+    <Script file="BossNotesFrame.lua"/>
+    <Script file="RaidCompFrame.lua"/>
+    <Script file="EventsFrame.lua"/>
+    <Script file="LootDistHelper.lua"/>
+    <Script file="ReadinessCheck.lua"/>
+</Ui>

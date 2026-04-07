@@ -47,7 +47,7 @@ local function PopulateTeamsPanel(panel)
     if not teams or #teams == 0 then
         local noData = panel.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         noData:SetPoint("TOPLEFT", panel.content, "TOPLEFT", 5, -5)
-        noData:SetText("No teams imported yet. Use /wgs import to paste the export string from the web app.")
+        noData:SetText("No teams imported yet. Use /gh import to paste the export string from the web app.")
         panel.content:SetHeight(30)
         return
     end

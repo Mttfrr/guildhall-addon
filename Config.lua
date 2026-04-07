@@ -71,7 +71,7 @@ local options = {
                     order = 22,
                     type = "toggle",
                     name = "Raid Readiness Check",
-                    desc = "Show a warning when entering a raid if players have missing enchants or gems. Can also be triggered with /wgs readiness.",
+                    desc = "Show a warning when entering a raid if players have missing enchants or gems. Can also be triggered with /gh readiness.",
                     width = "full",
                     get = function() return WGS.db.profile.showReadinessCheck end,
                     set = function(_, val) WGS.db.profile.showReadinessCheck = val end,

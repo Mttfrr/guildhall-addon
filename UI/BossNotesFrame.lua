@@ -72,5 +72,5 @@ function WGS:ShowBossNotes(encounterName)
     bossNotesFrame:Show()
 end
 
--- Boss notes can be shown manually via /wgs bossnotes <name>
+-- Boss notes can be shown manually via /gh bossnotes <name>
 -- or from the Import module when imported from the web platform

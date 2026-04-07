@@ -1,7 +1,7 @@
 ## Interface: 120000
 ## Title: GuildHall
-## Notes: [BETA] GuildHall companion addon — sync loot, attendance, bank gold, and more with guildhall.run. Early beta — please report issues on the web app.
-## Author: WoWGuildManager
+## Notes: Guild management companion — sync loot, attendance, bank gold, and more with guildhall.run.
+## Author: Mttfrr
 ## Version: 0.4.0-beta
 ## SavedVariables: GuildHallDB
 ## IconTexture: Interface\Icons\INV_Misc_Gear_01
@@ -10,18 +10,7 @@
 ## X-Wago-ID: BKpg1Z6E
 
 # Libraries
-Libs\LibStub\LibStub.lua
-Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
-Libs\AceAddon-3.0\AceAddon-3.0.lua
-Libs\AceDB-3.0\AceDB-3.0.lua
-Libs\AceEvent-3.0\AceEvent-3.0.lua
-Libs\AceConsole-3.0\AceConsole-3.0.lua
-Libs\AceGUI-3.0\AceGUI-3.0.lua
-Libs\AceConfig-3.0\AceConfigRegistry-3.0\AceConfigRegistry-3.0.lua
-Libs\AceConfig-3.0\AceConfigCmd-3.0\AceConfigCmd-3.0.lua
-Libs\AceConfig-3.0\AceConfigDialog-3.0\AceConfigDialog-3.0.lua
-Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
-Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\Libs.xml
 
 # Locales
 Locales\enUS.lua
@@ -31,24 +20,10 @@ Core.lua
 Config.lua
 
 # Sync layer
-Sync\Encoder.lua
-Sync\Decoder.lua
+Sync\Sync.xml
 
 # Modules
-Modules\Attendance.lua
-Modules\Loot.lua
-Modules\GuildBank.lua
-Modules\Import.lua
-Modules\MOTD.lua
+Modules\Modules.xml
 
 # UI
-UI\MinimapButton.lua
-UI\MainFrame.lua
-UI\LootFrame.lua
-UI\AttendanceFrame.lua
-UI\WishlistTooltip.lua
-UI\BossNotesFrame.lua
-UI\RaidCompFrame.lua
-UI\EventsFrame.lua
-UI\LootDistHelper.lua
-UI\ReadinessCheck.lua
+UI\UI.xml

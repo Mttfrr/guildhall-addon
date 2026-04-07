@@ -212,6 +212,6 @@ function WGS:CheckRaidReadiness()
     end
 
     if issueCount > 0 then
-        self:Print(string.format("|cffff8800Readiness Warning:|r %d raid member(s) have gear issues. Type /wgs readiness to view details.", issueCount))
+        self:Print(string.format("|cffff8800Readiness Warning:|r %d raid member(s) have gear issues. Type /gh readiness to view details.", issueCount))
     end
 end
