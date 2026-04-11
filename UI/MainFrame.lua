@@ -117,7 +117,7 @@ local function RefreshDashboard(tab)
     lines[#lines + 1] = "|cff888888Loot:|r " .. (db.loot and #db.loot or 0)
         .. "  |cff888888Attend:|r " .. (db.attendance and #db.attendance or 0)
     lines[#lines + 1] = "|cff888888Bank Tx:|r " .. (db.guildBankTransactions and #db.guildBankTransactions or 0)
-    local gold = WGS:GetGuildGoldFormatted and WGS:GetGuildGoldFormatted() or nil
+    local gold = WGS.GetGuildGoldFormatted and WGS:GetGuildGoldFormatted() or nil
     if gold then lines[#lines + 1] = "|cff888888Gold:|r " .. gold end
     if db.lastExport > 0 then
         lines[#lines + 1] = "|cff555555Exported: " .. date("%m/%d %H:%M", db.lastExport) .. "|r"
