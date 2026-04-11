@@ -9,7 +9,7 @@ local TAB_ROSTER    = 2
 local TAB_RAID      = 3
 local TAB_SYNC      = 4
 local TAB_COUNT     = 4
-local TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Sync" }
+local TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Import/Export" }
 
 local RAID_SUB_COMP      = 1
 local RAID_SUB_READINESS = 2
@@ -462,7 +462,7 @@ local function RefreshRaidSubView(tab)
 end
 
 ---------------------------------------------------------------------------
--- Tab 4: Sync (Import + Export stacked)
+-- Tab 4: Import/Export (stacked)
 ---------------------------------------------------------------------------
 
 local function BuildSyncTab(parent)
@@ -489,6 +489,8 @@ local function BuildSyncTab(parent)
     ieb:SetWidth(560)
     ieb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     isf:SetScrollChild(ieb)
+    isf:EnableMouse(true)
+    isf:SetScript("OnMouseDown", function() ieb:SetFocus() end)
     parent.importEditBox = ieb
 
     local btnImport = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -542,6 +544,8 @@ local function BuildSyncTab(parent)
     eeb:SetWidth(560)
     eeb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     esf:SetScrollChild(eeb)
+    esf:EnableMouse(true)
+    esf:SetScript("OnMouseDown", function() eeb:SetFocus() end)
     parent.exportEditBox = eeb
 
     local btnExport = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")

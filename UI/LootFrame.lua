@@ -6,6 +6,24 @@ local L = GuildHall_L
 local exportFrame = nil
 local importFrame = nil
 
+-- Register at load time so both standalone and tabbed paths can use it
+StaticPopupDialogs["WGS_CONFIRM_CLEAR_EXPORTED"] = {
+    text = "Clear all exported data (loot, attendance, encounters, bank transactions)?\n\nDo this AFTER you've pasted the export into your web app.",
+    button1 = "Clear",
+    button2 = "Cancel",
+    OnAccept = function()
+        WGS.db.global.loot = {}
+        WGS.db.global.attendance = {}
+        WGS.db.global.encounters = {}
+        WGS.db.global.guildBankMoneyChanges = {}
+        WGS.db.global.guildBankTransactions = {}
+        WGS:Print("Exported data cleared. Bank gold balance preserved.")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
 local function CreateExportFrame()
     local f = CreateFrame("Frame", "GuildHallExportFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(450, 350)
@@ -68,25 +86,6 @@ local function CreateExportFrame()
     btnClose:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
     btnClose:SetText("Close")
     btnClose:SetScript("OnClick", function() f:Hide() end)
-
-    -- Confirmation dialog
-    StaticPopupDialogs["WGS_CONFIRM_CLEAR_EXPORTED"] = {
-        text = "Clear all exported data (loot, attendance, encounters, bank transactions)?\n\nDo this AFTER you've pasted the export into your web app.",
-        button1 = "Clear",
-        button2 = "Cancel",
-        OnAccept = function()
-            WGS.db.global.loot = {}
-            WGS.db.global.attendance = {}
-            WGS.db.global.encounters = {}
-            WGS.db.global.guildBankMoneyChanges = {}
-            WGS.db.global.guildBankTransactions = {}
-            WGS:Print("Exported data cleared. Bank gold balance preserved.")
-            f:Hide()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-    }
 
     f:Hide()
     return f
