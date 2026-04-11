@@ -124,14 +124,10 @@ local function PopulateEvents(frame)
 end
 
 function WGS:ToggleEventsFrame()
-    if not eventsFrame then
-        eventsFrame = CreateEventsFrame()
-    end
+    self:SelectMainFrameTab(3, 3)
+end
 
-    if eventsFrame:IsShown() then
-        eventsFrame:Hide()
-    else
-        PopulateEvents(eventsFrame)
-        eventsFrame:Show()
-    end
+--- Populate events into any container with .content and .scrollFrame fields.
+function WGS:PopulateEvents(container)
+    PopulateEvents(container)
 end

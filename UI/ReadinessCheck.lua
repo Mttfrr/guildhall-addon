@@ -175,16 +175,12 @@ local function PopulateReadiness(frame)
 end
 
 function WGS:ToggleReadinessFrame()
-    if not readinessFrame then
-        readinessFrame = CreateReadinessFrame()
-    end
+    self:SelectMainFrameTab(3, 2)
+end
 
-    if readinessFrame:IsShown() then
-        readinessFrame:Hide()
-    else
-        PopulateReadiness(readinessFrame)
-        readinessFrame:Show()
-    end
+--- Populate readiness into any container with .content, .scrollFrame, .summary, .announceBtn.
+function WGS:PopulateReadiness(container)
+    PopulateReadiness(container)
 end
 
 -- Auto-show readiness warning on raid join if enabled and issues exist

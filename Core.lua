@@ -69,15 +69,16 @@ function WGS:SlashCommand(input)
     if cmd == "show" or cmd == "" then
         self:ToggleMainFrame()
     elseif cmd == "export" then
-        self:ShowExportFrame()
+        self:SelectMainFrameTab(4)
     elseif cmd == "import" then
-        self:ShowImportFrame()
+        self:SelectMainFrameTab(4)
     elseif cmd == "attendance" then
         self:ToggleAttendance()
+        self:RefreshMainFrame()
     elseif cmd == "config" or cmd == "options" then
         self:OpenConfig()
     elseif cmd == "teams" then
-        self:ListTeams()
+        self:SelectMainFrameTab(2)
     elseif cmd == "bossnotes" or cmd == "bn" then
         local _, bossName = self:GetArgs(input, 2)
         if bossName and bossName ~= "" then
@@ -86,9 +87,9 @@ function WGS:SlashCommand(input)
             self:Print("Usage: /gh bossnotes <boss name>")
         end
     elseif cmd == "events" then
-        self:ToggleEventsFrame()
+        self:SelectMainFrameTab(3, 3)
     elseif cmd == "readiness" or cmd == "ready" then
-        self:ToggleReadinessFrame()
+        self:SelectMainFrameTab(3, 2)
     else
         self:Print(L["SLASH_HELP"])
     end

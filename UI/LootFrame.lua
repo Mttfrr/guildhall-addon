@@ -169,19 +169,7 @@ local function CreateImportFrame()
 end
 
 function WGS:ShowExportFrame()
-    if not exportFrame then
-        exportFrame = CreateExportFrame()
-    end
-
-    local encoded = self:ExportAll()
-    if encoded then
-        exportFrame.editBox:SetText(encoded)
-        exportFrame:Show()
-        exportFrame.editBox:SetFocus()
-        exportFrame.editBox:HighlightText()
-        self.db.global.lastExport = self:GetTimestamp()
-        self:Print(L["EXPORT_COPIED"])
-    end
+    self:SelectMainFrameTab(4)
 end
 
 function WGS:ShowExportFrameForModule(moduleName)
@@ -239,11 +227,5 @@ function WGS:ShowJsonExportFrame()
 end
 
 function WGS:ShowImportFrame()
-    if not importFrame then
-        importFrame = CreateImportFrame()
-    end
-
-    importFrame.editBox:SetText("")
-    importFrame:Show()
-    importFrame.editBox:SetFocus()
+    self:SelectMainFrameTab(4)
 end

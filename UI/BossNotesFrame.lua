@@ -41,17 +41,37 @@ local function CreateBossNotesFrame()
 end
 
 function WGS:ShowBossNotes(encounterName)
-    local notes = self:GetBossNotes(encounterName)
-    if not notes then
-        self:Print("No boss notes found for: " .. encounterName)
+    self:SelectMainFrameTab(3, 4)
+    if encounterName then
+        C_Timer.After(0.05, function() self:SelectBossInTab(encounterName) end)
+    end
+end
+
+--- Return list of available boss names from imported notes.
+function WGS:GetBossNotesList()
+    local notes = self.db.global.bossNotes
+    if not notes then return {} end
+    local list = {}
+    for _, note in ipairs(notes) do
+        list[#list + 1] = note.encounterName or note.bossName or "Unknown"
+    end
+    return list
+end
+
+--- Populate boss notes into any container with .noteText (FontString) and .content.
+function WGS:PopulateBossNotes(container, encounterName)
+    if not encounterName then
+        container.noteText:SetText("|cff888888Select a boss from the dropdown above.|r")
+        container.content:SetHeight(40)
         return
     end
 
-    if not bossNotesFrame then
-        bossNotesFrame = CreateBossNotesFrame()
+    local notes = self:GetBossNotes(encounterName)
+    if not notes then
+        container.noteText:SetText("|cff888888No notes found for: " .. encounterName .. "|r")
+        container.content:SetHeight(40)
+        return
     end
-
-    bossNotesFrame.title:SetText("Notes: " .. encounterName)
 
     local text = ""
     if notes.strategy then
@@ -67,10 +87,6 @@ function WGS:ShowBossNotes(encounterName)
         text = text .. "|cffffd100Video:|r " .. notes.videoUrl .. "\n"
     end
 
-    bossNotesFrame.noteText:SetText(text)
-    bossNotesFrame.content:SetHeight(bossNotesFrame.noteText:GetStringHeight() + 20)
-    bossNotesFrame:Show()
+    container.noteText:SetText(text)
+    container.content:SetHeight(container.noteText:GetStringHeight() + 20)
 end
-
--- Boss notes can be shown manually via /gh bossnotes <name>
--- or from the Import module when imported from the web platform

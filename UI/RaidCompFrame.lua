@@ -156,14 +156,10 @@ local function PopulateRaidComp(frame)
 end
 
 function WGS:ToggleRaidCompFrame()
-    if not raidCompFrame then
-        raidCompFrame = CreateRaidCompFrame()
-    end
+    self:SelectMainFrameTab(3, 1)
+end
 
-    if raidCompFrame:IsShown() then
-        raidCompFrame:Hide()
-    else
-        PopulateRaidComp(raidCompFrame)
-        raidCompFrame:Show()
-    end
+--- Populate raid comp into any container with .content and .scrollFrame fields.
+function WGS:PopulateRaidComp(container)
+    PopulateRaidComp(container)
 end
