@@ -7,7 +7,7 @@ local L = GuildHall_L
 GuildHall = WGS
 _G["GuildHall"] = WGS
 
-WGS.version = "0.4.0-beta"
+WGS.version = "0.5.0-beta"
 
 local dbDefaults = {
     profile = {
