@@ -90,6 +90,8 @@ function WGS:SlashCommand(input)
         self:SelectMainFrameTab(3, 3)
     elseif cmd == "readiness" or cmd == "ready" then
         self:SelectMainFrameTab(3, 2)
+    elseif cmd == "invite" or cmd == "autoinvite" then
+        self:AutoInvite()
     else
         self:Print(L["SLASH_HELP"])
     end

@@ -131,7 +131,7 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
         teamName = teamName,
         eventId = event and event.id or nil,
         eventTitle = event and event.title or nil,
-        pullTime = event and event._pullTime or nil,
+        pullTime = event and WGS:GetEventPullTime(event) or nil,
         members = {},
     }
 
