@@ -45,12 +45,14 @@ function module:OnGroupRosterUpdate()
     if not ok or not members then return end
     local timestamp = WGS:GetTimestamp()
 
+    local pullTime = currentSession.pullTime
     for name, info in pairs(members) do
         if not currentSession.members[name] then
             local playerId = WGS:ResolvePlayerForCharacter(name)
+            local isLate = pullTime and timestamp > pullTime or false
             currentSession.members[name] = {
                 name = name,
-                playerId = playerId, -- nil if character not in player map
+                playerId = playerId,
                 class = info.class,
                 role = info.role,
                 subgroup = info.subgroup,
@@ -58,6 +60,7 @@ function module:OnGroupRosterUpdate()
                 joinedAt = timestamp,
                 leftAt = nil,
                 present = true,
+                late = isLate,
             }
         else
             currentSession.members[name].present = true
@@ -128,6 +131,7 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
         teamName = teamName,
         eventId = event and event.id or nil,
         eventTitle = event and event.title or nil,
+        pullTime = event and event._pullTime or nil,
         members = {},
     }
 

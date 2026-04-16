@@ -4,4 +4,5 @@
     <Script file="GuildBank.lua"/>
     <Script file="Import.lua"/>
     <Script file="MOTD.lua"/>
+    <Script file="EventScheduler.lua"/>
 </Ui>
