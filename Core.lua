@@ -92,6 +92,8 @@ function WGS:SlashCommand(input)
         self:SelectMainFrameTab(3, 2)
     elseif cmd == "invite" or cmd == "autoinvite" then
         self:AutoInvite()
+    elseif cmd == "sortgroups" or cmd == "sort" then
+        self:SortRaidGroups()
     else
         self:Print(L["SLASH_HELP"])
     end

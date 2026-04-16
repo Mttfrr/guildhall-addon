@@ -90,6 +90,7 @@ function WGS:ProcessImport(data)
                         name = slot.character_name or slot.name or "Unknown",
                         class = slot.class or "",
                         role = SLOT_GROUP_TO_ROLE[(slot.slot_group or ""):lower()] or slot.role or "DPS",
+                        group = slot.group or slot.subgroup or slot.slot_index or nil,
                         spec = slot.spec or nil,
                         note = slot.note or nil,
                     })

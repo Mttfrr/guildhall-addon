@@ -169,18 +169,99 @@ function WGS:AutoInvite()
 
     if queued > 0 then
         self:Print(string.format("|cffffd100Inviting %d member(s) for %s (from %s)|r", queued, event.title or "?", source or "roster"))
+        -- Auto-sort groups after invites land (give time for accepts)
+        if source == "raid comp" then
+            C_Timer.After(queued * INVITE_COOLDOWN + 5, function()
+                if IsInRaid() then self:SortRaidGroups() end
+            end)
+        end
     else
         self:Print("All members are already in group or offline.")
     end
 end
 
 ---------------------------------------------------------------------------
--- Watch for guild members logging in — notify if near event time
+-- /gh sortgroups — assign raid subgroups from comp
+---------------------------------------------------------------------------
+
+function WGS:SortRaidGroups()
+    if not IsInRaid() then
+        self:Print("|cffff4444Must be in a raid to sort groups.|r")
+        return
+    end
+    if not UnitIsGroupLeader("player") and not UnitIsGroupAssistant("player") then
+        self:Print("|cffff4444Must be raid leader or assistant to sort groups.|r")
+        return
+    end
+
+    local event = self:FindTodayEventForTeam(nil)
+    if not event then
+        self:Print("No event found for today.")
+        return
+    end
+
+    local eventId = event.id or event.eventId
+    if not eventId then
+        self:Print("Event has no ID — can't match raid comp.")
+        return
+    end
+
+    local comp = self:GetRaidComp(eventId)
+    if not comp or not comp.assignments then
+        self:Print("No raid comp found for this event.")
+        return
+    end
+
+    -- Build name → target group lookup from comp assignments
+    local targetGroup = {}
+    local hasGroups = false
+    for _, a in ipairs(comp.assignments) do
+        if a.group and a.name then
+            local short = a.name:match("^([^%-]+)") or a.name
+            targetGroup[short:lower()] = tonumber(a.group)
+            hasGroups = true
+        end
+    end
+
+    if not hasGroups then
+        -- No group data in comp — assign by role: tanks→1, healers→2, dps→3+
+        local roleGroup = { TANK = 1, HEALER = 2 }
+        local dpsGroup = 3
+        for _, a in ipairs(comp.assignments) do
+            if a.name then
+                local short = (a.name:match("^([^%-]+)") or a.name):lower()
+                local role = (a.role or "DPS"):upper()
+                targetGroup[short] = roleGroup[role] or dpsGroup
+            end
+        end
+    end
+
+    -- Apply to current raid
+    local moved = 0
+    for i = 1, GetNumGroupMembers() do
+        local name, _, subgroup = GetRaidRosterInfo(i)
+        if name then
+            local short = name:match("^([^%-]+)") or name
+            local target = targetGroup[short:lower()]
+            if target and target ~= subgroup then
+                SetRaidSubgroup(i, target)
+                moved = moved + 1
+            end
+        end
+    end
+
+    if moved > 0 then
+        self:Print("|cffffd100Sorted " .. moved .. " player(s) into raid groups.|r")
+    else
+        self:Print("All players already in correct groups.")
+    end
+end
+
+---------------------------------------------------------------------------
+-- Guild roster watch (lightweight, no polling)
 ---------------------------------------------------------------------------
 
 function module:OnGuildRosterUpdate()
-    -- Lightweight: just refresh roster cache so next /gh invite is current
-    -- No auto-actions here (removed polling)
 end
 
 ---------------------------------------------------------------------------

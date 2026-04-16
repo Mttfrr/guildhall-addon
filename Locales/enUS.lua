@@ -1,7 +1,7 @@
 local L = {}
 
 L["ADDON_NAME"] = "GuildHall"
-L["SLASH_HELP"] = "Commands: /gh show | export | import | teams | events | readiness | attendance | invite | bossnotes <name> | config | help"
+L["SLASH_HELP"] = "Commands: /gh show | export | import | teams | events | readiness | attendance | invite | sortgroups | bossnotes <name> | config | help"
 L["EXPORT_COPIED"] = "Export string ready. Copy and paste it into your guild web app."
 L["IMPORT_PROMPT"] = "Paste the import string from your guild web app below:"
 L["IMPORT_SUCCESS"] = "Successfully imported %d items."
