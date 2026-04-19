@@ -4,12 +4,15 @@ local L = GuildHall_L
 
 local mainFrame = nil
 
-local TAB_DASHBOARD = 1
-local TAB_ROSTER    = 2
-local TAB_RAID      = 3
-local TAB_SYNC      = 4
-local TAB_COUNT     = 4
-local TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Import/Export" }
+local TAB_DASHBOARD   = 1
+local TAB_ROSTER      = 2
+local TAB_RAID        = 3
+local TAB_LOOT        = 4
+local TAB_WISHLISTS   = 5
+local TAB_ROSTERCHECK = 6
+local TAB_SYNC        = 7
+local TAB_COUNT       = 7
+local TAB_NAMES       = { "Dashboard", "Roster", "Raid", "Loot", "Wishlists", "Roster Check", "Import/Export" }
 
 local RAID_SUB_COMP      = 1
 local RAID_SUB_READINESS = 2
@@ -33,7 +36,7 @@ local function CreateScrollContent(parent)
     sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
 
     local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(560)
+    content:SetWidth(660)
     content:SetHeight(1)
     sf:SetScrollChild(content)
 
@@ -149,7 +152,7 @@ local function BuildRosterTab(parent)
     sf:ClearAllPoints()
     sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -18)
     sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
-    content:SetWidth(560)
+    content:SetWidth(660)
 
     parent.scrollFrame = sf
     parent.content = content
@@ -171,7 +174,7 @@ local function RefreshRoster(tab)
     local roster = WGS:GetGuildRosterLookup()
     local characters = WGS.db.global.characters or {}
     local yOff = 0
-    local cw = 560
+    local cw = 660
 
     for _, team in ipairs(teams) do
         local row = CreateFrame("Frame", nil, tab.content)
@@ -371,7 +374,7 @@ local function BuildBossNotesSubView(sv)
     sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
     sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(560)
+    content:SetWidth(660)
     content:SetHeight(1)
     sf:SetScrollChild(content)
 
@@ -417,14 +420,14 @@ local function BuildRaidTab(parent)
     local sv2 = parent.subViews[RAID_SUB_READINESS]
     sv2.summary = sv2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     sv2.summary:SetPoint("TOPLEFT", sv2, "TOPLEFT", 5, 0)
-    sv2.summary:SetWidth(560)
+    sv2.summary:SetWidth(660)
     sv2.summary:SetJustifyH("LEFT")
 
     local rsf = CreateFrame("ScrollFrame", nil, sv2, "UIPanelScrollFrameTemplate")
     rsf:SetPoint("TOPLEFT", sv2, "TOPLEFT", 0, -35)
     rsf:SetPoint("BOTTOMRIGHT", sv2, "BOTTOMRIGHT", -22, 30)
     local rc = CreateFrame("Frame", nil, rsf)
-    rc:SetWidth(560)
+    rc:SetWidth(660)
     rc:SetHeight(1)
     rsf:SetScrollChild(rc)
     sv2.scrollFrame = rsf
@@ -462,7 +465,649 @@ local function RefreshRaidSubView(tab)
 end
 
 ---------------------------------------------------------------------------
--- Tab 4: Import/Export (stacked)
+-- Tab 4: Loot History
+---------------------------------------------------------------------------
+
+local ITEM_QUALITY_COLORS = {
+    [2] = "ff1eff00",  -- Uncommon (green)
+    [3] = "ff0070dd",  -- Rare (blue)
+    [4] = "ffa335ee",  -- Epic (purple)
+    [5] = "ffff8000",  -- Legendary (orange)
+    [6] = "ffe6cc80",  -- Artifact (gold)
+    [7] = "ff00ccff",  -- Heirloom
+}
+
+local function BuildLootHistoryTab(parent)
+    -- Search box at top
+    local searchLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    searchLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
+    searchLbl:SetText("Filter:")
+
+    local searchBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    searchBox:SetSize(250, 22)
+    searchBox:SetPoint("LEFT", searchLbl, "RIGHT", 10, 0)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetScript("OnTextChanged", function(self)
+        parent.filterText = (self:GetText() or ""):lower()
+        if parent._refreshFn then parent._refreshFn() end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    parent.searchBox = searchBox
+
+    local countText = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    countText:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
+    parent.countText = countText
+
+    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(660)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+
+    parent.scrollFrame = sf
+    parent.content = content
+    parent.filterText = ""
+end
+
+local function RefreshLootHistory(tab)
+    if not tab or not tab:IsVisible() then return end
+    ClearContainer(tab.content)
+
+    local loot = WGS.db.global.loot or {}
+    local filter = tab.filterText or ""
+    local roster = WGS:GetGuildRosterLookup()
+
+    -- Sort by timestamp descending (newest first)
+    local sorted = {}
+    for i = #loot, 1, -1 do sorted[#sorted + 1] = loot[i] end
+
+    local yOff = 0
+    local shown = 0
+    local MAX_ROWS = 200
+
+    for _, entry in ipairs(sorted) do
+        if shown >= MAX_ROWS then break end
+
+        -- Apply filter
+        local matches = filter == ""
+        if not matches then
+            local itemName = (entry.itemName or ""):lower()
+            local player = (entry.player or ""):lower()
+            local boss = (entry.boss or ""):lower()
+            if itemName:find(filter, 1, true) or player:find(filter, 1, true) or boss:find(filter, 1, true) then
+                matches = true
+            end
+        end
+
+        if matches then
+            local row = CreateFrame("Frame", nil, tab.content)
+            row:SetSize(660, 18)
+            row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+            -- Item name (quality colored)
+            local qColor = ITEM_QUALITY_COLORS[entry.itemQuality or 4] or "ffa335ee"
+            local itemText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            itemText:SetPoint("LEFT", row, "LEFT", 5, 0)
+            itemText:SetWidth(220)
+            itemText:SetJustifyH("LEFT")
+            itemText:SetText("|c" .. qColor .. (entry.itemName or "Unknown") .. "|r")
+
+            -- Player (class colored)
+            local short = (entry.player or ""):match("^([^%-]+)") or entry.player or "?"
+            local gi = roster[short]
+            local pColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local playerText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            playerText:SetPoint("LEFT", itemText, "RIGHT", 4, 0)
+            playerText:SetWidth(120)
+            playerText:SetJustifyH("LEFT")
+            playerText:SetText("|c" .. pColor .. short .. "|r")
+
+            -- Boss
+            local bossText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            bossText:SetPoint("LEFT", playerText, "RIGHT", 4, 0)
+            bossText:SetWidth(140)
+            bossText:SetJustifyH("LEFT")
+            local bossStr = entry.boss and entry.boss ~= "" and entry.boss or "—"
+            bossText:SetText("|cff888888" .. bossStr .. "|r")
+
+            -- Date
+            local dateText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            dateText:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            dateText:SetWidth(120)
+            dateText:SetJustifyH("RIGHT")
+            dateText:SetText("|cff555555" .. date("%m/%d %H:%M", entry.timestamp or 0) .. "|r")
+
+            yOff = yOff - 18
+            shown = shown + 1
+        end
+    end
+
+    if shown == 0 then
+        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+        noData:SetText(filter == "" and "No loot recorded yet." or "No loot matching filter.")
+        tab.content:SetHeight(30)
+    else
+        tab.content:SetHeight(math.abs(yOff) + 10)
+    end
+
+    tab.countText:SetText(string.format("|cff888888Showing %d of %d|r", shown, #loot))
+end
+
+---------------------------------------------------------------------------
+-- Tab 5: Wishlists (boss-centric browser)
+---------------------------------------------------------------------------
+
+local PRIORITY_ORDER = { BiS = 1, High = 2, Medium = 3, Low = 4 }
+local PRIORITY_COLORS = {
+    BiS    = "ffff8000",  -- Orange
+    High   = "ffa335ee",  -- Purple
+    Medium = "ff0070dd",  -- Blue
+    Low    = "ff1eff00",  -- Green
+}
+
+local function BuildWishlistsTab(parent)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
+    lbl:SetText("Boss:")
+
+    parent.dropBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    parent.dropBtn:SetSize(280, 22)
+    parent.dropBtn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
+    parent.dropBtn:SetText("(All items)")
+    parent.selectedBoss = nil
+
+    -- Dropdown menu
+    parent.dropMenu = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    parent.dropMenu:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    parent.dropMenu:SetBackdropColor(0, 0, 0, 0.95)
+    parent.dropMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+    parent.dropMenu:Hide()
+    parent.dropMenuButtons = {}
+
+    parent.dropBtn:SetScript("OnClick", function()
+        if parent.dropMenu:IsShown() then parent.dropMenu:Hide(); return end
+
+        for _, btn in ipairs(parent.dropMenuButtons) do btn:Hide() end
+
+        -- Build boss list from loot history
+        local bossSet = {}
+        for _, entry in ipairs(WGS.db.global.loot or {}) do
+            if entry.boss and entry.boss ~= "" then bossSet[entry.boss] = true end
+        end
+        local bosses = { "(All items)" }
+        for name in pairs(bossSet) do bosses[#bosses + 1] = name end
+        table.sort(bosses, function(a, b)
+            if a == "(All items)" then return true end
+            if b == "(All items)" then return false end
+            return a < b
+        end)
+
+        local bh = 22
+        parent.dropMenu:SetSize(280, #bosses * bh + 8)
+        parent.dropMenu:ClearAllPoints()
+        parent.dropMenu:SetPoint("TOPLEFT", parent.dropBtn, "BOTTOMLEFT", 0, -2)
+
+        for i, name in ipairs(bosses) do
+            local btn = parent.dropMenuButtons[i]
+            if not btn then
+                btn = CreateFrame("Button", nil, parent.dropMenu)
+                btn:SetSize(272, bh)
+                btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                btn.text:SetAllPoints()
+                btn.text:SetJustifyH("LEFT")
+                parent.dropMenuButtons[i] = btn
+            end
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", parent.dropMenu, "TOPLEFT", 4, -(i - 1) * bh - 4)
+            btn.text:SetText("  " .. name)
+            btn:SetScript("OnClick", function()
+                parent.selectedBoss = (name == "(All items)") and nil or name
+                parent.dropBtn:SetText(name)
+                parent.dropMenu:Hide()
+                if parent._refreshFn then parent._refreshFn() end
+            end)
+            btn:Show()
+        end
+        parent.dropMenu:Show()
+    end)
+
+    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(660)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+
+    parent.scrollFrame = sf
+    parent.content = content
+end
+
+local function RefreshWishlists(tab)
+    if not tab or not tab:IsVisible() then return end
+    ClearContainer(tab.content)
+
+    local wishlists = WGS.db.global.wishlists or {}
+    if #wishlists == 0 then
+        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+        noData:SetText("No wishlists imported. Import from web app first.")
+        tab.content:SetHeight(30)
+        return
+    end
+
+    -- Build item -> wishers map
+    local itemWishers = {}  -- [itemID] = { { playerName, priority, note }, ... }
+    local itemNames = {}    -- [itemID] = last-seen name (from loot history or wishlist entry)
+    for _, entry in ipairs(wishlists) do
+        if entry.items then
+            for _, item in ipairs(entry.items) do
+                if item.itemID then
+                    itemWishers[item.itemID] = itemWishers[item.itemID] or {}
+                    table.insert(itemWishers[item.itemID], {
+                        playerName = entry.playerName,
+                        priority = item.priority,
+                        note = item.note,
+                    })
+                end
+            end
+        end
+    end
+
+    -- Fill item names from loot history
+    for _, lootEntry in ipairs(WGS.db.global.loot or {}) do
+        if lootEntry.itemID and lootEntry.itemName and not itemNames[lootEntry.itemID] then
+            itemNames[lootEntry.itemID] = lootEntry.itemName
+        end
+    end
+    -- Fill from C_Item cache for items we haven't seen drop
+    for itemID in pairs(itemWishers) do
+        if not itemNames[itemID] then
+            local name = C_Item.GetItemInfo(itemID)
+            if name then itemNames[itemID] = name end
+        end
+    end
+
+    -- If a boss is selected, restrict to items seen dropping from that boss
+    local allowedIds = nil
+    if tab.selectedBoss then
+        allowedIds = {}
+        for _, lootEntry in ipairs(WGS.db.global.loot or {}) do
+            if lootEntry.boss == tab.selectedBoss and lootEntry.itemID then
+                allowedIds[lootEntry.itemID] = true
+            end
+        end
+    end
+
+    -- Collect items to render (sorted by wisher count descending, then itemID)
+    local itemsToShow = {}
+    for itemID, wishers in pairs(itemWishers) do
+        if not allowedIds or allowedIds[itemID] then
+            itemsToShow[#itemsToShow + 1] = { itemID = itemID, wishers = wishers }
+        end
+    end
+    table.sort(itemsToShow, function(a, b)
+        if #a.wishers ~= #b.wishers then return #a.wishers > #b.wishers end
+        return a.itemID < b.itemID
+    end)
+
+    if #itemsToShow == 0 then
+        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+        if tab.selectedBoss then
+            noData:SetText("No wishlisted items from " .. tab.selectedBoss .. " in loot history yet.")
+        else
+            noData:SetText("No wishlisted items found.")
+        end
+        tab.content:SetHeight(30)
+        return
+    end
+
+    local roster = WGS:GetGuildRosterLookup()
+    local yOff = 0
+
+    for _, item in ipairs(itemsToShow) do
+        -- Item header row
+        local header = CreateFrame("Frame", nil, tab.content)
+        header:SetSize(660, 20)
+        header:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+        local headerText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        headerText:SetPoint("LEFT", header, "LEFT", 5, 0)
+        local name = itemNames[item.itemID] or ("Item " .. item.itemID)
+        headerText:SetText(string.format("|cffa335ee%s|r  |cff888888(%d wisher%s)|r",
+            name, #item.wishers, #item.wishers == 1 and "" or "s"))
+        yOff = yOff - 20
+
+        -- Sort wishers by priority
+        table.sort(item.wishers, function(a, b)
+            return (PRIORITY_ORDER[a.priority] or 99) < (PRIORITY_ORDER[b.priority] or 99)
+        end)
+
+        for _, w in ipairs(item.wishers) do
+            local row = CreateFrame("Frame", nil, tab.content)
+            row:SetSize(660, 16)
+            row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+            local short = (w.playerName or ""):match("^([^%-]+)") or w.playerName or "?"
+            local gi = roster[short]
+            local pColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local pText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            pText:SetPoint("LEFT", row, "LEFT", 25, 0)
+            pText:SetText("|c" .. pColor .. short .. "|r")
+
+            local prColor = PRIORITY_COLORS[w.priority] or "ffffffff"
+            local prText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            prText:SetPoint("LEFT", pText, "RIGHT", 10, 0)
+            prText:SetText("|c" .. prColor .. (w.priority or "?") .. "|r")
+
+            if w.note and w.note ~= "" then
+                local nText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                nText:SetPoint("LEFT", prText, "RIGHT", 8, 0)
+                nText:SetText("|cff888888(" .. w.note .. ")|r")
+            end
+
+            yOff = yOff - 16
+        end
+
+        yOff = yOff - 4
+    end
+
+    tab.content:SetHeight(math.abs(yOff) + 10)
+end
+
+---------------------------------------------------------------------------
+-- Tab 6: Roster Check
+---------------------------------------------------------------------------
+
+local function BuildRosterCheckTab(parent)
+    parent.header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    parent.header:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
+    parent.header:SetWidth(660)
+    parent.header:SetJustifyH("LEFT")
+
+    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -22)
+    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 30)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(660)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+
+    parent.scrollFrame = sf
+    parent.content = content
+
+    parent.announceBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    parent.announceBtn:SetSize(180, 26)
+    parent.announceBtn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 5, 0)
+    parent.announceBtn:SetText("Announce Missing to Raid")
+    parent.announceBtn:Hide()
+
+    parent.refreshBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    parent.refreshBtn:SetSize(100, 26)
+    parent.refreshBtn:SetPoint("LEFT", parent.announceBtn, "RIGHT", 8, 0)
+    parent.refreshBtn:SetText("Refresh")
+    parent.refreshBtn:SetScript("OnClick", function()
+        if parent._refreshFn then parent._refreshFn() end
+    end)
+end
+
+-- Returns { expected, actual } lists for today's event
+local function BuildRosterCheckData()
+    local event = WGS:FindTodayEventForTeam and WGS:FindTodayEventForTeam(nil) or nil
+    if not event then
+        return nil, "No event scheduled for today."
+    end
+
+    local teamId = event.team_id or event.teamId
+    local team = nil
+    if teamId then
+        for _, t in ipairs(WGS.db.global.teams or {}) do
+            if t.id == teamId then team = t; break end
+        end
+    end
+
+    if not team then
+        return nil, "Today's event has no linked team."
+    end
+
+    -- Expected: set of character names (main + alts for each player)
+    local expected = {}       -- [charName-realm] = { playerId, isMain, mainName }
+    local expectedOrder = {}  -- ordered list of main names
+
+    if team.playerMembers then
+        local chars = WGS.db.global.characters or {}
+        for _, pm in ipairs(team.playerMembers) do
+            local info = chars[pm.playerId]
+            local main = pm.main or (info and info.main) or nil
+            if main then
+                expected[main] = { playerId = pm.playerId, isMain = true, mainName = main }
+                expectedOrder[#expectedOrder + 1] = main
+                if info and info.alts then
+                    for _, alt in ipairs(info.alts) do
+                        expected[alt] = { playerId = pm.playerId, isMain = false, mainName = main }
+                    end
+                end
+            end
+        end
+    elseif team.members then
+        for _, m in ipairs(team.members) do
+            expected[m] = { isMain = true, mainName = m }
+            expectedOrder[#expectedOrder + 1] = m
+        end
+    end
+
+    -- Actual: characters in current raid (or last session)
+    local actual = {}  -- [charName-realm] = true
+    local actualSource = nil
+    if IsInRaid() or IsInGroup() then
+        local members = WGS:GetRaidMembers()
+        for name in pairs(members) do actual[name] = true end
+        actualSource = "current raid"
+    else
+        local attendance = WGS.db.global.attendance or {}
+        if #attendance > 0 then
+            local last = attendance[#attendance]
+            if last.memberList then
+                for _, m in ipairs(last.memberList) do
+                    if m.name then actual[m.name] = true end
+                end
+                actualSource = "last session"
+            end
+        end
+    end
+
+    if not actualSource then
+        return nil, "Not in a raid and no attendance history."
+    end
+
+    return {
+        event = event,
+        team = team,
+        expected = expected,
+        expectedOrder = expectedOrder,
+        actual = actual,
+        actualSource = actualSource,
+    }
+end
+
+local function RefreshRosterCheck(tab)
+    if not tab or not tab:IsVisible() then return end
+    ClearContainer(tab.content)
+
+    local data, err = BuildRosterCheckData()
+    if not data then
+        tab.header:SetText("|cff888888" .. (err or "No data") .. "|r")
+        tab.announceBtn:Hide()
+        tab.content:SetHeight(10)
+        return
+    end
+
+    tab.header:SetText(string.format("|cffffd100%s|r  |cff888888(%s, vs %s)|r",
+        data.event.title or "Event", data.team.name or "?", data.actualSource))
+
+    local roster = WGS:GetGuildRosterLookup()
+    local yOff = 0
+    local cw = 660
+
+    -- Classify each expected player: present (any of their chars in actual) or missing
+    local present = {}
+    local missing = {}
+    local presentChars = {}  -- track which actual characters matched (for extra detection)
+
+    for _, main in ipairs(data.expectedOrder) do
+        local playerId = data.expected[main].playerId
+        local matched = nil
+        -- Check main first
+        if data.actual[main] then
+            matched = main
+            presentChars[main] = true
+        else
+            -- Check alts by playerId (reverse-resolve through expected map)
+            for altName, info in pairs(data.expected) do
+                if info.playerId == playerId and not info.isMain and data.actual[altName] then
+                    matched = altName
+                    presentChars[altName] = true
+                    break
+                end
+            end
+        end
+        if matched then
+            present[#present + 1] = { main = main, matched = matched }
+        else
+            missing[#missing + 1] = main
+        end
+    end
+
+    -- Extra: actual raid members not in expected (pugs, alts of team members annotated)
+    local extra = {}
+    for actualName in pairs(data.actual) do
+        if not presentChars[actualName] and not data.expected[actualName] then
+            -- Maybe an alt of someone on the team (resolve via character map)
+            local pid = WGS:ResolvePlayerForCharacter(actualName)
+            local altOfMain = nil
+            if pid then
+                for _, info in pairs(data.expected) do
+                    if info.playerId == pid then
+                        altOfMain = info.mainName
+                        break
+                    end
+                end
+            end
+            extra[#extra + 1] = { name = actualName, altOfMain = altOfMain }
+        end
+    end
+
+    local function addSectionHeader(text)
+        local h = tab.content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        h:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, yOff)
+        h:SetText(text)
+        yOff = yOff - 20
+    end
+
+    local function addRow(text)
+        local r = CreateFrame("Frame", nil, tab.content)
+        r:SetSize(cw, 16)
+        r:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+        local t = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        t:SetPoint("LEFT", r, "LEFT", 15, 0)
+        t:SetText(text)
+        yOff = yOff - 16
+    end
+
+    addSectionHeader("|cff00ff00Present (" .. #present .. ")|r")
+    if #present == 0 then
+        addRow("|cff666666(none)|r")
+    else
+        for _, p in ipairs(present) do
+            local short = p.main:match("^([^%-]+)") or p.main
+            local gi = roster[short]
+            local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local label = "|c" .. cColor .. short .. "|r"
+            if p.matched ~= p.main then
+                local altShort = p.matched:match("^([^%-]+)") or p.matched
+                label = label .. " |cff888888(on alt: " .. altShort .. ")|r"
+            end
+            addRow(label)
+        end
+    end
+    yOff = yOff - 6
+
+    addSectionHeader("|cffff4444Missing (" .. #missing .. ")|r")
+    if #missing == 0 then
+        addRow("|cff666666(none)|r")
+    else
+        for _, m in ipairs(missing) do
+            local short = m:match("^([^%-]+)") or m
+            local gi = roster[short]
+            local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local status = gi and (gi.online and "|cff00ff00online|r" or "|cff555555offline|r") or "|cffff4444not in guild|r"
+            addRow("|c" .. cColor .. short .. "|r  " .. status)
+        end
+    end
+    yOff = yOff - 6
+
+    addSectionHeader("|cffffcc00Extra (" .. #extra .. ")|r")
+    if #extra == 0 then
+        addRow("|cff666666(none)|r")
+    else
+        for _, e in ipairs(extra) do
+            local short = e.name:match("^([^%-]+)") or e.name
+            local gi = roster[short]
+            local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local label = "|c" .. cColor .. short .. "|r"
+            if e.altOfMain then
+                local mainShort = e.altOfMain:match("^([^%-]+)") or e.altOfMain
+                label = label .. " |cff888888(alt of " .. mainShort .. ")|r"
+            else
+                label = label .. " |cff888888(pug)|r"
+            end
+            addRow(label)
+        end
+    end
+
+    tab.content:SetHeight(math.abs(yOff) + 10)
+
+    -- Announce button wiring
+    if #missing > 0 and (IsInRaid() or IsInGroup()) then
+        tab.announceBtn:Show()
+        tab.announceBtn:SetScript("OnClick", function()
+            local channel = IsInRaid() and "RAID" or "PARTY"
+            C_ChatInfo.SendChatMessage("[GuildHall] Missing for " .. (data.event.title or "event") .. ":", channel)
+            local names = {}
+            for _, m in ipairs(missing) do
+                names[#names + 1] = m:match("^([^%-]+)") or m
+            end
+            -- Batch names into chunks to avoid message length limit
+            local chunk = ""
+            for _, n in ipairs(names) do
+                if #chunk + #n + 2 > 200 then
+                    C_ChatInfo.SendChatMessage("  " .. chunk, channel)
+                    chunk = n
+                else
+                    chunk = chunk == "" and n or (chunk .. ", " .. n)
+                end
+            end
+            if chunk ~= "" then
+                C_ChatInfo.SendChatMessage("  " .. chunk, channel)
+            end
+        end)
+    else
+        tab.announceBtn:Hide()
+    end
+end
+
+---------------------------------------------------------------------------
+-- Tab 7: Import/Export (stacked)
 ---------------------------------------------------------------------------
 
 local function BuildSyncTab(parent)
@@ -486,7 +1131,7 @@ local function BuildSyncTab(parent)
     ieb:SetMultiLine(true)
     ieb:SetAutoFocus(false)
     ieb:SetFontObject("ChatFontNormal")
-    ieb:SetWidth(560)
+    ieb:SetWidth(660)
     ieb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     isf:SetScrollChild(ieb)
     isf:EnableMouse(true)
@@ -541,7 +1186,7 @@ local function BuildSyncTab(parent)
     eeb:SetMultiLine(true)
     eeb:SetAutoFocus(false)
     eeb:SetFontObject("ChatFontNormal")
-    eeb:SetWidth(560)
+    eeb:SetWidth(660)
     eeb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     esf:SetScrollChild(eeb)
     esf:EnableMouse(true)
@@ -600,6 +1245,12 @@ local function RefreshCurrentTab(frame)
         RefreshRoster(frame.tabContents[TAB_ROSTER])
     elseif tab == TAB_RAID then
         RefreshRaidSubView(frame.tabContents[TAB_RAID])
+    elseif tab == TAB_LOOT then
+        RefreshLootHistory(frame.tabContents[TAB_LOOT])
+    elseif tab == TAB_WISHLISTS then
+        RefreshWishlists(frame.tabContents[TAB_WISHLISTS])
+    elseif tab == TAB_ROSTERCHECK then
+        RefreshRosterCheck(frame.tabContents[TAB_ROSTERCHECK])
     end
     -- Sync tab doesn't need auto-refresh
 
@@ -619,7 +1270,7 @@ end
 
 local function CreateMainFrame()
     local f = CreateFrame("Frame", "GuildHallMainFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(620, 580)
+    f:SetSize(720, 580)
     f:SetPoint("CENTER")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -674,7 +1325,22 @@ local function CreateMainFrame()
     BuildDashboardTab(f.tabContents[TAB_DASHBOARD])
     BuildRosterTab(f.tabContents[TAB_ROSTER])
     BuildRaidTab(f.tabContents[TAB_RAID])
+    BuildLootHistoryTab(f.tabContents[TAB_LOOT])
+    BuildWishlistsTab(f.tabContents[TAB_WISHLISTS])
+    BuildRosterCheckTab(f.tabContents[TAB_ROSTERCHECK])
     BuildSyncTab(f.tabContents[TAB_SYNC])
+
+    -- Wire back-pointers so in-tab controls (search box, dropdown, refresh btn)
+    -- can trigger a re-render without needing frame reference
+    f.tabContents[TAB_LOOT]._refreshFn = function()
+        RefreshLootHistory(f.tabContents[TAB_LOOT])
+    end
+    f.tabContents[TAB_WISHLISTS]._refreshFn = function()
+        RefreshWishlists(f.tabContents[TAB_WISHLISTS])
+    end
+    f.tabContents[TAB_ROSTERCHECK]._refreshFn = function()
+        RefreshRosterCheck(f.tabContents[TAB_ROSTERCHECK])
+    end
 
     -- Wire attendance button (needs mainFrame ref for refresh)
     f.tabContents[TAB_DASHBOARD].btnAttendance:SetScript("OnClick", function()

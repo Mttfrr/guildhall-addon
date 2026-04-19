@@ -168,7 +168,7 @@ local function CreateImportFrame()
 end
 
 function WGS:ShowExportFrame()
-    self:SelectMainFrameTab(4)
+    self:SelectMainFrameTab(7)
 end
 
 function WGS:ShowExportFrameForModule(moduleName)
@@ -226,5 +226,5 @@ function WGS:ShowJsonExportFrame()
 end
 
 function WGS:ShowImportFrame()
-    self:SelectMainFrameTab(4)
+    self:SelectMainFrameTab(7)
 end

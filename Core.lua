@@ -69,9 +69,9 @@ function WGS:SlashCommand(input)
     if cmd == "show" or cmd == "" then
         self:ToggleMainFrame()
     elseif cmd == "export" then
-        self:SelectMainFrameTab(4)
+        self:SelectMainFrameTab(7)
     elseif cmd == "import" then
-        self:SelectMainFrameTab(4)
+        self:SelectMainFrameTab(7)
     elseif cmd == "attendance" then
         self:ToggleAttendance()
         self:RefreshMainFrame()
@@ -94,6 +94,12 @@ function WGS:SlashCommand(input)
         self:AutoInvite()
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
+    elseif cmd == "loot" then
+        self:SelectMainFrameTab(4)
+    elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
+        self:SelectMainFrameTab(5)
+    elseif cmd == "rostercheck" or cmd == "check" then
+        self:SelectMainFrameTab(6)
     else
         self:Print(L["SLASH_HELP"])
     end
