@@ -863,7 +863,7 @@ end
 
 -- Returns { expected, actual } lists for today's event
 local function BuildRosterCheckData()
-    local event = WGS:FindTodayEventForTeam and WGS:FindTodayEventForTeam(nil) or nil
+    local event = WGS.FindTodayEventForTeam and WGS:FindTodayEventForTeam(nil) or nil
     if not event then
         return nil, "No event scheduled for today."
     end
