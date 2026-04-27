@@ -1498,8 +1498,3 @@ function WGS:RefreshMainFrame()
         RefreshCurrentTab(mainFrame)
     end
 end
-
--- Backward compat
-function WGS:UpdateMainFrameSummary()
-    self:RefreshMainFrame()
-end

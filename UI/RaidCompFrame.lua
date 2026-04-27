@@ -1,48 +1,12 @@
 ---@type GuildHall
 local WGS = GuildHall
 
-local raidCompFrame = nil
-
--- Role display order and colors
 local ROLE_ORDER = { "TANK", "HEALER", "DPS" }
 local ROLE_LABELS = {
-    TANK = "|cff5599ffTanks|r",
+    TANK   = "|cff5599ffTanks|r",
     HEALER = "|cff00ff00Healers|r",
-    DPS = "|cffff4444DPS|r",
+    DPS    = "|cffff4444DPS|r",
 }
-
-local function CreateRaidCompFrame()
-    local f = CreateFrame("Frame", "GuildHallRaidCompFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(320, 450)
-    f:SetPoint("CENTER")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    f.TitleBg:SetHeight(30)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
-    f.title:SetText("Raid Comp")
-
-    -- Scroll frame
-    local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -35)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 10)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetWidth(scrollFrame:GetWidth())
-    content:SetHeight(1)
-    scrollFrame:SetScrollChild(content)
-
-    f.scrollFrame = scrollFrame
-    f.content = content
-
-    f:Hide()
-    return f
-end
 
 local function PopulateRaidComp(frame)
     -- Hide previous children (WoW frames can't be GC'd, so just hide)

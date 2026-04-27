@@ -1,6 +1,5 @@
 ---@type GuildHall
 local WGS = GuildHall
-local L = GuildHall_L
 
 ---@class WGSMOTDModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("MOTD", "AceEvent-3.0")

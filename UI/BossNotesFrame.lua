@@ -1,45 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
 
-local bossNotesFrame = nil
-
-local function CreateBossNotesFrame()
-    local f = CreateFrame("Frame", "GuildHallBossNotesFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(400, 300)
-    f:SetPoint("CENTER", UIParent, "CENTER", 300, 0)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    f.TitleBg:SetHeight(30)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
-    f.title:SetText("Boss Notes")
-
-    -- Scroll frame
-    local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -35)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 10)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(scrollFrame:GetWidth(), 1)
-    scrollFrame:SetScrollChild(content)
-
-    f.content = content
-    f.noteText = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.noteText:SetPoint("TOPLEFT", content, "TOPLEFT", 5, -5)
-    f.noteText:SetPoint("TOPRIGHT", content, "TOPRIGHT", -5, -5)
-    f.noteText:SetJustifyH("LEFT")
-    f.noteText:SetJustifyV("TOP")
-    f.noteText:SetWordWrap(true)
-
-    f:Hide()
-    return f
-end
-
 function WGS:ShowBossNotes(encounterName)
     self:SelectMainFrameTab(3, 4)
     if encounterName then

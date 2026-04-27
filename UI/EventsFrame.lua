@@ -1,41 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
 
-local eventsFrame = nil
-
-local function CreateEventsFrame()
-    local f = CreateFrame("Frame", "GuildHallEventsFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(360, 400)
-    f:SetPoint("CENTER")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    f.TitleBg:SetHeight(30)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
-    f.title:SetText("Upcoming Events")
-
-    -- Scroll frame
-    local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -35)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 10)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetWidth(scrollFrame:GetWidth())
-    content:SetHeight(1)
-    scrollFrame:SetScrollChild(content)
-
-    f.scrollFrame = scrollFrame
-    f.content = content
-
-    f:Hide()
-    return f
-end
-
 local function PopulateEvents(frame)
     -- Hide previous children
     local children = { frame.content:GetChildren() }

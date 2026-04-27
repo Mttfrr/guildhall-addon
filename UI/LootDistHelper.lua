@@ -1,6 +1,5 @@
 ---@type GuildHall
 local WGS = GuildHall
-local L = GuildHall_L
 
 local helperFrame = nil
 local POPUP_DURATION = 30  -- auto-hide after 30 seconds if no action
