@@ -29,6 +29,12 @@ local LOOT_SUB_WISHLISTS = 2
 local LOOT_SUB_COUNT     = 2
 local LOOT_SUB_NAMES     = { "History", "Wishlists" }
 
+-- Forward declarations: these are defined later in the file, but referenced
+-- earlier (e.g. inside BuildRosterTab's sub-nav callback). Without this,
+-- the closures would capture _ENV.X (a nil global) instead of the local.
+local BuildRosterCheckSubView
+local PopulateRosterCheck
+
 ---------------------------------------------------------------------------
 -- Helpers
 ---------------------------------------------------------------------------
@@ -913,7 +919,7 @@ end
 -- Roster Check sub-view (lives inside Tab 2: Roster)
 ---------------------------------------------------------------------------
 
-local function BuildRosterCheckSubView(sv)
+function BuildRosterCheckSubView(sv)
     sv.header = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     sv.header:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
     sv.header:SetWidth(660)
@@ -1024,7 +1030,7 @@ local function BuildRosterCheckData()
     }
 end
 
-local function PopulateRosterCheck(tab)
+function PopulateRosterCheck(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
 
