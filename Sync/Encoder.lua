@@ -49,7 +49,7 @@ end
 
 -- Build export data from all captured modules
 function WGS:BuildExportData(modules)
-    modules = modules or { "attendance", "loot", "encounters", "guildBankMoneyChanges", "guildBankTransactions" }
+    modules = modules or { "attendance", "loot", "encounters", "raidCompResults", "guildBankMoneyChanges", "guildBankTransactions" }
 
     local data = {}
     for _, mod in ipairs(modules) do

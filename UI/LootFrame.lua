@@ -15,6 +15,7 @@ StaticPopupDialogs["WGS_CONFIRM_CLEAR_EXPORTED"] = {
         WGS.db.global.loot = {}
         WGS.db.global.attendance = {}
         WGS.db.global.encounters = {}
+        WGS.db.global.raidCompResults = {}
         WGS.db.global.guildBankMoneyChanges = {}
         WGS.db.global.guildBankTransactions = {}
         WGS:Print("Exported data cleared. Bank gold balance preserved.")
@@ -168,7 +169,7 @@ local function CreateImportFrame()
 end
 
 function WGS:ShowExportFrame()
-    self:SelectMainFrameTab(7)
+    self:SelectMainFrameTab(5)
 end
 
 function WGS:ShowExportFrameForModule(moduleName)
@@ -226,5 +227,5 @@ function WGS:ShowJsonExportFrame()
 end
 
 function WGS:ShowImportFrame()
-    self:SelectMainFrameTab(7)
+    self:SelectMainFrameTab(5)
 end

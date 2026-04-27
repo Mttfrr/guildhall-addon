@@ -27,6 +27,7 @@ local dbDefaults = {
         guildBankMoneyChanges = {},
         guildBankTransactions = {},
         encounters = {},
+        raidCompResults = {},  -- snapshots of actual raid groups at end of session
         lastKnownGold = nil,
         teams = {},
         wishlists = {},
@@ -69,16 +70,16 @@ function WGS:SlashCommand(input)
     if cmd == "show" or cmd == "" then
         self:ToggleMainFrame()
     elseif cmd == "export" then
-        self:SelectMainFrameTab(7)
+        self:SelectMainFrameTab(5)
     elseif cmd == "import" then
-        self:SelectMainFrameTab(7)
+        self:SelectMainFrameTab(5)
     elseif cmd == "attendance" then
         self:ToggleAttendance()
         self:RefreshMainFrame()
     elseif cmd == "config" or cmd == "options" then
         self:OpenConfig()
     elseif cmd == "teams" then
-        self:SelectMainFrameTab(2)
+        self:SelectMainFrameTab(2, 1)
     elseif cmd == "bossnotes" or cmd == "bn" then
         local _, bossName = self:GetArgs(input, 2)
         if bossName and bossName ~= "" then
@@ -95,11 +96,11 @@ function WGS:SlashCommand(input)
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
     elseif cmd == "loot" then
-        self:SelectMainFrameTab(4)
+        self:SelectMainFrameTab(4, 1)
     elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
-        self:SelectMainFrameTab(5)
+        self:SelectMainFrameTab(4, 2)
     elseif cmd == "rostercheck" or cmd == "check" then
-        self:SelectMainFrameTab(6)
+        self:SelectMainFrameTab(2, 2)
     else
         self:Print(L["SLASH_HELP"])
     end

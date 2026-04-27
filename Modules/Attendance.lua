@@ -179,6 +179,12 @@ function WGS:StopAttendance()
     currentSession.memberList = memberList
     currentSession.members = nil
 
+    -- Snapshot the actual raid composition (who was in which group at end)
+    local snapshot = self:CaptureRaidComposition(currentSession)
+    if snapshot then
+        table.insert(self.db.global.raidCompResults, snapshot)
+    end
+
     table.insert(self.db.global.attendance, currentSession)
 
     self:Print(string.format(L["ATTENDANCE_STOP"], #memberList))
@@ -199,6 +205,49 @@ function WGS:ToggleAttendance()
     else
         self:PromptAttendanceStart()
     end
+end
+
+--- Snapshot of who was in which raid group at session end.
+--- Mirrors the imported raidComps shape so the web can do planned-vs-actual diffs.
+function WGS:CaptureRaidComposition(session)
+    if not session or not IsInRaid() then return nil end
+
+    local slots = {}
+    for i = 1, GetNumGroupMembers() do
+        local unit = "raid" .. i
+        local name, realm = UnitFullName(unit)
+        if name then
+            realm = (realm and realm ~= "") and realm or (GetNormalizedRealmName() or "")
+            local fullName = name .. "-" .. realm
+            local _, classFile = UnitClass(unit)
+            local role = UnitGroupRolesAssigned(unit)
+            local _, _, subgroup = GetRaidRosterInfo(i)
+            local playerId = self:ResolvePlayerForCharacter(fullName)
+            slots[#slots + 1] = {
+                name = fullName,
+                playerId = playerId,
+                class = classFile or "",
+                role = role or "DPS",
+                group = subgroup or 0,
+            }
+        end
+    end
+
+    if #slots == 0 then return nil end
+
+    return {
+        eventId = session.eventId,
+        eventTitle = session.eventTitle,
+        teamId = session.teamId,
+        teamName = session.teamName,
+        instance = session.instanceName,
+        difficultyID = session.difficultyID,
+        difficultyName = session.difficultyName,
+        startedAt = session.startedAt,
+        finalAt = session.endedAt or self:GetTimestamp(),
+        recordedBy = self:GetPlayerKey(),
+        slots = slots,
+    }
 end
 
 function WGS:IsTrackingAttendance()

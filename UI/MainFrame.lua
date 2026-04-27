@@ -4,15 +4,13 @@ local L = GuildHall_L
 
 local mainFrame = nil
 
-local TAB_DASHBOARD   = 1
-local TAB_ROSTER      = 2
-local TAB_RAID        = 3
-local TAB_LOOT        = 4
-local TAB_WISHLISTS   = 5
-local TAB_ROSTERCHECK = 6
-local TAB_SYNC        = 7
-local TAB_COUNT       = 7
-local TAB_NAMES       = { "Dashboard", "Roster", "Raid", "Loot", "Wishlists", "Roster Check", "Import/Export" }
+local TAB_DASHBOARD = 1
+local TAB_ROSTER    = 2
+local TAB_RAID      = 3
+local TAB_LOOT      = 4
+local TAB_SYNC      = 5
+local TAB_COUNT     = 5
+local TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Loot", "Import/Export" }
 
 local RAID_SUB_COMP      = 1
 local RAID_SUB_READINESS = 2
@@ -20,6 +18,16 @@ local RAID_SUB_EVENTS    = 3
 local RAID_SUB_BOSSNOTES = 4
 local RAID_SUB_COUNT     = 4
 local RAID_SUB_NAMES     = { "Raid Comp", "Readiness", "Events", "Boss Notes" }
+
+local ROSTER_SUB_TEAMS = 1
+local ROSTER_SUB_CHECK = 2
+local ROSTER_SUB_COUNT = 2
+local ROSTER_SUB_NAMES = { "Teams", "Roster Check" }
+
+local LOOT_SUB_HISTORY   = 1
+local LOOT_SUB_WISHLISTS = 2
+local LOOT_SUB_COUNT     = 2
+local LOOT_SUB_NAMES     = { "History", "Wishlists" }
 
 ---------------------------------------------------------------------------
 -- Helpers
@@ -41,6 +49,49 @@ local function CreateScrollContent(parent)
     sf:SetScrollChild(content)
 
     return sf, content
+end
+
+--- Generic sub-view selector. Hides all sub-views, shows the selected one,
+--- and updates button font weight to indicate selection.
+local function SelectSubView(tab, index, count)
+    for i = 1, count do
+        tab.subViews[i]:Hide()
+        if tab.subButtons[i] then
+            tab.subButtons[i]:SetNormalFontObject("GameFontNormalSmall")
+        end
+    end
+    tab.subViews[index]:Show()
+    if tab.subButtons[index] then
+        tab.subButtons[index]:SetNormalFontObject("GameFontHighlightSmall")
+    end
+    tab.selectedSub = index
+end
+
+--- Build a sub-navigation row across the top of a tab plus N sub-view frames.
+--- onSelect(tab, index) is called when a sub-button is clicked.
+local function BuildSubNav(parent, names, onSelect)
+    parent.subButtons = {}
+    parent.subViews = {}
+    parent.selectedSub = 1
+    local count = #names
+    local btnW = math.floor(660 / count) - 4
+    local btnX = 0
+    for i = 1, count do
+        local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        btn:SetSize(btnW, 22)
+        btn:SetPoint("TOPLEFT", parent, "TOPLEFT", btnX, 0)
+        btn:SetText(names[i])
+        btn:SetScript("OnClick", function() onSelect(parent, i) end)
+        parent.subButtons[i] = btn
+        btnX = btnX + btnW + 4
+    end
+    for i = 1, count do
+        local sv = CreateFrame("Frame", nil, parent)
+        sv:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
+        sv:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+        sv:Hide()
+        parent.subViews[i] = sv
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -140,25 +191,19 @@ local function RefreshDashboard(tab)
 end
 
 ---------------------------------------------------------------------------
--- Tab 2: Roster
+-- Tab 2: Roster (Teams + Roster Check sub-views)
 ---------------------------------------------------------------------------
 
-local function BuildRosterTab(parent)
-    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, 0)
-    header:SetText("|cffffd100Teams|r")
-
-    local sf, content = CreateScrollContent(parent)
+local function BuildTeamsSubView(sv)
+    local sf, content = CreateScrollContent(sv)
     sf:ClearAllPoints()
-    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -18)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
-    content:SetWidth(660)
-
-    parent.scrollFrame = sf
-    parent.content = content
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, 0)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
+    sv.scrollFrame = sf
+    sv.content = content
 end
 
-local function RefreshRoster(tab)
+local function PopulateTeams(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
 
@@ -290,18 +335,36 @@ local function RefreshRoster(tab)
     tab.content:SetHeight(math.abs(yOff) + 10)
 end
 
+local function BuildRosterTab(parent)
+    BuildSubNav(parent, ROSTER_SUB_NAMES, function(p, i)
+        SelectSubView(p, i, ROSTER_SUB_COUNT)
+        if i == ROSTER_SUB_TEAMS then
+            PopulateTeams(p.subViews[i])
+        elseif i == ROSTER_SUB_CHECK then
+            PopulateRosterCheck(p.subViews[i])
+        end
+    end)
+    BuildTeamsSubView(parent.subViews[ROSTER_SUB_TEAMS])
+    BuildRosterCheckSubView(parent.subViews[ROSTER_SUB_CHECK])
+    SelectSubView(parent, ROSTER_SUB_TEAMS, ROSTER_SUB_COUNT)
+end
+
+local function RefreshRosterSubView(tab)
+    if not tab or not tab:IsVisible() then return end
+    local sub = tab.selectedSub or ROSTER_SUB_TEAMS
+    if sub == ROSTER_SUB_TEAMS then
+        PopulateTeams(tab.subViews[sub])
+    elseif sub == ROSTER_SUB_CHECK then
+        PopulateRosterCheck(tab.subViews[sub])
+    end
+end
+
 ---------------------------------------------------------------------------
 -- Tab 3: Raid (sub-navigation)
 ---------------------------------------------------------------------------
 
 local function SelectRaidSubView(tab, index)
-    for i = 1, RAID_SUB_COUNT do
-        tab.subViews[i]:Hide()
-        tab.subButtons[i]:SetNormalFontObject("GameFontNormalSmall")
-    end
-    tab.subViews[index]:Show()
-    tab.subButtons[index]:SetNormalFontObject("GameFontHighlightSmall")
-    tab.selectedSub = index
+    SelectSubView(tab, index, RAID_SUB_COUNT)
 end
 
 local function BuildBossNotesSubView(sv)
@@ -465,7 +528,7 @@ local function RefreshRaidSubView(tab)
 end
 
 ---------------------------------------------------------------------------
--- Tab 4: Loot History
+-- Tab 4: Loot (History + Wishlists sub-views)
 ---------------------------------------------------------------------------
 
 local ITEM_QUALITY_COLORS = {
@@ -477,41 +540,40 @@ local ITEM_QUALITY_COLORS = {
     [7] = "ff00ccff",  -- Heirloom
 }
 
-local function BuildLootHistoryTab(parent)
-    -- Search box at top
-    local searchLbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    searchLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
+local function BuildLootHistorySubView(sv)
+    local searchLbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    searchLbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
     searchLbl:SetText("Filter:")
 
-    local searchBox = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    local searchBox = CreateFrame("EditBox", nil, sv, "InputBoxTemplate")
     searchBox:SetSize(250, 22)
     searchBox:SetPoint("LEFT", searchLbl, "RIGHT", 10, 0)
     searchBox:SetAutoFocus(false)
     searchBox:SetScript("OnTextChanged", function(self)
-        parent.filterText = (self:GetText() or ""):lower()
-        if parent._refreshFn then parent._refreshFn() end
+        sv.filterText = (self:GetText() or ""):lower()
+        if sv._refreshFn then sv._refreshFn() end
     end)
     searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    parent.searchBox = searchBox
+    sv.searchBox = searchBox
 
-    local countText = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local countText = sv:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     countText:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
-    parent.countText = countText
+    sv.countText = countText
 
-    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(660)
     content:SetHeight(1)
     sf:SetScrollChild(content)
 
-    parent.scrollFrame = sf
-    parent.content = content
-    parent.filterText = ""
+    sv.scrollFrame = sf
+    sv.content = content
+    sv.filterText = ""
 end
 
-local function RefreshLootHistory(tab)
+local function PopulateLootHistory(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
 
@@ -597,7 +659,7 @@ local function RefreshLootHistory(tab)
 end
 
 ---------------------------------------------------------------------------
--- Tab 5: Wishlists (boss-centric browser)
+-- Wishlists sub-view (lives inside Tab 4: Loot)
 ---------------------------------------------------------------------------
 
 local PRIORITY_ORDER = { BiS = 1, High = 2, Medium = 3, Low = 4 }
@@ -608,36 +670,34 @@ local PRIORITY_COLORS = {
     Low    = "ff1eff00",  -- Green
 }
 
-local function BuildWishlistsTab(parent)
-    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
+local function BuildWishlistsSubView(sv)
+    local lbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
     lbl:SetText("Boss:")
 
-    parent.dropBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    parent.dropBtn:SetSize(280, 22)
-    parent.dropBtn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
-    parent.dropBtn:SetText("(All items)")
-    parent.selectedBoss = nil
+    sv.dropBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.dropBtn:SetSize(280, 22)
+    sv.dropBtn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
+    sv.dropBtn:SetText("(All items)")
+    sv.selectedBoss = nil
 
-    -- Dropdown menu
-    parent.dropMenu = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    parent.dropMenu:SetBackdrop({
+    sv.dropMenu = CreateFrame("Frame", nil, sv, "BackdropTemplate")
+    sv.dropMenu:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
         tile = true, tileSize = 16, edgeSize = 16,
         insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    parent.dropMenu:SetBackdropColor(0, 0, 0, 0.95)
-    parent.dropMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    parent.dropMenu:Hide()
-    parent.dropMenuButtons = {}
+    sv.dropMenu:SetBackdropColor(0, 0, 0, 0.95)
+    sv.dropMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+    sv.dropMenu:Hide()
+    sv.dropMenuButtons = {}
 
-    parent.dropBtn:SetScript("OnClick", function()
-        if parent.dropMenu:IsShown() then parent.dropMenu:Hide(); return end
+    sv.dropBtn:SetScript("OnClick", function()
+        if sv.dropMenu:IsShown() then sv.dropMenu:Hide(); return end
 
-        for _, btn in ipairs(parent.dropMenuButtons) do btn:Hide() end
+        for _, btn in ipairs(sv.dropMenuButtons) do btn:Hide() end
 
-        -- Build boss list from loot history
         local bossSet = {}
         for _, entry in ipairs(WGS.db.global.loot or {}) do
             if entry.boss and entry.boss ~= "" then bossSet[entry.boss] = true end
@@ -651,48 +711,48 @@ local function BuildWishlistsTab(parent)
         end)
 
         local bh = 22
-        parent.dropMenu:SetSize(280, #bosses * bh + 8)
-        parent.dropMenu:ClearAllPoints()
-        parent.dropMenu:SetPoint("TOPLEFT", parent.dropBtn, "BOTTOMLEFT", 0, -2)
+        sv.dropMenu:SetSize(280, #bosses * bh + 8)
+        sv.dropMenu:ClearAllPoints()
+        sv.dropMenu:SetPoint("TOPLEFT", sv.dropBtn, "BOTTOMLEFT", 0, -2)
 
         for i, name in ipairs(bosses) do
-            local btn = parent.dropMenuButtons[i]
+            local btn = sv.dropMenuButtons[i]
             if not btn then
-                btn = CreateFrame("Button", nil, parent.dropMenu)
+                btn = CreateFrame("Button", nil, sv.dropMenu)
                 btn:SetSize(272, bh)
                 btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
                 btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 btn.text:SetAllPoints()
                 btn.text:SetJustifyH("LEFT")
-                parent.dropMenuButtons[i] = btn
+                sv.dropMenuButtons[i] = btn
             end
             btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", parent.dropMenu, "TOPLEFT", 4, -(i - 1) * bh - 4)
+            btn:SetPoint("TOPLEFT", sv.dropMenu, "TOPLEFT", 4, -(i - 1) * bh - 4)
             btn.text:SetText("  " .. name)
             btn:SetScript("OnClick", function()
-                parent.selectedBoss = (name == "(All items)") and nil or name
-                parent.dropBtn:SetText(name)
-                parent.dropMenu:Hide()
-                if parent._refreshFn then parent._refreshFn() end
+                sv.selectedBoss = (name == "(All items)") and nil or name
+                sv.dropBtn:SetText(name)
+                sv.dropMenu:Hide()
+                if sv._refreshFn then sv._refreshFn() end
             end)
             btn:Show()
         end
-        parent.dropMenu:Show()
+        sv.dropMenu:Show()
     end)
 
-    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(660)
     content:SetHeight(1)
     sf:SetScrollChild(content)
 
-    parent.scrollFrame = sf
-    parent.content = content
+    sv.scrollFrame = sf
+    sv.content = content
 end
 
-local function RefreshWishlists(tab)
+local function PopulateWishlists(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
 
@@ -825,39 +885,63 @@ local function RefreshWishlists(tab)
     tab.content:SetHeight(math.abs(yOff) + 10)
 end
 
+local function BuildLootTab(parent)
+    BuildSubNav(parent, LOOT_SUB_NAMES, function(p, i)
+        SelectSubView(p, i, LOOT_SUB_COUNT)
+        if i == LOOT_SUB_HISTORY then
+            PopulateLootHistory(p.subViews[i])
+        elseif i == LOOT_SUB_WISHLISTS then
+            PopulateWishlists(p.subViews[i])
+        end
+    end)
+    BuildLootHistorySubView(parent.subViews[LOOT_SUB_HISTORY])
+    BuildWishlistsSubView(parent.subViews[LOOT_SUB_WISHLISTS])
+    SelectSubView(parent, LOOT_SUB_HISTORY, LOOT_SUB_COUNT)
+end
+
+local function RefreshLootSubView(tab)
+    if not tab or not tab:IsVisible() then return end
+    local sub = tab.selectedSub or LOOT_SUB_HISTORY
+    if sub == LOOT_SUB_HISTORY then
+        PopulateLootHistory(tab.subViews[sub])
+    elseif sub == LOOT_SUB_WISHLISTS then
+        PopulateWishlists(tab.subViews[sub])
+    end
+end
+
 ---------------------------------------------------------------------------
--- Tab 6: Roster Check
+-- Roster Check sub-view (lives inside Tab 2: Roster)
 ---------------------------------------------------------------------------
 
-local function BuildRosterCheckTab(parent)
-    parent.header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    parent.header:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -2)
-    parent.header:SetWidth(660)
-    parent.header:SetJustifyH("LEFT")
+local function BuildRosterCheckSubView(sv)
+    sv.header = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sv.header:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
+    sv.header:SetWidth(660)
+    sv.header:SetJustifyH("LEFT")
 
-    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -22)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 30)
+    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -22)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 30)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(660)
     content:SetHeight(1)
     sf:SetScrollChild(content)
 
-    parent.scrollFrame = sf
-    parent.content = content
+    sv.scrollFrame = sf
+    sv.content = content
 
-    parent.announceBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    parent.announceBtn:SetSize(180, 26)
-    parent.announceBtn:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 5, 0)
-    parent.announceBtn:SetText("Announce Missing to Raid")
-    parent.announceBtn:Hide()
+    sv.announceBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.announceBtn:SetSize(180, 26)
+    sv.announceBtn:SetPoint("BOTTOMLEFT", sv, "BOTTOMLEFT", 5, 0)
+    sv.announceBtn:SetText("Announce Missing to Raid")
+    sv.announceBtn:Hide()
 
-    parent.refreshBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    parent.refreshBtn:SetSize(100, 26)
-    parent.refreshBtn:SetPoint("LEFT", parent.announceBtn, "RIGHT", 8, 0)
-    parent.refreshBtn:SetText("Refresh")
-    parent.refreshBtn:SetScript("OnClick", function()
-        if parent._refreshFn then parent._refreshFn() end
+    sv.refreshBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.refreshBtn:SetSize(100, 26)
+    sv.refreshBtn:SetPoint("LEFT", sv.announceBtn, "RIGHT", 8, 0)
+    sv.refreshBtn:SetText("Refresh")
+    sv.refreshBtn:SetScript("OnClick", function()
+        if sv._refreshFn then sv._refreshFn() end
     end)
 end
 
@@ -940,7 +1024,7 @@ local function BuildRosterCheckData()
     }
 end
 
-local function RefreshRosterCheck(tab)
+local function PopulateRosterCheck(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
 
@@ -1242,15 +1326,11 @@ local function RefreshCurrentTab(frame)
     if tab == TAB_DASHBOARD then
         RefreshDashboard(frame.tabContents[TAB_DASHBOARD])
     elseif tab == TAB_ROSTER then
-        RefreshRoster(frame.tabContents[TAB_ROSTER])
+        RefreshRosterSubView(frame.tabContents[TAB_ROSTER])
     elseif tab == TAB_RAID then
         RefreshRaidSubView(frame.tabContents[TAB_RAID])
     elseif tab == TAB_LOOT then
-        RefreshLootHistory(frame.tabContents[TAB_LOOT])
-    elseif tab == TAB_WISHLISTS then
-        RefreshWishlists(frame.tabContents[TAB_WISHLISTS])
-    elseif tab == TAB_ROSTERCHECK then
-        RefreshRosterCheck(frame.tabContents[TAB_ROSTERCHECK])
+        RefreshLootSubView(frame.tabContents[TAB_LOOT])
     end
     -- Sync tab doesn't need auto-refresh
 
@@ -1325,21 +1405,21 @@ local function CreateMainFrame()
     BuildDashboardTab(f.tabContents[TAB_DASHBOARD])
     BuildRosterTab(f.tabContents[TAB_ROSTER])
     BuildRaidTab(f.tabContents[TAB_RAID])
-    BuildLootHistoryTab(f.tabContents[TAB_LOOT])
-    BuildWishlistsTab(f.tabContents[TAB_WISHLISTS])
-    BuildRosterCheckTab(f.tabContents[TAB_ROSTERCHECK])
+    BuildLootTab(f.tabContents[TAB_LOOT])
     BuildSyncTab(f.tabContents[TAB_SYNC])
 
     -- Wire back-pointers so in-tab controls (search box, dropdown, refresh btn)
-    -- can trigger a re-render without needing frame reference
-    f.tabContents[TAB_LOOT]._refreshFn = function()
-        RefreshLootHistory(f.tabContents[TAB_LOOT])
+    -- can trigger a re-render. These point to the actual sub-view, not the tab frame.
+    local lootTab = f.tabContents[TAB_LOOT]
+    lootTab.subViews[LOOT_SUB_HISTORY]._refreshFn = function()
+        PopulateLootHistory(lootTab.subViews[LOOT_SUB_HISTORY])
     end
-    f.tabContents[TAB_WISHLISTS]._refreshFn = function()
-        RefreshWishlists(f.tabContents[TAB_WISHLISTS])
+    lootTab.subViews[LOOT_SUB_WISHLISTS]._refreshFn = function()
+        PopulateWishlists(lootTab.subViews[LOOT_SUB_WISHLISTS])
     end
-    f.tabContents[TAB_ROSTERCHECK]._refreshFn = function()
-        RefreshRosterCheck(f.tabContents[TAB_ROSTERCHECK])
+    local rosterTab = f.tabContents[TAB_ROSTER]
+    rosterTab.subViews[ROSTER_SUB_CHECK]._refreshFn = function()
+        PopulateRosterCheck(rosterTab.subViews[ROSTER_SUB_CHECK])
     end
 
     -- Wire attendance button (needs mainFrame ref for refresh)
@@ -1386,12 +1466,18 @@ function WGS:ToggleMainFrame()
     if mainFrame:IsShown() then mainFrame:Hide() else mainFrame:Show() end
 end
 
-function WGS:SelectMainFrameTab(tabIndex, raidSubView)
+function WGS:SelectMainFrameTab(tabIndex, subIndex)
     if not mainFrame then mainFrame = CreateMainFrame() end
     if not mainFrame:IsShown() then mainFrame:Show() end
     SelectTab(mainFrame, tabIndex)
-    if raidSubView and tabIndex == TAB_RAID then
-        SelectRaidSubView(mainFrame.tabContents[TAB_RAID], raidSubView)
+    if subIndex then
+        if tabIndex == TAB_RAID then
+            SelectSubView(mainFrame.tabContents[TAB_RAID], subIndex, RAID_SUB_COUNT)
+        elseif tabIndex == TAB_ROSTER then
+            SelectSubView(mainFrame.tabContents[TAB_ROSTER], subIndex, ROSTER_SUB_COUNT)
+        elseif tabIndex == TAB_LOOT then
+            SelectSubView(mainFrame.tabContents[TAB_LOOT], subIndex, LOOT_SUB_COUNT)
+        end
     end
     RefreshCurrentTab(mainFrame)
 end

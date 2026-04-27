@@ -194,6 +194,7 @@ local options = {
                         WGS.db.global.attendance = {}
                         WGS.db.global.loot = {}
                         WGS.db.global.encounters = {}
+                        WGS.db.global.raidCompResults = {}
                         WGS.db.global.guildBankMoneyChanges = {}
                         WGS.db.global.guildBankTransactions = {}
                         WGS.db.global.lastKnownGold = nil
