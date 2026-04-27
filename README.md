@@ -30,16 +30,6 @@ GuildHall handles the parts of raiding that don't belong in a spreadsheet: track
 - **Raid composition tools** — `/gh invite` mass-invites the team, `/gh sortgroups` puts everyone in the right subgroup.
 - **Wishlist tooltips** — hover any item to see who in the guild wants it.
 
-## Installation
-
-### From [Wago Addons](https://addons.wago.io)
-Search for "GuildHall" in the Wago client.
-
-### Manual
-1. Download `GuildHall.zip` from the [latest release](https://github.com/Mttfrr/guildhall-addon/releases/latest)
-2. Extract into `World of Warcraft/_retail_/Interface/AddOns/`
-3. Restart WoW (or `/reload`)
-
 ## Quick start
 
 1. Sign your guild up at [guildhall.run](https://guildhall.run) and create teams + events.
@@ -107,23 +97,6 @@ The export string is plain JSON wrapped in base64 with a `WGS` prefix. You can d
 - The exact error message (with `/console scriptErrors 1` enabled, or via [BugSack](https://www.curseforge.com/wow/addons/bugsack))
 - What you were doing when it happened
 - Your addon version (visible at the top of `/gh` and on the minimap tooltip)
-
-## Building & releasing
-
-Releases are automated via the [BigWigs packager](https://github.com/BigWigsMods/packager) GitHub Action. Push a `v*` tag and the workflow packages the addon and uploads to Wago.
-
-Manual release flow (for the maintainer):
-
-```sh
-# Bump version in Core.lua and GuildHall.toc, update CHANGELOG.md
-git commit -am "Bump version to vX.Y.Z-beta"
-
-# Tag and push
-git tag -a vX.Y.Z-beta -m "vX.Y.Z-beta"
-git push origin main vX.Y.Z-beta
-```
-
-The GitHub release also needs to be created (or the packager Action will handle it) for the Wago webhook to fire.
 
 ## Architecture overview
 
