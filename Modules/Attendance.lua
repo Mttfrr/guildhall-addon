@@ -209,26 +209,24 @@ end
 
 --- Snapshot of who was in which raid group at session end.
 --- Mirrors the imported raidComps shape so the web can do planned-vs-actual diffs.
+---
+--- Reads from session.memberList (populated continuously by OnGroupRosterUpdate)
+--- rather than the live raid roster. StopAttendance is most often triggered by
+--- OnGroupLeft, at which point IsInRaid() is already false and the live roster
+--- API would return nothing.
 function WGS:CaptureRaidComposition(session)
-    if not session or not IsInRaid() then return nil end
+    if not session or not session.memberList then return nil end
 
     local slots = {}
-    for i = 1, GetNumGroupMembers() do
-        local unit = "raid" .. i
-        local name, realm = UnitFullName(unit)
-        if name then
-            realm = (realm and realm ~= "") and realm or (GetNormalizedRealmName() or "")
-            local fullName = name .. "-" .. realm
-            local _, classFile = UnitClass(unit)
-            local role = UnitGroupRolesAssigned(unit)
-            local _, _, subgroup = GetRaidRosterInfo(i)
-            local playerId = self:ResolvePlayerForCharacter(fullName)
+    for _, member in ipairs(session.memberList) do
+        -- Only members still present at session end with a valid raid subgroup
+        if member.present and member.subgroup and member.subgroup > 0 then
             slots[#slots + 1] = {
-                name = fullName,
-                playerId = playerId,
-                class = classFile or "",
-                role = role or "DPS",
-                group = subgroup or 0,
+                name = member.name,
+                playerId = member.playerId,
+                class = member.class or "",
+                role = member.role or "DPS",
+                group = member.subgroup,
             }
         end
     end
