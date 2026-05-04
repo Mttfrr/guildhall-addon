@@ -179,11 +179,9 @@ function WGS:StopAttendance()
     currentSession.memberList = memberList
     currentSession.members = nil
 
-    -- Snapshot the actual raid composition (who was in which group at end)
-    local snapshot = self:CaptureRaidComposition(currentSession)
-    if snapshot then
-        table.insert(self.db.global.raidCompResults, snapshot)
-    end
+    -- Final raid comp snapshot (deduped against any kill snapshots from
+    -- this session — if the comp didn't change since the last kill, skip)
+    self:SnapshotRaidComp(nil)
 
     table.insert(self.db.global.attendance, currentSession)
 
@@ -207,19 +205,31 @@ function WGS:ToggleAttendance()
     end
 end
 
---- Snapshot of who was in which raid group at session end.
---- Mirrors the imported raidComps shape so the web can do planned-vs-actual diffs.
+--- Stable signature for a slots array. Used to dedupe identical snapshots.
+local function ComputeCompSignature(slots)
+    local parts = {}
+    for _, s in ipairs(slots) do
+        parts[#parts + 1] = (s.name or "?") .. ":" .. (s.group or 0)
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
+--- Snapshot of who was in which raid group at a given moment.
+--- Reads from session.memberList (set on stop) or session.members (live during
+--- session). StopAttendance is often triggered by OnGroupLeft, at which point
+--- IsInRaid() is already false, so we cannot rely on the live raid API.
 ---
---- Reads from session.memberList (populated continuously by OnGroupRosterUpdate)
---- rather than the live raid roster. StopAttendance is most often triggered by
---- OnGroupLeft, at which point IsInRaid() is already false and the live roster
---- API would return nothing.
-function WGS:CaptureRaidComposition(session)
-    if not session or not session.memberList then return nil end
+--- bossInfo (optional): { encounterID, encounterName, difficultyID, difficultyName }
+--- — when present, the snapshot is tagged with the kill that triggered it.
+function WGS:CaptureRaidComposition(session, bossInfo)
+    if not session then return nil end
+    local source = session.memberList or session.members
+    if not source then return nil end
 
     local slots = {}
-    for _, member in ipairs(session.memberList) do
-        -- Only members still present at session end with a valid raid subgroup
+    for _, member in pairs(source) do
+        -- Only members currently present with a valid raid subgroup
         if member.present and member.subgroup and member.subgroup > 0 then
             slots[#slots + 1] = {
                 name = member.name,
@@ -242,10 +252,35 @@ function WGS:CaptureRaidComposition(session)
         difficultyID = session.difficultyID,
         difficultyName = session.difficultyName,
         startedAt = session.startedAt,
-        finalAt = session.endedAt or self:GetTimestamp(),
+        finalAt = self:GetTimestamp(),
         recordedBy = self:GetPlayerKey(),
+        boss = bossInfo and bossInfo.encounterName or nil,
+        encounterID = bossInfo and bossInfo.encounterID or nil,
+        bossDifficultyID = bossInfo and bossInfo.difficultyID or nil,
+        signature = ComputeCompSignature(slots),
         slots = slots,
     }
+end
+
+--- Capture + dedupe + save. Skips if the comp is identical to the last
+--- saved snapshot for the current session (same signature).
+--- Called on boss kills (with bossInfo) and at session end (without).
+function WGS:SnapshotRaidComp(bossInfo)
+    if not currentSession then return false end
+
+    local snapshot = self:CaptureRaidComposition(currentSession, bossInfo)
+    if not snapshot then return false end
+
+    local results = self.db.global.raidCompResults
+    local last = results[#results]
+    -- Dedupe: skip if the previous snapshot is from the same session and has
+    -- the same comp signature. (Same session = same startedAt timestamp.)
+    if last and last.startedAt == snapshot.startedAt and last.signature == snapshot.signature then
+        return false
+    end
+
+    results[#results + 1] = snapshot
+    return true
 end
 
 function WGS:IsTrackingAttendance()
