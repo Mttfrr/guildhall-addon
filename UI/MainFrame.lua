@@ -138,7 +138,31 @@ local function BuildDashboardTab(parent)
         WGS:ScanBankTransactions()
         WGS:RefreshMainFrame()
     end)
-    y = y - btnH - gap * 4
+    y = y - btnH - gap * 3
+
+    -- Raid Leader Tools (officer/leader perms required, button checks at runtime)
+    local hdr2 = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hdr2:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
+    hdr2:SetText("|cffffd100Raid Tools|r")
+    y = y - 18
+
+    local btnInvite = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btnInvite:SetSize(btnW, btnH)
+    btnInvite:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
+    btnInvite:SetText("Auto-Invite Team")
+    btnInvite:SetScript("OnClick", function()
+        WGS:AutoInvite()
+    end)
+    y = y - btnH - gap
+
+    local btnSort = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btnSort:SetSize(btnW, btnH)
+    btnSort:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
+    btnSort:SetText("Sort Raid Groups")
+    btnSort:SetScript("OnClick", function()
+        WGS:SortRaidGroups()
+    end)
+    y = y - btnH - gap * 3
 
     local info = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     info:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
@@ -939,12 +963,19 @@ function BuildRosterCheckSubView(sv)
     sv.announceBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
     sv.announceBtn:SetSize(180, 26)
     sv.announceBtn:SetPoint("BOTTOMLEFT", sv, "BOTTOMLEFT", 5, 0)
-    sv.announceBtn:SetText("Announce Missing to Raid")
+    sv.announceBtn:SetText("Announce Missing")
     sv.announceBtn:Hide()
+
+    sv.inviteBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.inviteBtn:SetSize(140, 26)
+    sv.inviteBtn:SetPoint("LEFT", sv.announceBtn, "RIGHT", 8, 0)
+    sv.inviteBtn:SetText("Invite Missing")
+    sv.inviteBtn:SetScript("OnClick", function() WGS:AutoInvite() end)
+    sv.inviteBtn:Hide()
 
     sv.refreshBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
     sv.refreshBtn:SetSize(100, 26)
-    sv.refreshBtn:SetPoint("LEFT", sv.announceBtn, "RIGHT", 8, 0)
+    sv.refreshBtn:SetPoint("LEFT", sv.inviteBtn, "RIGHT", 8, 0)
     sv.refreshBtn:SetText("Refresh")
     sv.refreshBtn:SetScript("OnClick", function()
         if sv._refreshFn then sv._refreshFn() end
@@ -1038,6 +1069,7 @@ function PopulateRosterCheck(tab)
     if not data then
         tab.header:SetText("|cff888888" .. (err or "No data") .. "|r")
         tab.announceBtn:Hide()
+        tab.inviteBtn:Hide()
         tab.content:SetHeight(10)
         return
     end
@@ -1167,32 +1199,38 @@ function PopulateRosterCheck(tab)
 
     tab.content:SetHeight(math.abs(yOff) + 10)
 
-    -- Announce button wiring
-    if #missing > 0 and (IsInRaid() or IsInGroup()) then
-        tab.announceBtn:Show()
-        tab.announceBtn:SetScript("OnClick", function()
-            local channel = IsInRaid() and "RAID" or "PARTY"
-            C_ChatInfo.SendChatMessage("[GuildHall] Missing for " .. (data.event.title or "event") .. ":", channel)
-            local names = {}
-            for _, m in ipairs(missing) do
-                names[#names + 1] = m:match("^([^%-]+)") or m
-            end
-            -- Batch names into chunks to avoid message length limit
-            local chunk = ""
-            for _, n in ipairs(names) do
-                if #chunk + #n + 2 > 200 then
-                    C_ChatInfo.SendChatMessage("  " .. chunk, channel)
-                    chunk = n
-                else
-                    chunk = chunk == "" and n or (chunk .. ", " .. n)
+    -- Show/hide action buttons based on whether there's anything missing
+    if #missing > 0 then
+        tab.inviteBtn:Show()
+        if IsInRaid() or IsInGroup() then
+            tab.announceBtn:Show()
+            tab.announceBtn:SetScript("OnClick", function()
+                local channel = IsInRaid() and "RAID" or "PARTY"
+                C_ChatInfo.SendChatMessage("[GuildHall] Missing for " .. (data.event.title or "event") .. ":", channel)
+                local names = {}
+                for _, m in ipairs(missing) do
+                    names[#names + 1] = m:match("^([^%-]+)") or m
                 end
-            end
-            if chunk ~= "" then
-                C_ChatInfo.SendChatMessage("  " .. chunk, channel)
-            end
-        end)
+                -- Batch names into chunks to avoid message length limit
+                local chunk = ""
+                for _, n in ipairs(names) do
+                    if #chunk + #n + 2 > 200 then
+                        C_ChatInfo.SendChatMessage("  " .. chunk, channel)
+                        chunk = n
+                    else
+                        chunk = chunk == "" and n or (chunk .. ", " .. n)
+                    end
+                end
+                if chunk ~= "" then
+                    C_ChatInfo.SendChatMessage("  " .. chunk, channel)
+                end
+            end)
+        else
+            tab.announceBtn:Hide()
+        end
     else
         tab.announceBtn:Hide()
+        tab.inviteBtn:Hide()
     end
 end
 
