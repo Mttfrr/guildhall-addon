@@ -126,6 +126,17 @@ function WGS:GetPlayerKey()
     return (name or "Unknown") .. "-" .. realm
 end
 
+--- Ensure a name is in "CharName-Realm" format. Same-realm members from
+--- GetGuildRosterInfo / GetRaidRosterInfo may come back as just "CharName"
+--- — append the player's own realm in that case.
+function WGS:NormalizeFullName(name)
+    if not name or name == "" then return nil end
+    if name:find("-", 1, true) then return name end
+    local realm = GetNormalizedRealmName() or ""
+    if realm == "" then return name end
+    return name .. "-" .. realm
+end
+
 function WGS:GetTimestamp()
     return time()
 end
@@ -369,7 +380,7 @@ function WGS:GetGuildRosterLookup()
         if name then
             local short = name:match("^([^%-]+)")
             roster[short] = {
-                fullName = name,
+                fullName = self:NormalizeFullName(name),  -- always "Char-Realm"
                 class = classFile or "",
                 online = online or false,
                 level = level or 0,

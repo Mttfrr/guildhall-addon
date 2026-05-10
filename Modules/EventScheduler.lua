@@ -280,19 +280,19 @@ end
 ---------------------------------------------------------------------------
 
 function module:IsInCurrentGroup(fullName)
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local name = GetRaidRosterInfo(i)
-            if name and fullName:find(name) then return true end
-        end
-    elseif IsInGroup() then
-        if fullName == WGS:GetPlayerKey() then return true end
-        for i = 1, GetNumGroupMembers() - 1 do
-            local uName, uRealm = UnitFullName("party" .. i)
-            if uName then
-                uRealm = (uRealm and uRealm ~= "") and uRealm or (GetNormalizedRealmName() or "")
-                if (uName .. "-" .. uRealm) == fullName then return true end
-            end
+    if not (IsInRaid() or IsInGroup()) then return false end
+    if fullName == WGS:GetPlayerKey() then return true end
+
+    -- Use UnitFullName for both raid and party — gives consistent (name, realm)
+    -- output across cross-realm and same-realm members. GetRaidRosterInfo
+    -- returns realm-suffixed only for cross-realm; UnitFullName is uniform.
+    local prefix = IsInRaid() and "raid" or "party"
+    local count = IsInRaid() and GetNumGroupMembers() or (GetNumGroupMembers() - 1)
+    for i = 1, count do
+        local uName, uRealm = UnitFullName(prefix .. i)
+        if uName then
+            uRealm = (uRealm and uRealm ~= "") and uRealm or (GetNormalizedRealmName() or "")
+            if (uName .. "-" .. uRealm) == fullName then return true end
         end
     end
     return false
