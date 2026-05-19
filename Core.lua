@@ -7,7 +7,7 @@ local L = GuildHall_L
 GuildHall = WGS
 _G["GuildHall"] = WGS
 
-WGS.version = "0.6.0-beta"
+WGS.version = "0.7.0-beta"
 
 local dbDefaults = {
     profile = {
@@ -42,6 +42,7 @@ local dbDefaults = {
         lastExport = 0,
         lastImport = 0,
         exportHistory = {},
+        serverMinAddonVersion = nil,  -- captured from the web's export response on import
     },
 }
 
@@ -360,6 +361,49 @@ function WGS:Base64Decode(str)
         end
     end
     return table.concat(out)
+end
+
+---------------------------------------------------------------------------
+-- djb2 hash — 32-bit, 8-char lowercase hex. Used to checksum the base64
+-- payload of v3 export envelopes so the decoder can detect copy-paste
+-- truncation. Must stay in lockstep with the web's `djb2Hex` in
+-- client/src/pages/AddonSync.jsx.
+---------------------------------------------------------------------------
+
+function WGS:HashString(s)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + s:byte(i)) % 4294967296
+    end
+    return string.format("%08x", h)
+end
+
+-- Compare two semver-ish strings ("0.6.0", "0.6.0-beta"). Pre-release
+-- suffixes are stripped so "0.6.0-beta" == "0.6.0", matching the server's
+-- compareVersions in server/routes/addonSync.js. Returns -1 / 0 / 1.
+function WGS:CompareVersions(a, b)
+    local function parts(v)
+        v = (v or ""):gsub("%-.*$", "")
+        local t = {}
+        for n in v:gmatch("(%d+)") do t[#t + 1] = tonumber(n) or 0 end
+        return t
+    end
+    local pa, pb = parts(a), parts(b)
+    local n = math.max(#pa, #pb)
+    for i = 1, n do
+        local na, nb = pa[i] or 0, pb[i] or 0
+        if na > nb then return 1 end
+        if na < nb then return -1 end
+    end
+    return 0
+end
+
+-- True iff the running addon is older than the server's MIN_ADDON_VERSION
+-- (captured into db.global.serverMinAddonVersion on the last import).
+function WGS:IsOutdated()
+    local required = self.db and self.db.global and self.db.global.serverMinAddonVersion
+    if not required or required == "" then return false end
+    return self:CompareVersions(self.version, required) < 0
 end
 
 ---------------------------------------------------------------------------

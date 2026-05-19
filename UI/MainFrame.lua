@@ -178,9 +178,9 @@ local function BuildDashboardTab(parent)
     btnSettings:SetScript("OnClick", function() WGS:OpenConfig() end)
 
     -- Summary column
-    local hdr2 = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hdr2:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, 0)
-    hdr2:SetText("|cffffd100Summary|r")
+    local hdrSummary = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hdrSummary:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, 0)
+    hdrSummary:SetText("|cffffd100Summary|r")
 
     parent.summaryText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     parent.summaryText:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, -22)
@@ -192,6 +192,14 @@ local function BuildDashboardTab(parent)
     parent.attendanceStatus:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, -140)
     parent.attendanceStatus:SetWidth(270)
     parent.attendanceStatus:SetJustifyH("LEFT")
+
+    -- Bottom-of-tab banner: only shown when the server's MIN_ADDON_VERSION
+    -- exceeds our running version. Spans both columns so it's hard to miss.
+    parent.outdatedBanner = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    parent.outdatedBanner:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 100, 4)
+    parent.outdatedBanner:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -10, 4)
+    parent.outdatedBanner:SetJustifyH("LEFT")
+    parent.outdatedBanner:SetText("")
 end
 
 local function RefreshDashboard(tab)
@@ -217,6 +225,16 @@ local function RefreshDashboard(tab)
     else
         tab.btnAttendance:SetText("Start Attendance Tracking")
         tab.attendanceStatus:SetText("")
+    end
+
+    if tab.outdatedBanner then
+        if WGS:IsOutdated() then
+            tab.outdatedBanner:SetText(string.format(
+                "|cffff8800Addon outdated:|r v%s required, you have v%s. Update at |cff8888ffaddons.wago.io/addons/guildhall-addon|r",
+                db.serverMinAddonVersion or "?", WGS.version))
+        else
+            tab.outdatedBanner:SetText("")
+        end
     end
 end
 
@@ -1321,11 +1339,7 @@ local function BuildSyncTab(parent)
     esf:SetScript("OnMouseDown", function() eeb:SetFocus() end)
     parent.exportEditBox = eeb
 
-    local btnExport = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnExport:SetSize(100, 25)
-    btnExport:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 5, 0)
-    btnExport:SetText("Export")
-    btnExport:SetScript("OnClick", function()
+    local function runExport()
         local encoded = WGS:ExportAll()
         if encoded then
             eeb:SetText(encoded)
@@ -1334,7 +1348,17 @@ local function BuildSyncTab(parent)
             WGS.db.global.lastExport = WGS:GetTimestamp()
             WGS:Print(L["EXPORT_COPIED"])
         end
-    end)
+    end
+
+    -- Stash on the parent so WGS:PopulateExportEditBox can invoke it from
+    -- anywhere (post-raid reminder → ShowExportFrame in particular).
+    parent.runExport = runExport
+
+    local btnExport = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btnExport:SetSize(100, 25)
+    btnExport:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 5, 0)
+    btnExport:SetText("Export")
+    btnExport:SetScript("OnClick", runExport)
 
     local btnSelectAll = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btnSelectAll:SetSize(100, 25)
@@ -1540,5 +1564,16 @@ end
 function WGS:RefreshMainFrame()
     if mainFrame and mainFrame:IsShown() then
         RefreshCurrentTab(mainFrame)
+    end
+end
+
+-- Programmatically run the Sync tab's export action — same effect as
+-- clicking the Export button. Used by ShowExportFrame so the post-raid
+-- reminder can land on the Sync tab with the string already in the box.
+function WGS:PopulateExportEditBox()
+    if not mainFrame then return end
+    local syncTab = mainFrame.tabContents and mainFrame.tabContents[TAB_SYNC]
+    if syncTab and syncTab.runExport then
+        syncTab.runExport()
     end
 end

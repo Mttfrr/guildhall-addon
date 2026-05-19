@@ -1,12 +1,16 @@
 ---@type GuildHall
 local WGS = GuildHall
 
--- Export format version (for future compatibility)
-local EXPORT_VERSION = 2
-local EXPORT_HEADER = "WGS"  -- 3-char prefix to identify our strings
+-- Export format version. Emitted format is v3:
+--   WGS3<8-hex-djb2-of-base64>:<base64(JSON)>
+-- The 8-char checksum lets the decoder reject silently-truncated paste
+-- (a very common failure mode in WoW's edit boxes). The web's decoder
+-- in client/src/pages/AddonSync.jsx accepts both v2 (`WGS<base64>`)
+-- and v3, so old web↔addon exports still round-trip.
+local EXPORT_VERSION = 3
+local EXPORT_HEADER_V3 = "WGS3"
 
--- Encode a data table into a WGS export string: WGS + base64(JSON)
--- This format is directly decodable by the web platform (atob + JSON.parse)
+-- Encode a data table into a WGS export string.
 function WGS:Encode(data)
     if not data then return nil end
 
@@ -20,16 +24,14 @@ function WGS:Encode(data)
         data = data,
     }
 
-    -- Step 1: Serialize to JSON
     local json = self:ToJson(payload)
     if not json then return nil end
 
-    -- Step 2: Base64 encode
     local encoded = self:Base64Encode(json)
     if not encoded then return nil end
 
-    -- Step 3: Prepend header
-    return EXPORT_HEADER .. encoded
+    local sum = self:HashString(encoded)
+    return EXPORT_HEADER_V3 .. sum .. ":" .. encoded
 end
 
 -- Clean loot entries for export (strip WoW-specific itemLink escape codes)

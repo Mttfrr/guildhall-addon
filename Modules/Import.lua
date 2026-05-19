@@ -126,6 +126,18 @@ function WGS:ProcessImport(data)
         self.db.global.targetIlvl = data.targetIlvl
     end
 
+    -- Record the server's minimum required addon version so the Dashboard
+    -- can show an "addon outdated" banner without waiting for the next
+    -- push-import to be rejected.
+    if data.minAddonVersion and data.minAddonVersion ~= "" then
+        self.db.global.serverMinAddonVersion = data.minAddonVersion
+        if self:IsOutdated() then
+            self:Print(string.format(
+                "|cffff8800GuildHall is outdated:|r the web requires v%s but you have v%s. Update from addons.wago.io/addons/guildhall-addon",
+                data.minAddonVersion, self.version))
+        end
+    end
+
     -- Auto-populate Guild ID from invite code (secure linking)
     if data.inviteCode and data.inviteCode ~= "" then
         if self.db.profile.guildWebId == "" or self.db.profile.guildWebId ~= data.inviteCode then

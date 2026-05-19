@@ -21,9 +21,11 @@ StaticPopupDialogs["WGS_CONFIRM_CLEAR_EXPORTED"] = {
     hideOnEscape = true,
 }
 
--- Both functions just open the Import/Export tab on the main frame.
+-- Open the Sync tab and immediately generate + select the export string,
+-- so the post-raid reminder is a single click away from copy-paste.
 function WGS:ShowExportFrame()
     self:SelectMainFrameTab(5)
+    self:PopulateExportEditBox()
 end
 
 function WGS:ShowImportFrame()

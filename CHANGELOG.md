@@ -2,6 +2,20 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [0.7.0-beta] — Unreleased
+
+### Added
+- **Export envelope v3 with checksum** — addon now emits `WGS3<8-hex-djb2>:<base64>` and the web emits the same format. The decoder validates the djb2 checksum on the base64 string and rejects truncated paste with a clear error ("Export string appears truncated — please re-copy the full string."). The legacy `WGS<base64>` (v2) envelope is still accepted on import for backwards compatibility.
+- **Outdated-addon banner** — Dashboard tab now shows a banner when the running addon is older than the server's `MIN_ADDON_VERSION` (read from the web's export response on import). No more raw error strings on next sync.
+- **Auto-populated export on Sync tab open** — the post-raid reminder's "Export Now" button now lands on the Sync tab with the export string already generated, selected and ready for Ctrl+C.
+
+### Tooling
+- **`.luacheckrc`** — Lua 5.1 static analysis with the WoW global allowlist; the codebase passes clean (0 warnings, 0 errors).
+- **`.github/workflows/lint.yml`** — runs `luacheck .` on every push and PR.
+
+### Fixed
+- Removed a dead `local L` in `Config.lua`, a duplicate `hdr2` declaration in `UI/MainFrame.lua`, and an empty-if branch in `UI/ReadinessCheck.lua` (all surfaced by the new luacheck gate).
+
 ## [0.6.0-beta] — 2026-04-13
 
 ### Added

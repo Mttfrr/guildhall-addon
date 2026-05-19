@@ -1,6 +1,5 @@
 ---@type GuildHall
 local WGS = GuildHall
-local L = GuildHall_L
 
 local options = {
     name = "GuildHall |cffff8800[BETA]|r",

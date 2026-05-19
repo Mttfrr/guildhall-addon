@@ -40,9 +40,7 @@ local function PopulateReadiness(frame)
         local shortName = name:match("^([^%-]+)") or name
 
         -- If in raid, only show issues for current raid members
-        if inRaid and not raidMembers[name:lower()] and not raidMembers[shortName:lower()] then
-            -- skip non-raid members
-        else
+        if not (inRaid and not raidMembers[name:lower()] and not raidMembers[shortName:lower()]) then
             local missingEnchants = entry.missingEnchants or 0
             local missingGems = entry.missingGems or 0
             local ilvl = entry.ilvl or 0
