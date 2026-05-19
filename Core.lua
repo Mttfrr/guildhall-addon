@@ -43,6 +43,7 @@ local dbDefaults = {
         lastImport = 0,
         exportHistory = {},
         serverMinAddonVersion = nil,  -- captured from the web's export response on import
+        lastClearSnapshot = { t = 0 }, -- 24h recoverable backup of cleared exported data
     },
 }
 
@@ -102,6 +103,8 @@ function WGS:SlashCommand(input)
         self:SelectMainFrameTab(4, 2)
     elseif cmd == "rostercheck" or cmd == "check" then
         self:SelectMainFrameTab(2, 2)
+    elseif cmd == "restore" then
+        self:RestoreClearedData()
     else
         self:Print(L["SLASH_HELP"])
     end
@@ -404,6 +407,57 @@ function WGS:IsOutdated()
     local required = self.db and self.db.global and self.db.global.serverMinAddonVersion
     if not required or required == "" then return false end
     return self:CompareVersions(self.version, required) < 0
+end
+
+---------------------------------------------------------------------------
+-- Exported-data clear safety net
+--
+-- "Clear exported data" wipes loot/attendance/encounters/bank into the
+-- void. If the user pasted into the wrong web tab — or thought they did
+-- but the string was truncated — that data is irrecoverable. We keep one
+-- snapshot on disk for 24h so the user has an undo, via `/gh restore`.
+---------------------------------------------------------------------------
+
+WGS.CLEAR_SNAPSHOT_TTL = 24 * 60 * 60
+
+local SNAPSHOTTED_KEYS = {
+    "loot", "attendance", "encounters", "raidCompResults",
+    "guildBankMoneyChanges", "guildBankTransactions",
+}
+
+function WGS:SnapshotExportedData()
+    local db = self.db.global
+    local snap = { t = self:GetTimestamp() }
+    for _, k in ipairs(SNAPSHOTTED_KEYS) do
+        snap[k] = db[k] or {}
+    end
+    db.lastClearSnapshot = snap
+end
+
+function WGS:HasRestorableSnapshot()
+    local snap = self.db and self.db.global and self.db.global.lastClearSnapshot
+    if not snap or not snap.t or snap.t == 0 then return false end
+    return (self:GetTimestamp() - snap.t) <= self.CLEAR_SNAPSHOT_TTL
+end
+
+function WGS:RestoreClearedData()
+    local db = self.db.global
+    local snap = db.lastClearSnapshot
+    if not snap or not snap.t or snap.t == 0 then
+        self:Print("No snapshot available to restore.")
+        return false
+    end
+    local age = self:GetTimestamp() - snap.t
+    if age > self.CLEAR_SNAPSHOT_TTL then
+        self:Print(string.format("Snapshot expired (%.1fh old; TTL is 24h).", age / 3600))
+        return false
+    end
+    for _, k in ipairs(SNAPSHOTTED_KEYS) do
+        db[k] = snap[k] or {}
+    end
+    self:Print(string.format("Restored data cleared %d minute(s) ago.", math.max(1, math.floor(age / 60))))
+    if self.RefreshMainFrame then self:RefreshMainFrame() end
+    return true
 end
 
 ---------------------------------------------------------------------------
