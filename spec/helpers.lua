@@ -46,6 +46,13 @@ function M.setup()
     _G.GetGuildInfo = function() return nil end
 
     dofile("Core.lua")
+    -- Mirror the .toc load order: Util/* depend on WGS being defined in
+    -- Core.lua, and Sync/* depend on Util/JSON.lua + Util/Base64.lua for
+    -- ToJson + Base64Encode + HashString.
+    dofile("Util/Time.lua")
+    dofile("Util/JSON.lua")
+    dofile("Util/Base64.lua")
+    dofile("Util/Roster.lua")
     dofile("Sync/Encoder.lua")
     dofile("Sync/Decoder.lua")
 

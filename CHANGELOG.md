@@ -10,9 +10,12 @@ All notable changes to GuildHall will be documented in this file.
 - **Auto-populated export on Sync tab open** — the post-raid reminder's "Export Now" button now lands on the Sync tab with the export string already generated, selected and ready for Ctrl+C.
 - **Snapshot-before-clear safety net** — "Clear exported data" now stashes a copy of loot/attendance/encounters/bank into `db.global.lastClearSnapshot` first. Type `/gh restore` within 24h to undo. Protects against the "I cleared but my paste was actually truncated" failure mode.
 
+### Changed
+- **Core.lua slimmed from 587 → 229 LOC** by extracting utilities into a new `Util/` directory: `Util/JSON.lua` (ToJson/FromJson/JSON_NULL), `Util/Base64.lua` (Base64Encode/Base64Decode/HashString), `Util/Time.lua` (GetTimestamp/GetPlayerKey), `Util/Roster.lua` (NormalizeFullName, BuildCharacterLookup, ResolvePlayerForCharacter, GetGuildRosterLookup, IsGuildGroup, CLASS_COLORS). Same methods on the same `WGS` namespace — no caller had to change. Load order via the new `Util/Util.xml` between Core and Sync.
+
 ### Tooling
 - **`.luacheckrc`** — Lua 5.1 static analysis with the WoW global allowlist; the codebase passes clean (0 warnings, 0 errors).
-- **`spec/`** — busted test harness (`spec/helpers.lua` + `spec/sync_spec.lua` + `spec/clear_spec.lua`) covering the envelope v3 round-trip, truncation detection, v2 legacy acceptance, djb2 parity with the web's `djb2Hex`, Base64/JSON codecs, version comparison, and the clear-snapshot lifecycle. 19 tests, all green.
+- **`spec/`** — busted test harness (`spec/helpers.lua` + `spec/sync_spec.lua` + `spec/clear_spec.lua` + `spec/util_spec.lua`) covering the envelope v3 round-trip, truncation detection, v2 legacy acceptance, djb2 parity with the web's `djb2Hex`, Base64/JSON codecs, version comparison, snapshot-restore lifecycle, and character-lookup/identity helpers. 27 tests, all green.
 - **`.github/workflows/ci.yml`** — replaces the old `lint.yml`; runs `luacheck .` and `busted --lua=lua5.1 spec/` on every push and PR.
 
 ### Fixed

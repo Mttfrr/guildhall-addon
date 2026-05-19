@@ -19,6 +19,9 @@ Locales\enUS.lua
 Core.lua
 Config.lua
 
+# Utilities (JSON, Base64, hash, roster, time/identity — used by Sync + Modules + UI)
+Util\Util.xml
+
 # Sync layer
 Sync\Sync.xml
 
