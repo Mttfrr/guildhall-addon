@@ -1,11 +1,15 @@
 ---@type GuildHall
 local WGS = GuildHall
 
+-- Route the boss-notes view to the Events tab — the notes panel now
+-- lives inside the per-event detail (master-detail rework). The Raids
+-- → Boss Notes sub-view is gone. If a specific boss name is requested
+-- we stash it on WGS and PopulateEvents picks it up on next render.
 function WGS:ShowBossNotes(encounterName)
-    self:SelectMainFrameTab(self._ui.TAB_RAIDS, self._ui.RAIDS_SUB_BOSSNOTES)
     if encounterName then
-        C_Timer.After(0.05, function() self:SelectBossInTab(encounterName) end)
+        self._pendingBossNoteSelection = encounterName
     end
+    self:SelectMainFrameTab(self._ui.TAB_EVENTS)
 end
 
 --- Return list of available boss names from imported notes.

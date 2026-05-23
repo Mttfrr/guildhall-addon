@@ -396,6 +396,101 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
     return last
 end
 
+-- Render the Boss Notes section. Boss notes aren't linked to events in
+-- the data model (the platform sends a flat list per guild), so the
+-- section surfaces the full list as a button row + a body font-string
+-- that shows the selected note's strategy/assignments/MRT text. If
+-- the user landed here via `/gh bossnotes <name>`, the requested name
+-- is pre-selected via the frame's _selectedBoss field.
+local function PopulateBossNotesSection(content, anchor, frame, width)
+    local header = BuildSectionHeader(content, anchor, "Boss Notes", width)
+
+    local list = WGS:GetBossNotesList()
+    if #list == 0 then
+        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        empty:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+        empty:SetText("No boss notes imported.")
+        return empty
+    end
+
+    -- Boss name picker: wrapping row of clickable text buttons. More
+    -- compact than the standalone view's dropdown — the detail panel
+    -- already has limited vertical room and we don't want a click +
+    -- open-popup before the body is visible.
+    local pickerBar = CreateFrame("Frame", nil, content)
+    pickerBar:SetPoint("TOPLEFT",  header, "BOTTOMLEFT",  0, -6)
+    pickerBar:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -6)
+    pickerBar:SetHeight(20)
+
+    local selected = frame._selectedBoss
+    if not selected or not list[1] then selected = list[1] end
+    -- Ensure the chosen name actually exists in the current list
+    -- (could be stale after a re-import).
+    local present
+    for _, n in ipairs(list) do if n == selected then present = true; break end end
+    if not present then selected = list[1] end
+    frame._selectedBoss = selected
+
+    local xOff = 0
+    for _, name in ipairs(list) do
+        local btn = CreateFrame("Button", nil, pickerBar)
+        local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", btn, "LEFT", 4, 0)
+        label:SetText(name)
+        btn:SetSize(label:GetStringWidth() + 12, 18)
+        btn:SetPoint("TOPLEFT", pickerBar, "TOPLEFT", xOff, 0)
+        btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+        local hl = btn:GetHighlightTexture()
+        if hl then hl:SetAlpha(0.3) end
+        if name == selected then
+            label:SetTextColor(1.00, 0.82, 0.00)
+            local underline = btn:CreateTexture(nil, "ARTWORK")
+            underline:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 4, 0)
+            underline:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 0)
+            underline:SetHeight(1)
+            underline:SetColorTexture(1.00, 0.82, 0.00)
+        else
+            label:SetTextColor(0.75, 0.75, 0.75)
+        end
+        btn:SetScript("OnClick", function()
+            frame._selectedBoss = name
+            WGS:PopulateEvents(frame)
+        end)
+        xOff = xOff + btn:GetWidth() + 4
+        -- Wrap at the section width
+        if xOff > width - 80 then xOff = 0 end   -- crude wrap; rare case
+    end
+
+    -- Note body. Replicates PopulateBossNotes's section assembly (we
+    -- don't reuse the helper directly because it expects a container
+    -- with .content and .noteText fields, which would force the whole
+    -- detail panel to resize to the note's height).
+    local notes = WGS:GetBossNotes(selected)
+    local mrt   = WGS.GetMRTNote and WGS:GetMRTNote() or nil
+    local sections = {}
+    if notes then
+        if notes.strategy    then sections[#sections + 1] = "|cffffd100Strategy:|r\n"    .. notes.strategy end
+        if notes.assignments then sections[#sections + 1] = "|cffffd100Assignments:|r\n" .. notes.assignments end
+        if notes.notes       then sections[#sections + 1] = "|cffffd100Notes:|r\n"       .. notes.notes end
+        if notes.videoUrl    then sections[#sections + 1] = "|cffffd100Video:|r "        .. notes.videoUrl end
+    end
+    if mrt then sections[#sections + 1] = "|cff66ccffMRT Note:|r\n" .. mrt end
+
+    local body = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    body:SetPoint("TOPLEFT",  pickerBar, "BOTTOMLEFT",  4, -6)
+    body:SetPoint("TOPRIGHT", pickerBar, "BOTTOMRIGHT", 0, -6)
+    body:SetJustifyH("LEFT")
+    body:SetJustifyV("TOP")
+    body:SetWordWrap(true)
+    if #sections > 0 then
+        body:SetText(table.concat(sections, "\n\n"))
+    else
+        body:SetText("|cff888888No notes for: " .. selected .. "|r")
+    end
+
+    return body
+end
+
 ---------------------------------------------------------------------------
 -- Detail panel rendering
 ---------------------------------------------------------------------------
@@ -454,10 +549,12 @@ local function PopulateDetail(frame, ev)
     local roster = BuildEventRoster(ev.id)
     lastAnchor = PopulateRosterSection(content, lastAnchor, roster, sectionW)
 
-    -- Raid Comp section. Anchor isn't reused yet — later phases (Boss
-    -- Notes, Actions) chain off the next section's bottom.
+    -- Raid Comp section
     local comp = FindRaidCompForEvent(ev.id)
-    PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
+    lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
+
+    -- Boss Notes section
+    PopulateBossNotesSection(content, lastAnchor, frame, sectionW)
 
     -- Grow the scroll content so the bottom of the last section is
     -- reachable. We can't introspect every child's offset cleanly, so
@@ -478,6 +575,15 @@ local function PopulateEvents(frame)
     -- used), the rail/detail fields won't exist. Bail rather than
     -- error out.
     if not frame.railContent or not frame.detailContent then return end
+
+    -- Cross-module hand-off: /gh bossnotes <name> stashes the boss
+    -- name on WGS before switching to this tab. Adopt it once on
+    -- render and clear so subsequent refreshes don't keep re-applying
+    -- a stale selection.
+    if WGS._pendingBossNoteSelection then
+        frame._selectedBoss = WGS._pendingBossNoteSelection
+        WGS._pendingBossNoteSelection = nil
+    end
 
     local events = WGS.db.global.events or {}
 
