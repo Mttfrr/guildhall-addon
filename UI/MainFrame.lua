@@ -9,6 +9,7 @@ local ui = WGS._ui
 
 -- Tab indices used by the shell. Other tab IDs come through
 -- ui.TAB_* directly at their lone call sites in SelectMainFrameTab.
+local TAB_EVENTS = ui.TAB_EVENTS
 local TAB_TEAMS  = ui.TAB_TEAMS
 local TAB_SYNC   = ui.TAB_SYNC
 local TAB_COUNT  = ui.TAB_COUNT
@@ -30,7 +31,7 @@ local function SelectTab(frame, tabIndex)
 end
 
 local function RefreshCurrentTab(frame)
-    local tab = frame.selectedTab or TAB_TEAMS
+    local tab = frame.selectedTab or TAB_EVENTS
     local entry = ui.tabs[tab]
     if entry and entry.refresh then
         entry.refresh(frame.tabContents[tab])
@@ -118,10 +119,11 @@ local function CreateMainFrame()
         end
     end
 
-    -- Show the Teams tab by default — it's the first thing officers /
-    -- raiders care about (who's online, what's the comp).
-    SelectTab(f, TAB_TEAMS)
-    f.tabContents[TAB_TEAMS]:Show()
+    -- Show the Events tab by default — after the event-centric rework
+    -- it's the officer's daily driver (today's raid + signups + comp +
+    -- boss notes all live there). Teams moves to position 2.
+    SelectTab(f, TAB_EVENTS)
+    f.tabContents[TAB_EVENTS]:Show()
 
     f:SetScript("OnShow", function(self)
         RefreshCurrentTab(self)

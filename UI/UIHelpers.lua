@@ -11,18 +11,20 @@ local ui = WGS._ui
 -- Tab + sub-view constants
 ---------------------------------------------------------------------------
 
--- Tab order mirrors the platform layout: roster → bank → calendar →
--- raid tooling → sync settings. Dashboard tab was removed (its
--- summary tiles weren't pulling their weight) and Loot folded into
--- Bank (loot history is capture-log data, same as transactions)
--- and Teams (wishlists are per-player data).
-ui.TAB_TEAMS  = 1
-ui.TAB_BANK   = 2
-ui.TAB_EVENTS = 3
+-- Tab order is officer-flow-first: Events (today's raid) → Teams
+-- (rosters / readiness) → Bank → Raids → Sync (paste in/out). Dashboard
+-- tab was removed (its summary tiles weren't pulling their weight) and
+-- Loot folded into Bank (loot history is capture-log data, same as
+-- transactions) and Teams (wishlists are per-player data). Bank+Raids
+-- are scheduled to collapse into a single "Logs" tab in a follow-up
+-- commit; for now they're just reordered.
+ui.TAB_EVENTS = 1
+ui.TAB_TEAMS  = 2
+ui.TAB_BANK   = 3
 ui.TAB_RAIDS  = 4
 ui.TAB_SYNC   = 5
 ui.TAB_COUNT  = 5
-ui.TAB_NAMES  = { "Teams", "Bank", "Events", "Raids", "Import/Export" }
+ui.TAB_NAMES  = { "Events", "Teams", "Bank", "Raids", "Sync" }
 
 ui.TEAMS_SUB_TEAMS     = 1
 ui.TEAMS_SUB_CHECK     = 2
