@@ -19,7 +19,6 @@ local dbDefaults = {
         showLootDistHelper = true,
         showReadinessCheck = true,
         showBossNotes = true,
-        showWebMOTD = true,
         -- nil = "use officer default" (on for officers, off otherwise).
         -- Explicit true/false from the user takes precedence.
         peerSyncEnabled = nil,
@@ -43,7 +42,6 @@ local dbDefaults = {
         characterDetails = {},  -- imported per-character info: { charName → { class, spec, ilvl, missingEnchants, missingGems } }
         signups = {},           -- imported event signups: [{eventId, characterName, class, status}]
         targetIlvl = 0,
-        webMOTD = "",
         lastExport = 0,
         lastImport = 0,
         exportHistory = {},
@@ -128,6 +126,12 @@ function WGS:SlashCommand(input)
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_CHECK)
     elseif cmd == "bank" then
         self:SelectMainFrameTab(ui.TAB_BANK)
+    elseif cmd == "sync" or cmd == "catchup" then
+        -- Manual catch-up. Useful when you join a raid late and the
+        -- automatic GROUP_ROSTER_UPDATE debounce hasn't fired yet, or
+        -- when you suspect a peer's data drifted. Bypasses the 60s
+        -- debounce so it always does something visible.
+        self:PeerSync_ManualCatchup()
     elseif cmd == "restore" then
         self:RestoreClearedData()
     else

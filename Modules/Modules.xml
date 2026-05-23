@@ -3,7 +3,6 @@
     <Script file="Loot.lua"/>
     <Script file="GuildBank.lua"/>
     <Script file="Import.lua"/>
-    <Script file="MOTD.lua"/>
     <Script file="EventScheduler.lua"/>
     <Script file="MRTNotes.lua"/>
     <Script file="PeerSync.lua"/>

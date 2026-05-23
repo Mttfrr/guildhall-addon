@@ -4,6 +4,15 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Removed
+- **Web MOTD feature.** The platform's "Web MOTD" was a separate message-of-the-day field officers could set on guildhall.run, surfaced via a Chat print on import + an opt-in second print on `PLAYER_ENTERING_WORLD` (with a 5s post-login delay). In practice it duplicated WoW's own guild MOTD — which the client already prints on login — and added another auto-chat line to disable. Removed: `Modules/MOTD.lua`, the `showWebMOTD` profile toggle, the `webMOTD` global DB field, the `importMOTD` step in `ProcessImport`, and the per-action clearing in the Data Management buttons. The platform still ships `data.motd` in the export (no addon coordination needed — the field is just ignored now).
+
+### Added
+- **`/gh sync` slash command — manual officer-sync catch-up.** The peer-sync flow auto-probes on `GROUP_ROSTER_UPDATE` after a raid join, debounced 60s. The new `/gh sync` (alias `/gh catchup`) bypasses the debounce and forces a probe immediately — useful when you join late, suspect a peer's data drifted, or want to verify the channel is working. Prints "Officer sync: probing peers on RAID…" so the operator sees something happened. Officer-rank + channel requirements are unchanged; failures print a clear reason instead of going silent.
+
+### Changed
+- **Events tab is now a sortable table.** Replaces the old date/title/description prose-row layout with the same column-table pattern used on the Teams tab. Columns: Date · Time | Title | Type | Team | Signups | Status. Signups shows committed vs tentative as `18 / 4 ?` with a colour bucket (≥20 green, ≥14 orange, below red — rough 20-raider mythic rule). Status pill reads TODAY / SOON (this week) / UPCOMING / PAST based on the parsed start timestamp. Click any header to sort; default is date asc (next event first). Row hover surfaces the full description + signup breakdown in a tooltip.
+
 ### Changed
 - **Import no longer hitches WoW on paste.** The Import flow used to run all 13 per-section importers — plus the wishlist tooltip-cache preload (potentially 200-500 `C_Item.RequestLoadItemDataByID` calls back-to-back) — in one frame tick. For a 100-character guild that produced a visible stutter every time an officer pasted the export string. Two changes: (1) `WGS:ProcessImport` now streams importers one-per-frame via `C_Timer.After(0, ...)` when the scheduler is available, and (2) the wishlist preload drains in batches of 50 items per frame instead of firing all of them at once. Total wall-clock time is unchanged but per-frame work stays small enough that the client doesn't visibly hitch. Each importer also runs under `pcall` now — a malformed section (server bug, partial paste) fires `WGS_INTERNAL_ERROR` with `source = "Import.step.<n>"` and the rest of the import continues against `db.global`. The `WGS_IMPORT_APPLIED` event still fires exactly once at the tail of the chain so subscribers see a fully-consistent db. Tests without `C_Timer` continue to run synchronously, preserving the legacy contract that `ProcessImport` is observable inline.
 

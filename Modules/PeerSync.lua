@@ -304,7 +304,7 @@ end
 WGS._PeerSync_ProcessCatchupOffers = processCatchupOffers   -- for tests
 
 -- Public trigger. Called from GROUP_ROSTER_UPDATE on entering a raid,
--- or directly via /gh catchup for manual recovery. Debounced so a
+-- or directly via /gh sync for manual recovery. Debounced so a
 -- raid-frame storm can't flood the channel.
 function WGS:PeerSync_Catchup()
     if not self:IsGuildOfficer() then return end
@@ -321,6 +321,26 @@ function WGS:PeerSync_Catchup()
     end
     -- Without a scheduler (test env), the caller drives via
     -- WGS._PeerSync_ProcessCatchupOffers when they're ready.
+end
+
+-- /gh sync entry point. Same as PeerSync_Catchup but bypasses the
+-- 60s debounce — when an officer hits the command, they want
+-- something to happen now. Returns a reason string when the request
+-- is dropped (no officer rank, no channel) so the slash handler can
+-- print it.
+function WGS:PeerSync_ManualCatchup()
+    if not self:IsGuildOfficer() then
+        self:Print("Officer sync: needs guild officer rank (officer, GM, or assistant GM).")
+        return
+    end
+    local channel = self:PeerSync_PreferredChannel()
+    if not channel then
+        self:Print("Officer sync: no eligible channel (need raid, party, or guild membership).")
+        return
+    end
+    lastProbeAt = 0   -- force-bypass debounce
+    self:Print("Officer sync: probing peers on " .. channel .. "…")
+    self:PeerSync_Catchup()
 end
 
 -- Trust gate + dispatch for a single received chunk. Called by the

@@ -84,15 +84,6 @@ local options = {
                     get = function() return WGS.db.profile.showBossNotes end,
                     set = function(_, val) WGS.db.profile.showBossNotes = val end,
                 },
-                showWebMOTD = {
-                    order = 24,
-                    type = "toggle",
-                    name = "Show Web MOTD on Login",
-                    desc = "Display the guild's web platform message of the day in chat when you log in.",
-                    width = "full",
-                    get = function() return WGS.db.profile.showWebMOTD end,
-                    set = function(_, val) WGS.db.profile.showWebMOTD = val end,
-                },
                 headerPeerSync = {
                     order = 28,
                     type = "header",
@@ -195,7 +186,6 @@ local options = {
                         WGS.db.global.gearAudit = {}
                         WGS.db.global.characters = {}
                         WGS.db.global.characterLookup = {}
-                        WGS.db.global.webMOTD = ""
                         WGS.db.global.targetIlvl = 0
                         WGS:Print("Imported web data cleared.")
                     end,
@@ -223,7 +213,6 @@ local options = {
                         WGS.db.global.gearAudit = {}
                         WGS.db.global.characters = {}
                         WGS.db.global.characterLookup = {}
-                        WGS.db.global.webMOTD = ""
                         WGS.db.global.targetIlvl = 0
                         WGS:Print("All data cleared.")
                     end,

@@ -216,15 +216,6 @@ local function importInviteCode(self, data)
     return 0
 end
 
-local function importMOTD(self, data)
-    if not data.motd then return 0 end
-    self.db.global.webMOTD = data.motd
-    if data.motd ~= "" then
-        self:Print("|cffffd100[Guild Web MOTD]|r " .. data.motd)
-    end
-    return 0
-end
-
 -- Order matters: characters must come first so BuildCharacterLookup
 -- has the canonical player map before any team-member-resolution
 -- consumer runs. Otherwise it's the order the user sees diagnostic
@@ -242,7 +233,6 @@ local IMPORTERS = {
     importTargetIlvl,
     importMinAddonVersion,
     importInviteCode,
-    importMOTD,
 }
 
 ---------------------------------------------------------------------------

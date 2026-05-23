@@ -117,7 +117,7 @@ function M.setup()
             guildBankMoneyChanges = {}, guildBankTransactions = {},
             characters = {}, characterLookup = {}, teams = {},
             wishlists = {}, bossNotes = {}, raidComps = {}, events = {},
-            gearAudit = {}, characterDetails = {}, signups = {}, targetIlvl = 0, webMOTD = "",
+            gearAudit = {}, characterDetails = {}, signups = {}, targetIlvl = 0,
             lastExport = 0, lastImport = 0, lastKnownGold = 0,
             exportHistory = {},
             lastClearSnapshot = { t = 0 },
