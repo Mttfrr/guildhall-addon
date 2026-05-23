@@ -314,18 +314,227 @@ local function PopulateBank(sv)
 end
 
 ---------------------------------------------------------------------------
--- Attendance sub-view (NEW; lands in the next commit — Phase 6)
+-- Attendance sub-view
+--
+-- Lists captured raid sessions from db.global.attendance, reverse
+-- chronological (newest first). Each row: date+time · team name ·
+-- duration · member count · export status pill. Clicking the row
+-- expands it inline to show the member list with class colours and a
+-- T/H/D role tally.
+--
+-- "Exported" is a heuristic: session.endedAt <= db.global.lastExport.
+-- The platform is the source of truth; a wrong "✓" just nudges the
+-- officer to re-export, which is harmless.
 ---------------------------------------------------------------------------
 
+local function FormatDuration(startedAt, endedAt)
+    if not startedAt or not endedAt or endedAt < startedAt then return "?" end
+    local secs = endedAt - startedAt
+    local h = math.floor(secs / 3600)
+    local m = math.floor((secs % 3600) / 60)
+    if h > 0 then return string.format("%dh %02dm", h, m) end
+    return string.format("%dm", m)
+end
+
+local function NormalizeRole(role)
+    if not role then return "DPS" end
+    if role == "TANK" then return "TANK" end
+    if role == "HEALER" then return "HEALER" end
+    -- "DAMAGER" (live UnitGroupRolesAssigned) and "DPS" (import path)
+    -- both bucket as damage; "NONE" / nil / anything else also defaults
+    -- so the tally doesn't drop members on a stale role.
+    return "DPS"
+end
+
 local function BuildAttendanceSubView(sv)
-    sv.placeholder = sv:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    sv.placeholder:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -5)
-    sv.placeholder:SetText("Attendance log — lands in the next commit.")
+    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, 0)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(660)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+
+    sv.scrollFrame = sf
+    sv.content = content
+    -- _expanded[i] = true when session at sorted index i has its
+    -- member list expanded. Per-session-index rather than per-session-
+    -- object so a re-render survives a re-sort.
+    sv._expanded = {}
 end
 
 local function PopulateAttendance(sv)
-    -- Placeholder; real implementation in Phase 6.
     if not sv or not sv:IsVisible() then return end
+    ClearContainer(sv.content)
+
+    local sessions = WGS.db.global.attendance or {}
+    local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
+    local lastExport = WGS.db.global.lastExport or 0
+
+    -- Reverse chronological (newest first). Filter by team if the
+    -- picker is set; nil session.teamId never matches a filter.
+    local rows = {}
+    for i = #sessions, 1, -1 do
+        local s = sessions[i]
+        if not currentTeamId or s.teamId == currentTeamId then
+            rows[#rows + 1] = { i = i, s = s }
+        end
+    end
+
+    if #rows == 0 then
+        local noData = sv.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 5, -5)
+        if currentTeamId then
+            noData:SetText("No attendance sessions for the picked team.")
+        else
+            noData:SetText("No attendance sessions captured yet.")
+        end
+        sv.content:SetHeight(30)
+        return
+    end
+
+    local cw = 660
+    local ROW_H = 22
+    local yOff = 0
+
+    for _, row in ipairs(rows) do
+        local s = row.s
+        local sessionIdx = row.i
+        local expanded = sv._expanded[sessionIdx] == true
+
+        -- Outer row: clickable to toggle expansion. Sized once now,
+        -- grown below when the member list is rendered.
+        local outer = CreateFrame("Button", nil, sv.content)
+        outer:SetSize(cw, ROW_H)
+        outer:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 0, yOff)
+        outer:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+        local hl = outer:GetHighlightTexture()
+        if hl then hl:SetAlpha(0.25) end
+
+        local bg = outer:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(outer)
+        bg:SetColorTexture(1, 1, 1, 0.025)
+
+        -- Disclosure triangle
+        local disclosure = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        disclosure:SetPoint("LEFT", outer, "LEFT", 5, 0)
+        disclosure:SetText(expanded and "|cffffd100v|r" or "|cffaaaaaa>|r")
+
+        -- Date + time
+        local dateText = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        dateText:SetPoint("LEFT", disclosure, "RIGHT", 6, 0)
+        dateText:SetWidth(110)
+        dateText:SetJustifyH("LEFT")
+        dateText:SetText(date("%m/%d %H:%M", s.startedAt or 0))
+
+        -- Team / event tag
+        local tagText = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        tagText:SetPoint("LEFT", dateText, "RIGHT", 4, 0)
+        tagText:SetWidth(220)
+        tagText:SetJustifyH("LEFT")
+        local tag = s.teamName or "|cff888888untagged|r"
+        if s.eventTitle and s.eventTitle ~= "" then
+            tag = tag .. " |cff666666·|r |cffaaaaaa" .. s.eventTitle .. "|r"
+        end
+        tagText:SetText(tag)
+
+        -- Duration
+        local durText = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        durText:SetPoint("LEFT", tagText, "RIGHT", 4, 0)
+        durText:SetWidth(70)
+        durText:SetJustifyH("RIGHT")
+        durText:SetText("|cffcccccc" .. FormatDuration(s.startedAt, s.endedAt) .. "|r")
+
+        -- Member count
+        local members = s.memberList or {}
+        local countText = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        countText:SetPoint("LEFT", durText, "RIGHT", 4, 0)
+        countText:SetWidth(60)
+        countText:SetJustifyH("RIGHT")
+        countText:SetText("|cffaaaaaa" .. #members .. "|r")
+
+        -- Export status pill
+        local exported = (s.endedAt or 0) > 0 and (s.endedAt or 0) <= lastExport
+        local pillText = outer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pillText:SetPoint("RIGHT", outer, "RIGHT", -5, 0)
+        pillText:SetWidth(110)
+        pillText:SetJustifyH("RIGHT")
+        if exported then
+            pillText:SetText("|cff00ff00exported|r")
+        else
+            pillText:SetText("|cffffaa00unexported|r")
+        end
+
+        outer:SetScript("OnClick", function()
+            sv._expanded[sessionIdx] = not expanded
+            PopulateAttendance(sv)
+        end)
+
+        yOff = yOff - ROW_H
+
+        -- Expanded body: role tally + member list. Rendered when the
+        -- row was last toggled open.
+        if expanded then
+            -- Role tally
+            local tally = { TANK = 0, HEALER = 0, DPS = 0 }
+            for _, m in ipairs(members) do
+                local r = NormalizeRole(m.role)
+                tally[r] = (tally[r] or 0) + 1
+            end
+
+            local roleBar = CreateFrame("Frame", nil, sv.content)
+            roleBar:SetSize(cw, 18)
+            roleBar:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 0, yOff)
+            local tallyText = roleBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            tallyText:SetPoint("LEFT", roleBar, "LEFT", 26, 0)
+            tallyText:SetText(string.format(
+                "|cff5599ff%dT|r  |cff00ff00%dH|r  |cffff4444%dD|r  |cff888888·|r  %s  |cff666666·|r  |cffaaaaaastarted by %s|r",
+                tally.TANK, tally.HEALER, tally.DPS,
+                s.instanceName or "?",
+                (s.startedBy or "?"):match("^([^%-]+)") or s.startedBy or "?"))
+
+            yOff = yOff - 18
+
+            -- Member list. Class-coloured, role-grouped (Tanks → Healers
+            -- → DPS) so the body reads as a comp snapshot.
+            local sorted = {}
+            for _, m in ipairs(members) do sorted[#sorted + 1] = m end
+            local roleOrder = { TANK = 1, HEALER = 2, DPS = 3 }
+            table.sort(sorted, function(a, b)
+                local ra = roleOrder[NormalizeRole(a.role)] or 4
+                local rb = roleOrder[NormalizeRole(b.role)] or 4
+                if ra ~= rb then return ra < rb end
+                return ((a.name or ""):lower()) < ((b.name or ""):lower())
+            end)
+
+            -- 3-column grid
+            local COLS = 3
+            local COL_W = math.floor(cw / COLS)
+            local memberRowH = 16
+            local i = 0
+            local maxRow = 0
+            for _, m in ipairs(sorted) do
+                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local classFile = WGS:NormalizeClassFile(m.class or "")
+                local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
+
+                local fs = sv.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                local col = i % COLS
+                local rowIdx = math.floor(i / COLS)
+                if rowIdx > maxRow then maxRow = rowIdx end
+                fs:SetPoint("TOPLEFT", sv.content, "TOPLEFT",
+                    26 + col * COL_W, yOff - rowIdx * memberRowH)
+                fs:SetWidth(COL_W - 8)
+                fs:SetJustifyH("LEFT")
+                fs:SetText("|c" .. colorHex .. short .. "|r")
+                i = i + 1
+            end
+
+            yOff = yOff - (maxRow + 1) * memberRowH - 6
+        end
+    end
+
+    sv.content:SetHeight(math.abs(yOff) + 10)
 end
 
 ---------------------------------------------------------------------------

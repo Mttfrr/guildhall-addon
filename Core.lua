@@ -101,9 +101,13 @@ function WGS:SlashCommand(input)
     elseif cmd == "export" or cmd == "import" then
         self:SelectMainFrameTab(ui.TAB_SYNC)
     elseif cmd == "attendance" then
-        -- Capture is auto-started on raid entry now; /gh attendance is
-        -- a status read-out only.
+        -- Capture is auto-started on raid entry now. `/gh attendance`
+        -- prints the live status (whether we're recording, which
+        -- team/event) AND opens the Logs → Attendance log so the
+        -- officer can scan past sessions. Print + show together avoids
+        -- a separate "/gh attendance log" alias.
         self:AttendanceStatus()
+        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_ATTENDANCE)
     elseif cmd == "config" or cmd == "options" then
         self:OpenConfig()
     elseif cmd == "teams" then
