@@ -462,7 +462,15 @@ local function PopulateTeams(tab)
         end
         yOff = yOff - TEAM_GAP
     end
-    tab.content:SetHeight(math.abs(yOff) + 10)
+    -- Refresh the scroll child geometry. SetHeight alone doesn't
+    -- always wake the UIPanelScrollFrameTemplate scrollbar — without
+    -- UpdateScrollChildRect() the bar stays hidden and only the
+    -- top 1-2 rows (whatever fits in the unscrolled viewport)
+    -- render visibly. SetSize re-asserts both dimensions defensively.
+    tab.content:SetSize(CONTENT_W, math.abs(yOff) + 10)
+    if tab.scrollFrame and tab.scrollFrame.UpdateScrollChildRect then
+        tab.scrollFrame:UpdateScrollChildRect()
+    end
 end
 
 ---------------------------------------------------------------------------
