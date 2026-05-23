@@ -92,39 +92,6 @@ local function GetCharacterDetails(charName)
 end
 
 -- Build a (segmented, colour-coded) detail line for the main row.
--- Format: "i620 | enchants ✓ | gems ✓" — segments are coloured:
---   green: clean / at-target
---   orange: below target or 1-3 missing
---   red: 4+ missing
--- Returns nil if there's no characterDetails entry — caller hides the line.
-local function BuildDetailLine(charName)
-    local info = GetCharacterDetails(charName)
-    if not info then return nil end
-
-    local ilvl   = info.ilvl or 0
-    local me     = info.missingEnchants or 0
-    local mg     = info.missingGems or 0
-    local target = WGS.db.global.targetIlvl or 0
-    local belowTarget = target > 0 and ilvl > 0 and ilvl < target
-
-    local segs = {}
-    if ilvl > 0 then
-        local color = belowTarget and "ffff8800" or "ff00ff00"
-        local label = belowTarget and string.format("i%d / %d", ilvl, target) or ("i" .. ilvl)
-        segs[#segs + 1] = "|c" .. color .. label .. "|r"
-    end
-
-    local enchantsColor = me == 0 and "ff00ff00" or (me >= 4 and "ffff4444" or "ffff8800")
-    local enchantsText  = me == 0 and "enchants \226\156\147" or ("enchants " .. me .. " missing")
-    segs[#segs + 1] = "|c" .. enchantsColor .. enchantsText .. "|r"
-
-    local gemsColor = mg == 0 and "ff00ff00" or (mg >= 4 and "ffff4444" or "ffff8800")
-    local gemsText  = mg == 0 and "gems \226\156\147" or ("gems " .. mg .. " missing")
-    segs[#segs + 1] = "|c" .. gemsColor .. gemsText .. "|r"
-
-    return table.concat(segs, "  |cff555555||r  ")
-end
-
 -- Multi-line tooltip body for an alt: class/spec + ilvl + missing counts.
 -- Each line is "|cAARRGGBBtext|r" ready to feed into GameTooltip:AddLine.
 local function BuildAltTooltipLines(charName, roster)
@@ -180,23 +147,6 @@ local function BuildAltTooltipLines(charName, roster)
     return lines
 end
 
--- Mount a tooltip handler on a frame so hovering it shows the alt's
--- full gear breakdown. EnableMouse must already be on; we attach
--- OnEnter/OnLeave that own the GameTooltip life cycle.
-local function AttachAltTooltip(frame, charName, roster)
-    frame:EnableMouse(true)
-    frame._charName = charName
-    frame:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        local lines = BuildAltTooltipLines(self._charName, roster)
-        for _, line in ipairs(lines) do
-            GameTooltip:AddLine(line)
-        end
-        GameTooltip:Show()
-    end)
-    frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
-end
-
 ---------------------------------------------------------------------------
 -- Teams sub-view
 ---------------------------------------------------------------------------
@@ -210,116 +160,194 @@ local function BuildTeamsSubView(sv)
     sv.content = content
 end
 
--- Layout constants. Each team member is rendered as TWO stacked
--- rows: a verbose MAIN row with full gear info always visible, and
--- (when alts exist) an indented ALT row with compact icon+name chips.
--- Hover an alt chip to see its full gear breakdown in a tooltip.
-local CONTENT_W      = 660
-local MAIN_ROW_H     = 22
-local ALT_ROW_H      = 18
-local MAIN_INDENT    = 8
-local ALT_INDENT     = 30   -- indented under the main's name
-local ALT_CHIP_W     = 110  -- icon (14) + name (~90) per alt
-local ALT_CHIP_GAP   = 4
-local TEAM_GAP       = 10
-local MEMBER_GAP     = 4
+---------------------------------------------------------------------------
+-- Table layout
+--
+-- One row per team member (mains only). Columns:
+--   Character  iLvl  Enchants  Gems  Alts
+-- Click a column header to sort by it. Hover the Alts cell to see the
+-- alt list with per-alt gear breakdown in a tooltip.
+--
+-- Numeric cells render as plain numbers (e.g. "0", "2") coloured by
+-- severity rather than ✓ / ✗ glyphs — the in-game default font misses
+-- a lot of Unicode and we'd rather use what's guaranteed to render.
+---------------------------------------------------------------------------
 
-local function BuildMainRow(parent, charName, roster, yOff)
+local CONTENT_W   = 660
+local HEADER_H    = 22
+local ROW_H       = 20
+local TEAM_GAP    = 12
+
+-- Column geometry. Each cell anchors LEFT at COL_X[k]; numeric cells
+-- right-align their text against COL_X[k+1] - 8 so the digits line up.
+local COL = {
+    NAME = { x = 10,  w = 240, label = "Character" },
+    ILVL = { x = 250, w = 70,  label = "iLvl"      },
+    ENCH = { x = 320, w = 100, label = "Enchants"  },
+    GEMS = { x = 420, w = 100, label = "Gems"      },
+    ALTS = { x = 520, w = 120, label = "Alts"      },
+}
+
+-- Default sort = name asc. Stored per-tab on `tab._sortKey` / `_sortDir`.
+local DEFAULT_SORT_KEY = "name"
+local DEFAULT_SORT_DIR = "asc"
+
+local SORT_ARROW_TEX = "Interface\\Buttons\\UI-SortArrow"
+
+-- One sortable column header. clickFn(key) is called when the button
+-- is clicked. The arrow indicator is added/oriented externally based
+-- on the tab's current sort state.
+local function BuildHeaderCell(parent, col, key, x, sortKey, sortDir, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(col.w, HEADER_H)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, 0)
+
+    -- Highlight on hover so the column reads as clickable.
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+    local hl = btn:GetHighlightTexture()
+    if hl then hl:SetAlpha(0.3) end
+
+    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("LEFT", btn, "LEFT", 6, 0)
+    label:SetText(col.label)
+    if sortKey == key then
+        label:SetTextColor(1.00, 0.82, 0.00)  -- gold when active
+    else
+        label:SetTextColor(0.85, 0.85, 0.85)
+    end
+
+    if sortKey == key then
+        local arrow = btn:CreateTexture(nil, "OVERLAY")
+        arrow:SetSize(10, 10)
+        arrow:SetPoint("LEFT", label, "RIGHT", 4, 0)
+        arrow:SetTexture(SORT_ARROW_TEX)
+        if sortDir == "asc" then
+            -- Default texcoords point down (desc). Flip for asc.
+            arrow:SetTexCoord(0, 1, 1, 0)
+        end
+    end
+
+    btn:SetScript("OnClick", function() onClick(key) end)
+    return btn
+end
+
+-- Numeric cell: right-aligned text with severity colour.
+--   0 → green, 1-3 → orange, 4+ → red. Below-target ilvl follows the
+--   same scale (0 issues; ilvl < target counts as 1).
+local function BuildNumericCell(parent, col, x, value, isProblemWhenAbove0, yOff)
+    local cell = CreateFrame("Frame", nil, parent)
+    cell:SetSize(col.w, ROW_H)
+    cell:SetPoint("TOPLEFT", parent, "TOPLEFT", x, yOff)
+
+    local text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("RIGHT", cell, "RIGHT", -10, 0)
+
+    if isProblemWhenAbove0 then
+        local n = value or 0
+        local color
+        if n == 0       then color = "ff00ff00"
+        elseif n >= 4   then color = "ffff4444"
+        else                 color = "ffff8800" end
+        text:SetText("|c" .. color .. n .. "|r")
+    else
+        -- ilvl-style: green at-target, orange below-target.
+        local target = WGS.db.global.targetIlvl or 0
+        if not value or value == 0 then
+            text:SetText("|cff666666\226\128\148|r")  -- em dash
+        elseif target > 0 and value < target then
+            text:SetText("|cffff8800" .. value .. "|r")
+        else
+            text:SetText("|cff00ff00" .. value .. "|r")
+        end
+    end
+    return cell
+end
+
+-- Build one data row.
+local function BuildDataRow(parent, member, roster, yOff, evenStripe)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(CONTENT_W, MAIN_ROW_H)
+    row:SetSize(CONTENT_W, ROW_H)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOff)
 
-    local short    = charName:match("^([^%-]+)") or charName
-    local class    = ResolveClass(charName, roster)
+    -- Optional zebra-stripe background to make the columns scan easier.
+    if evenStripe then
+        local bg = row:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(row)
+        bg:SetColorTexture(1, 1, 1, 0.025)
+    end
+
+    -- Character cell: online dot + class icon + class-coloured name
+    local short    = member.short
+    local class    = ResolveClass(member.name, roster)
     local classFile = (class or ""):upper()
     local colorHex = WGS.CLASS_COLORS[classFile] or WGS.CLASS_COLORS[class] or "ffffffff"
     local gi       = roster[short]
 
-    -- Online dot
-    local dot = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dot:SetPoint("LEFT", row, "LEFT", MAIN_INDENT, 0)
+    local nameCell = CreateFrame("Frame", nil, row)
+    nameCell:SetSize(COL.NAME.w, ROW_H)
+    nameCell:SetPoint("TOPLEFT", row, "TOPLEFT", COL.NAME.x, 0)
+
+    local dot = nameCell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dot:SetPoint("LEFT", nameCell, "LEFT", 0, 0)
     if gi then
         dot:SetText(gi.online and "|cff00ff00\194\183|r" or "|cff555555\194\183|r")
     else
         dot:SetText("|cffff4444\194\183|r")
     end
 
-    -- Class icon
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(18, 18)
+    local icon = nameCell:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(16, 16)
     icon:SetPoint("LEFT", dot, "RIGHT", 4, 0)
     ApplyClassIcon(icon, classFile, colorHex)
 
-    -- Name (class-coloured)
-    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local nameText = nameCell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     nameText:SetPoint("LEFT", icon, "RIGHT", 6, 0)
     nameText:SetText("|c" .. colorHex .. short .. "|r")
 
-    -- Detail line (right-aligned): "i620 | enchants ✓ | gems ✓"
-    local detail = BuildDetailLine(charName)
-    if detail then
-        local detailText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        detailText:SetPoint("RIGHT", row, "RIGHT", -10, 0)
-        detailText:SetText(detail)
+    -- Numeric cells
+    BuildNumericCell(row, COL.ILVL, COL.ILVL.x, member.ilvl, false, 0)
+    BuildNumericCell(row, COL.ENCH, COL.ENCH.x, member.missingEnchants, true, 0)
+    BuildNumericCell(row, COL.GEMS, COL.GEMS.x, member.missingGems, true, 0)
+
+    -- Alts cell: count + hover-tooltip with per-alt breakdown.
+    local altsCell = CreateFrame("Frame", nil, row)
+    altsCell:SetSize(COL.ALTS.w, ROW_H)
+    altsCell:SetPoint("TOPLEFT", row, "TOPLEFT", COL.ALTS.x, 0)
+
+    local altsText = altsCell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    altsText:SetPoint("RIGHT", altsCell, "RIGHT", -10, 0)
+    if member.altCount > 0 then
+        altsText:SetText("|cffffd100" .. member.altCount .. "|r")
+        -- Highlight + tooltip on hover
+        altsCell:EnableMouse(true)
+        altsCell:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+        local hl = altsCell:GetHighlightTexture()
+        if hl then hl:SetAlpha(0.3) end
+        altsCell:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("|cffffd100" .. short .. "'s alts|r")
+            for _, alt in ipairs(member.alts) do
+                local lines = BuildAltTooltipLines(alt, roster)
+                for _, line in ipairs(lines) do GameTooltip:AddLine(line) end
+                GameTooltip:AddLine(" ")  -- blank separator between alts
+            end
+            GameTooltip:Show()
+        end)
+        altsCell:SetScript("OnLeave", function() GameTooltip:Hide() end)
     else
-        local noData = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noData:SetPoint("RIGHT", row, "RIGHT", -10, 0)
-        noData:SetText("|cff666666no gear data|r")
+        altsText:SetText("|cff555555\226\128\148|r")  -- em dash
     end
-
-    return row
 end
 
-local function BuildAltsRow(parent, altList, roster, yOff)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(CONTENT_W, ALT_ROW_H)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOff)
-
-    -- "└" continuation glyph at the indent stop, so the alt strip
-    -- reads as a child branch of the main above it.
-    local glyph = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    glyph:SetPoint("LEFT", row, "LEFT", ALT_INDENT - 12, 1)
-    glyph:SetText("|cff555555\226\148\148|r")  -- └
-
-    local x = ALT_INDENT
-    -- Fit as many alts inline as space allows; overflow → "+N more"
-    local maxChips = math.floor((CONTENT_W - ALT_INDENT - 50) / (ALT_CHIP_W + ALT_CHIP_GAP))
-    local visible  = math.min(#altList, maxChips)
-
-    for i = 1, visible do
-        local alt = altList[i]
-        local short = alt:match("^([^%-]+)") or alt
-        local class = ResolveClass(alt, roster)
-        local classFile = (class or ""):upper()
-        local colorHex = WGS.CLASS_COLORS[classFile] or WGS.CLASS_COLORS[class] or "ffffffff"
-
-        local chip = CreateFrame("Frame", nil, row)
-        chip:SetSize(ALT_CHIP_W, ALT_ROW_H)
-        chip:SetPoint("LEFT", row, "LEFT", x, 0)
-
-        local icon = chip:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(14, 14)
-        icon:SetPoint("LEFT", chip, "LEFT", 0, 0)
-        ApplyClassIcon(icon, classFile, colorHex)
-
-        local nameText = chip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        nameText:SetPoint("LEFT", icon, "RIGHT", 4, 0)
-        nameText:SetText("|c" .. colorHex .. short .. "|r")
-
-        -- Per-alt tooltip on hover — shows full gear breakdown.
-        AttachAltTooltip(chip, alt, roster)
-
-        x = x + ALT_CHIP_W + ALT_CHIP_GAP
-    end
-
-    if #altList > visible then
-        local more = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        more:SetPoint("LEFT", row, "LEFT", x, 0)
-        more:SetText("|cff888888+" .. (#altList - visible) .. " more|r")
-    end
-
-    return row
-end
+-- Sort comparators per key. Each returns true if `a` should come
+-- before `b`. asc/desc is applied by swapping arguments at the call.
+local SORT_COMPARATORS = {
+    name    = function(a, b) return a.short:lower() < b.short:lower() end,
+    ilvl    = function(a, b) return (a.ilvl or 0) < (b.ilvl or 0) end,
+    enchants = function(a, b) return (a.missingEnchants or 0) < (b.missingEnchants or 0) end,
+    gems    = function(a, b) return (a.missingGems or 0) < (b.missingGems or 0) end,
+    alts    = function(a, b) return (a.altCount or 0) < (b.altCount or 0) end,
+}
 
 local function PopulateTeams(tab)
     if not tab or not tab:IsVisible() then return end
@@ -336,6 +364,25 @@ local function PopulateTeams(tab)
 
     local roster     = WGS:GetGuildRosterLookup()
     local characters = WGS.db.global.characters or {}
+    local details    = WGS.db.global.characterDetails or {}
+
+    -- Sort state lives on the tab so it survives a re-render. Click
+    -- a header → SetSort(key) → PopulateTeams(tab) re-runs.
+    local sortKey = tab._sortKey or DEFAULT_SORT_KEY
+    local sortDir = tab._sortDir or DEFAULT_SORT_DIR
+
+    local function setSort(key)
+        if tab._sortKey == key then
+            tab._sortDir = (tab._sortDir == "asc") and "desc" or "asc"
+        else
+            tab._sortKey = key
+            -- Default for non-name columns is desc (highest first) since
+            -- "who has the most missing enchants" is the usual question.
+            tab._sortDir = (key == "name") and "asc" or "desc"
+        end
+        PopulateTeams(tab)
+    end
+
     local yOff = 0
 
     for _, team in ipairs(teams) do
@@ -356,31 +403,61 @@ local function PopulateTeams(tab)
             noM:SetText("(no members)")
             yOff = yOff - 16
         else
-            -- Build a name → playerMember lookup so we can attach alts
-            -- per row while iterating team.members (the full list).
-            -- Fixes the linked-vs-unlinked mutual-exclusion bug.
+            -- Column headers (sortable, gold + arrow on the active column)
+            local hdrRow = CreateFrame("Frame", nil, tab.content)
+            hdrRow:SetSize(CONTENT_W, HEADER_H)
+            hdrRow:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+            BuildHeaderCell(hdrRow, COL.NAME, "name",     COL.NAME.x, sortKey, sortDir, setSort)
+            BuildHeaderCell(hdrRow, COL.ILVL, "ilvl",     COL.ILVL.x, sortKey, sortDir, setSort)
+            BuildHeaderCell(hdrRow, COL.ENCH, "enchants", COL.ENCH.x, sortKey, sortDir, setSort)
+            BuildHeaderCell(hdrRow, COL.GEMS, "gems",     COL.GEMS.x, sortKey, sortDir, setSort)
+            BuildHeaderCell(hdrRow, COL.ALTS, "alts",     COL.ALTS.x, sortKey, sortDir, setSort)
+
+            -- Thin separator under the header
+            local sep = tab.content:CreateTexture(nil, "ARTWORK")
+            sep:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff - HEADER_H + 1)
+            sep:SetPoint("TOPRIGHT", tab.content, "TOPRIGHT", 0, yOff - HEADER_H + 1)
+            sep:SetHeight(1)
+            sep:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+
+            yOff = yOff - HEADER_H
+
+            -- Build per-member rows. Fixes the linked-vs-unlinked
+            -- mutual-exclusion bug by iterating team.members (the
+            -- canonical full list) and decorating from playerMembers
+            -- when a link exists.
             local linkInfo = {}
             for _, pm in ipairs(team.playerMembers or {}) do
                 local shortMain = (pm.main or ""):match("^([^%-]+)") or pm.main or ""
                 if shortMain ~= "" then linkInfo[shortMain:lower()] = pm end
             end
 
+            -- Collect rows first so we can sort, then render.
+            local rows = {}
             for _, memberName in ipairs(memberNames) do
                 local short = memberName:match("^([^%-]+)") or memberName
                 local pm = linkInfo[short:lower()]
-
-                -- Row 1: main with detailed gear info
-                BuildMainRow(tab.content, memberName, roster, yOff)
-                yOff = yOff - MAIN_ROW_H
-
-                -- Row 2: alts (if any) — compact chips with hover-tooltips
                 local altList = pm and characters[pm.playerId] and characters[pm.playerId].alts
-                if altList and #altList > 0 then
-                    BuildAltsRow(tab.content, altList, roster, yOff)
-                    yOff = yOff - ALT_ROW_H
-                end
+                local info = details[short] or {}
+                rows[#rows + 1] = {
+                    name             = memberName,
+                    short            = short,
+                    ilvl             = info.ilvl or 0,
+                    missingEnchants  = info.missingEnchants or 0,
+                    missingGems      = info.missingGems or 0,
+                    altCount         = altList and #altList or 0,
+                    alts             = altList or {},
+                }
+            end
 
-                yOff = yOff - MEMBER_GAP
+            local cmp = SORT_COMPARATORS[sortKey] or SORT_COMPARATORS.name
+            table.sort(rows, function(a, b)
+                if sortDir == "asc" then return cmp(a, b) else return cmp(b, a) end
+            end)
+
+            for i, member in ipairs(rows) do
+                BuildDataRow(tab.content, member, roster, yOff, i % 2 == 0)
+                yOff = yOff - ROW_H
             end
         end
         yOff = yOff - TEAM_GAP
