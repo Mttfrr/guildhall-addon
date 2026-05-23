@@ -106,17 +106,16 @@ local function PopulateReadiness(frame)
         frame.announceBtn:Show()
     end
 
-    -- Announce button
+    -- Announce button — routes through the central chat helper so the
+    -- prefix, indent, and 200-byte chunking rules stay in one place.
     frame.announceBtn:SetScript("OnClick", function()
         local channel = WGS:GetGroupChannel()
         if not channel then
             WGS:Print("Not in a group.")
             return
         end
-        C_ChatInfo.SendChatMessage("[GuildHall] Raid Readiness Check — " .. playersWithIssues .. " player(s) with gear issues:", channel)
-        for _, line in ipairs(announceLines) do
-            C_ChatInfo.SendChatMessage("  " .. line, channel)
-        end
+        WGS:SendChatLine("Raid Readiness Check — " .. playersWithIssues .. " player(s) with gear issues:", channel)
+        WGS:SendChatChunked(announceLines, channel)
     end)
 end
 

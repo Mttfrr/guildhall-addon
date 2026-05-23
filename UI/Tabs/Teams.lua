@@ -749,24 +749,18 @@ function PopulateRosterCheck(tab)
         if WGS:IsInAnyGroup() then
             tab.announceBtn:Show()
             tab.announceBtn:SetScript("OnClick", function()
+                -- Pack short character names into the minimum number
+                -- of comma-joined chat lines that fit under the 200-
+                -- byte chat-message cap. Used to do this inline; the
+                -- helper centralises the packing rule so it can't
+                -- drift from the Readiness check's version.
                 local channel = WGS:GetGroupChannel() or "PARTY"
-                C_ChatInfo.SendChatMessage("[GuildHall] Missing for " .. (data.event.title or "event") .. ":", channel)
-                local names = {}
+                local shorts = {}
                 for _, m in ipairs(missing) do
-                    names[#names + 1] = m:match("^([^%-]+)") or m
+                    shorts[#shorts + 1] = m:match("^([^%-]+)") or m
                 end
-                local chunk = ""
-                for _, n in ipairs(names) do
-                    if #chunk + #n + 2 > 200 then
-                        C_ChatInfo.SendChatMessage("  " .. chunk, channel)
-                        chunk = n
-                    else
-                        chunk = chunk == "" and n or (chunk .. ", " .. n)
-                    end
-                end
-                if chunk ~= "" then
-                    C_ChatInfo.SendChatMessage("  " .. chunk, channel)
-                end
+                WGS:SendChatLine("Missing for " .. (data.event.title or "event") .. ":", channel)
+                WGS:SendChatChunked(WGS:PackChatTokens(shorts), channel)
             end)
         else
             tab.announceBtn:Hide()

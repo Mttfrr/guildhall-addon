@@ -5,4 +5,5 @@
     <Script file="Roster.lua"/>
     <Script file="Interop.lua"/>
     <Script file="Group.lua"/>
+    <Script file="Announce.lua"/>
 </Ui>

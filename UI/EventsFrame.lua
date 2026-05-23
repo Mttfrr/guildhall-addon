@@ -491,6 +491,91 @@ local function PopulateBossNotesSection(content, anchor, frame, width)
     return body
 end
 
+-- Build the four "Share" / "Invite" action buttons in a row below the
+-- last section. Each button reuses an existing helper — Invite goes
+-- through AutoInvite (already scoped to the next event), the three
+-- share buttons funnel through WGS:SendChatLine + SendChatChunked so
+-- the chat formatting stays consistent across the addon.
+local function PopulateActionsRow(content, anchor, ev, roster, comp, width)
+    local header = BuildSectionHeader(content, anchor, "Actions", width)
+
+    local row = CreateFrame("Frame", nil, content)
+    row:SetPoint("TOPLEFT",  header, "BOTTOMLEFT",  0, -6)
+    row:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -6)
+    row:SetHeight(26)
+
+    local function actionBtn(label, x, w, onClick)
+        local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        btn:SetSize(w, 24)
+        btn:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
+        btn:SetText(label)
+        btn:SetScript("OnClick", onClick)
+        return btn
+    end
+
+    actionBtn("Invite", 0, 70, function()
+        if WGS.AutoInvite then WGS:AutoInvite() end
+    end)
+
+    actionBtn("Share Roster", 74, 100, function()
+        local channel = WGS:GetGroupChannel()
+        if not channel then WGS:Print("Not in a group."); return end
+        local shorts = {}
+        for _, r in ipairs(roster.rows) do
+            if COMMITTED_STATUSES[r.status] then shorts[#shorts + 1] = r.short end
+        end
+        WGS:SendChatLine("Roster for " .. (ev.title or "event") .. " ("
+            .. roster.committedCount .. " committed):", channel)
+        WGS:SendChatChunked(WGS:PackChatTokens(shorts), channel)
+    end)
+
+    actionBtn("Share Gear Gaps", 178, 120, function()
+        local channel = WGS:GetGroupChannel()
+        if not channel then WGS:Print("Not in a group."); return end
+        local lines = {}
+        for _, r in ipairs(roster.rows) do
+            if (r.missingEnchants + r.missingGems) > 0 and COMMITTED_STATUSES[r.status] then
+                local issues = {}
+                if r.missingEnchants > 0 then issues[#issues + 1] = r.missingEnchants .. " enchant(s)" end
+                if r.missingGems     > 0 then issues[#issues + 1] = r.missingGems     .. " gem(s)"     end
+                lines[#lines + 1] = r.short .. ": missing " .. table.concat(issues, ", ")
+            end
+        end
+        if #lines == 0 then
+            WGS:Print("No gear gaps to announce — all committed players are ready.")
+            return
+        end
+        WGS:SendChatLine("Pre-pull gear check for " .. (ev.title or "event") .. ":", channel)
+        WGS:SendChatChunked(lines, channel)
+    end)
+
+    actionBtn("Share Comp", 302, 100, function()
+        local channel = WGS:GetGroupChannel()
+        if not channel then WGS:Print("Not in a group."); return end
+        if not comp then
+            WGS:Print("No comp planned for this event.")
+            return
+        end
+        local assignments = comp.assignments or comp.members or {}
+        local byRole = { TANK = {}, HEALER = {}, DPS = {} }
+        for _, m in ipairs(assignments) do
+            local role = (m.role or "DPS"):upper()
+            if not byRole[role] then role = "DPS" end
+            byRole[role][#byRole[role] + 1] = m.name or m.playerName or "?"
+        end
+        WGS:SendChatLine("Raid Comp for " .. (ev.title or "event") .. ":", channel)
+        for _, role in ipairs(ROLE_ORDER) do
+            local names = byRole[role]
+            if #names > 0 then
+                WGS:SendChatLine(role .. " (" .. #names .. "):", channel)
+                WGS:SendChatChunked(WGS:PackChatTokens(names), channel)
+            end
+        end
+    end)
+
+    return row
+end
+
 ---------------------------------------------------------------------------
 -- Detail panel rendering
 ---------------------------------------------------------------------------
@@ -554,7 +639,10 @@ local function PopulateDetail(frame, ev)
     lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
 
     -- Boss Notes section
-    PopulateBossNotesSection(content, lastAnchor, frame, sectionW)
+    lastAnchor = PopulateBossNotesSection(content, lastAnchor, frame, sectionW)
+
+    -- Actions row (Invite + three Share buttons)
+    PopulateActionsRow(content, lastAnchor, ev, roster, comp, sectionW)
 
     -- Grow the scroll content so the bottom of the last section is
     -- reachable. We can't introspect every child's offset cleanly, so
