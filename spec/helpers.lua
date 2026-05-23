@@ -18,16 +18,50 @@ end
 function M.setup()
     clearGlobals()
 
-    -- Ace3 / LibStub stub. NewAddon hands back a plain table; the addon
-    -- mixes methods onto it. NewLibrary is unused at load time but kept
-    -- defensive in case a vendored Lib is dofile'd later.
-    _G.LibStub = function()
-        return {
-            NewAddon = function() return {} end,
-            NewLibrary = function() return {}, true end,
-            GetLibrary = function() return {} end,
-        }
+    -- Ace3 / LibStub stub. Real LibStub looks up registered libraries
+    -- by name; we mimic that so vendored libs that register themselves
+    -- at file scope (LibDeflate) can be dofile'd and retrieved.
+    --
+    -- Pre-register stubs for the Ace3 namespaces used at load time
+    -- (AceAddon, AceDB, CallbackHandler). Each is a permissive dummy
+    -- whose methods return empty tables — enough for Core.lua to
+    -- complete its OnInitialize without errors. Libraries not
+    -- pre-registered return nil from LibStub() so the caller's own
+    -- fallback path (e.g. Encoder.lua's "no LibDeflate → use v3") is
+    -- exercised. Specs that want a real lib loaded call M.loadLibDeflate.
+    local libs = {}
+    local function permissiveStub()
+        return setmetatable({}, {
+            __index = function() return function() return {} end end,
+        })
     end
+    libs["AceAddon-3.0"]         = permissiveStub()
+    libs["AceDB-3.0"]            = permissiveStub()
+    libs["AceEvent-3.0"]         = permissiveStub()
+    libs["AceConsole-3.0"]       = permissiveStub()
+    libs["CallbackHandler-1.0"]  = permissiveStub()
+    local lib_stub_meta = {
+        NewAddon = function() return {} end,
+        NewLibrary = function(_, name, _minor)
+            local t = libs[name]
+            if not t then
+                t = {}
+                libs[name] = t
+            end
+            return t, true
+        end,
+        GetLibrary = function(_, name, silent)
+            if libs[name] then return libs[name], libs[name]._MINOR end
+            if silent then return nil end
+            error("LibStub: " .. tostring(name) .. " not registered", 2)
+        end,
+    }
+    _G.LibStub = setmetatable({}, {
+        __call = function(_, name, _silent)
+            return libs[name]
+        end,
+        __index = lib_stub_meta,
+    })
 
     -- Locale table: any key resolves to itself. The codec never reads it.
     _G.GuildHall_L = setmetatable({}, { __index = function(_, k) return k end })
@@ -113,6 +147,26 @@ function M.setup()
     }
 
     return GuildHall
+end
+
+--- Opt-in loader for the vendored LibDeflate library. Specs that
+--- exercise the v4 (deflate) envelope call this AFTER M.setup() so
+--- the LibStub stub already exists. We dofile the real source rather
+--- than mock it — round-tripping a payload through the actual
+--- CompressDeflate / EncodeForPrint catches regressions Encoder.lua's
+--- own logic can't.
+function M.loadLibDeflate()
+    -- string.pack is used by LibDeflate for Adler32 hashing; busted
+    -- runs on Lua 5.1 by default, which doesn't ship it. Provide a
+    -- minimal shim so the library loads cleanly. (We don't exercise
+    -- Adler32 in tests, but the function table is built at load time.)
+    -- luacheck: push ignore 142 143
+    if not string.pack then
+        string.pack = function() return "" end
+        string.unpack = function() return 0 end
+    end
+    -- luacheck: pop
+    dofile("Libs/LibDeflate/LibDeflate.lua")
 end
 
 return M
