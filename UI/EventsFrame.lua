@@ -1,76 +1,28 @@
 ---@type GuildHall
 local WGS = GuildHall
 
--- Events tab: sortable table of imported events. Mirrors the
--- table pattern from UI/Tabs/Teams.lua so the two surfaces feel
--- consistent. Replaces the old prose-y row layout that wrote out
--- date/time/title/type/description as stacked text — the new shape
--- adds a Signups count (joined from db.global.signups) and a status
--- pill (TODAY / SOON / UPCOMING / PAST) which were the actual
--- decisions raid leaders make on this page.
+-- Events tab render: master-detail. The rail (left, narrow) lists every
+-- imported event sorted by start time; clicking a row loads that event
+-- in the detail panel (right). The detail panel is the new home for
+-- per-event Raid Comp, Roster + gear gaps, Boss Notes, and the share
+-- action buttons — replacing the standalone Raids → Raid Comp and
+-- Raids → Readiness sub-views.
 --
--- Columns:
---   Date · Time | Title | Type | Team | Signups | Status
---
--- Click any column header to sort by it. Click again to flip
--- direction. Default sort = date asc (next event first).
+-- Phase 1 of the restructure: rail rendering + detail-header only. The
+-- detail sections (Roster, Raid Comp, Boss Notes, Actions) land in
+-- later commits.
 
-local CONTENT_W = 660
-local HEADER_H  = 22
-local ROW_H     = 22
-
-local COL = {
-    DATE    = { x = 10,  w = 130, label = "Date · Time" },
-    TITLE   = { x = 140, w = 200, label = "Title"       },
-    TYPE    = { x = 340, w = 70,  label = "Type"        },
-    TEAM    = { x = 410, w = 90,  label = "Team"        },
-    SIGNUPS = { x = 500, w = 70,  label = "Signups"     },
-    STATUS  = { x = 570, w = 90,  label = "Status"      },
+local RAIL_ROW_H = 38
+local STATUS_COLORS = {
+    TODAY    = "ff00ff00",
+    SOON     = "ffffd100",
+    UPCOMING = "ff80c0ff",
+    PAST     = "ff666666",
 }
 
-local SORT_ARROW_TEX = "Interface\\Buttons\\UI-SortArrow"
-
--- A column-header button. Mirrors UI/Tabs/Teams.lua's BuildHeaderCell;
--- duplicated rather than shared because the two tabs have slightly
--- different column geometries and the helper is only ~25 lines.
-local function BuildHeaderCell(parent, col, key, sortKey, sortDir, onClick)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(col.w, HEADER_H)
-    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", col.x, 0)
-    btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
-    local hl = btn:GetHighlightTexture()
-    if hl then hl:SetAlpha(0.3) end
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("LEFT", btn, "LEFT", 6, 0)
-    label:SetText(col.label)
-    if sortKey == key then
-        label:SetTextColor(1.00, 0.82, 0.00)
-    else
-        label:SetTextColor(0.85, 0.85, 0.85)
-    end
-
-    if sortKey == key then
-        local arrow = btn:CreateTexture(nil, "OVERLAY")
-        arrow:SetSize(10, 10)
-        arrow:SetPoint("LEFT", label, "RIGHT", 4, 0)
-        arrow:SetTexture(SORT_ARROW_TEX)
-        if sortDir == "asc" then
-            arrow:SetTexCoord(0, 1, 1, 0)   -- flip default-desc to point up
-        end
-    end
-
-    btn:SetScript("OnClick", function() onClick(key) end)
-    return btn
-end
-
--- Count signups per event, bucketed by status. Returns
--- { [eventId] = { committed = N, tentative = N } }
--- where committed = P/L/LT/B (people who are coming or warming a bench)
--- and tentative = T (interested but not promised).
---
--- Walks db.global.signups once per render — cheap enough at typical
--- guild sizes (a few hundred rows at most).
+-- Local copies of the small helpers from the old table renderer.
+-- BuildSignupCounts walks db.global.signups once per refresh; cheap
+-- enough at typical guild sizes (a few hundred rows).
 local function BuildSignupCounts()
     local out = {}
     local signups = WGS.db.global.signups
@@ -91,8 +43,6 @@ local function BuildSignupCounts()
     return out
 end
 
--- Resolve a team_id to its display name via db.global.teams. Returns
--- nil if not found (unaffiliated event); callers render an em-dash.
 local function TeamNameById(teamId)
     if not teamId then return nil end
     local teams = WGS.db.global.teams
@@ -103,218 +53,237 @@ local function TeamNameById(teamId)
     return nil
 end
 
--- Parse an event's "date" (yyyy-mm-dd) and optional "time" (HH:MM) into
--- a unix timestamp for status comparison. Uses os.date to assemble the
--- table; if the strings don't match the expected shape, returns 0 so
--- the row sorts to the top and the status reads as PAST.
 local function EventStartTs(ev)
     local y, mo, d = (ev.date or ""):match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
     if not y then return 0 end
     local h, mi = (ev.time or "00:00"):match("^(%d%d):(%d%d)$")
     return time({
-        year  = tonumber(y),
-        month = tonumber(mo),
-        day   = tonumber(d),
-        hour  = tonumber(h or 0),
-        min   = tonumber(mi or 0),
-        sec   = 0,
+        year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+        hour = tonumber(h or 0), min = tonumber(mi or 0), sec = 0,
     })
 end
 
--- Status pill text + colour. The three meaningful states for a raid
--- leader skimming the page are "tonight", "soon" (this week), and
--- "later" — past events come along if /reload happened after the
--- night ran but before the next import.
 local function EventStatus(ev, now)
     local startTs = EventStartTs(ev)
     if startTs == 0 then return "?", "ff888888" end
     local delta = startTs - now
-    if delta < -3 * 3600 then return "PAST", "ff666666" end
+    if delta < -3 * 3600 then return "PAST", STATUS_COLORS.PAST end
     if delta < 86400 and ev.date == date("%Y-%m-%d", now) then
-        return "TODAY", "ff00ff00"
+        return "TODAY", STATUS_COLORS.TODAY
     end
-    if delta < 7 * 86400 then return "SOON", "ffffd100" end
-    return "UPCOMING", "ff80c0ff"
+    if delta < 7 * 86400 then return "SOON", STATUS_COLORS.SOON end
+    return "UPCOMING", STATUS_COLORS.UPCOMING
 end
 
--- Sort comparators keyed by column. Each returns true if `a` should
--- come before `b`. asc/desc is applied by swapping args at the call
--- site; here we just define "ascending = natural" for each column.
-local function CompareEvents(key)
-    if key == "date" then
-        return function(a, b) return (a._startTs or 0) < (b._startTs or 0) end
-    elseif key == "title" then
-        return function(a, b) return (a.title or "") < (b.title or "") end
-    elseif key == "type" then
-        return function(a, b) return (a.type or "") < (b.type or "") end
-    elseif key == "team" then
-        return function(a, b) return (a._teamName or "") < (b._teamName or "") end
-    elseif key == "signups" then
-        return function(a, b)
-            local ac = (a._counts and a._counts.committed) or 0
-            local bc = (b._counts and b._counts.committed) or 0
-            return ac < bc
-        end
-    elseif key == "status" then
-        -- Surface upcoming first by ordering on start time again
-        return function(a, b) return (a._startTs or 0) < (b._startTs or 0) end
+---------------------------------------------------------------------------
+-- Rail rendering
+---------------------------------------------------------------------------
+
+-- One row in the left rail: date · title on the top line, status pill +
+-- signup count on the bottom. Clicking selects the event and re-renders
+-- the detail panel.
+local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(parent:GetWidth(), RAIL_ROW_H)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOff)
+
+    -- Selection background. Same hue as the active sub-nav underline
+    -- (gold) so the selected row reads as "this is what the panel is
+    -- showing right now".
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(btn)
+    if isSelected then
+        bg:SetColorTexture(1.00, 0.82, 0.00, 0.12)
+    else
+        bg:SetColorTexture(1, 1, 1, 0.025)
     end
-    return function() return false end
+
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+    local hl = btn:GetHighlightTexture()
+    if hl then hl:SetAlpha(0.25) end
+
+    -- Top line: date · time + title (truncated)
+    local topLine = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    topLine:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -4)
+    topLine:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
+    topLine:SetJustifyH("LEFT")
+    topLine:SetWordWrap(false)
+    local dateStr = ev.date or "?"
+    if ev.time then dateStr = dateStr .. " |cffaaaaaa" .. ev.time .. "|r" end
+    topLine:SetText(dateStr)
+
+    local titleLine = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    titleLine:SetPoint("TOPLEFT", topLine, "BOTTOMLEFT", 0, -2)
+    titleLine:SetPoint("TOPRIGHT", topLine, "BOTTOMRIGHT", 0, -2)
+    titleLine:SetJustifyH("LEFT")
+    titleLine:SetWordWrap(false)
+    titleLine:SetText("|cffffffff" .. (ev.title or "Untitled") .. "|r")
+
+    -- Bottom line: status pill + signup count
+    local statusText, statusColor = EventStatus(ev, time())
+    local bottomLine = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bottomLine:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 6, 4)
+    bottomLine:SetText("|c" .. statusColor .. statusText .. "|r")
+
+    if ev._counts and (ev._counts.committed + ev._counts.tentative) > 0 then
+        local signupText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        signupText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -6, 4)
+        signupText:SetText("|cffaaaaaa" .. ev._counts.committed
+            .. (ev._counts.tentative > 0 and (" / " .. ev._counts.tentative .. "?") or "")
+            .. "|r")
+    end
+
+    btn:SetScript("OnClick", function() onSelect(ev) end)
+    return btn
 end
 
-local function PopulateEvents(frame)
-    -- Tear down anything from a prior render. Same pattern as Teams.lua —
-    -- we don't pool widgets; recreating them on each refresh is fast
-    -- enough at typical event counts (≤20 from the platform query).
-    local children = { frame.content:GetChildren() }
-    for _, child in ipairs(children) do child:Hide() end
-    local regions = { frame.content:GetRegions() }
-    for _, region in ipairs(regions) do region:Hide() end
+local function PopulateRail(frame, decoratedEvents, selectedId)
+    local content = frame.railContent
+    for _, child in ipairs({ content:GetChildren() }) do child:Hide() end
+    for _, region in ipairs({ content:GetRegions() }) do region:Hide() end
 
-    local events = WGS.db.global.events
-    if not events or #events == 0 then
-        local noData = frame.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noData:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 5, -10)
-        noData:SetText("No events imported. Import from the web app first.")
-        noData:Show()
-        frame.content:SetHeight(40)
+    if #decoratedEvents == 0 then
+        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        empty:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -10)
+        empty:SetText("No events imported.")
+        content:SetHeight(40)
         return
     end
 
-    -- Decorate each event with derived fields so the sort comparators
-    -- don't have to look them up per-comparison (n log n calls would
-    -- otherwise spam the signup-count walk).
+    local yOff = 0
+    for _, ev in ipairs(decoratedEvents) do
+        BuildRailRow(content, ev, yOff, ev.id == selectedId, function(picked)
+            frame._selectedEventId = picked.id
+            WGS:PopulateEvents(frame)
+        end)
+        yOff = yOff - RAIL_ROW_H - 2
+    end
+    content:SetHeight(math.abs(yOff) + 10)
+end
+
+---------------------------------------------------------------------------
+-- Detail panel rendering
+---------------------------------------------------------------------------
+
+-- Phase 1 detail: header only (title, date, team, status pill, signup
+-- summary). The Roster / Raid Comp / Boss Notes / Actions sections
+-- land in later commits and slot in below the header.
+local function PopulateDetail(frame, ev)
+    local content = frame.detailContent
+    for _, child in ipairs({ content:GetChildren() }) do child:Hide() end
+    for _, region in ipairs({ content:GetRegions() }) do region:Hide() end
+
+    if not ev then
+        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        empty:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -10)
+        empty:SetText("Select an event from the list.")
+        content:SetHeight(40)
+        return
+    end
+
+    -- Title (large)
+    local title = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    title:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -4)
+    title:SetPoint("TOPRIGHT", content, "TOPRIGHT", -8, -4)
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+    title:SetText(ev.title or "Untitled")
+
+    -- Subline: date · time · team · status pill
+    local subline = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    subline:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    subline:SetPoint("TOPRIGHT", title, "BOTTOMRIGHT", 0, -4)
+    subline:SetJustifyH("LEFT")
+    subline:SetWordWrap(false)
+    local statusText, statusColor = EventStatus(ev, time())
+    local parts = {}
+    parts[#parts + 1] = "|cffffd100" .. (ev.date or "?") .. "|r"
+    if ev.time then parts[#parts + 1] = "|cffaaaaaa" .. ev.time .. "|r" end
+    if ev._teamName then parts[#parts + 1] = "|cffffd100" .. ev._teamName .. "|r" end
+    parts[#parts + 1] = "|c" .. statusColor .. statusText .. "|r"
+    subline:SetText(table.concat(parts, "  ·  "))
+
+    -- Signup summary (one line; the Roster section in a later commit
+    -- will show the per-player list).
+    local committed = ev._counts and ev._counts.committed or 0
+    local tentative = ev._counts and ev._counts.tentative or 0
+    local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    summary:SetPoint("TOPLEFT", subline, "BOTTOMLEFT", 0, -8)
+    summary:SetText(string.format(
+        "|cff00ff00%d|r committed   |cffaaaaaa%d|r tentative", committed, tentative))
+
+    -- Description, if any. Truncated tooltips are gone — we now have
+    -- room to show the full text in the detail panel.
+    if ev.description and ev.description ~= "" then
+        local desc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        desc:SetPoint("TOPLEFT", summary, "BOTTOMLEFT", 0, -10)
+        desc:SetPoint("TOPRIGHT", content, "TOPRIGHT", -8, -52)
+        desc:SetJustifyH("LEFT")
+        desc:SetWordWrap(true)
+        desc:SetText("|cffcccccc" .. ev.description .. "|r")
+        content:SetHeight(120)
+    else
+        content:SetHeight(80)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Entry point
+---------------------------------------------------------------------------
+
+local function PopulateEvents(frame)
+    -- Sanity: if the tab hasn't been built yet (old build entry was
+    -- used), the rail/detail fields won't exist. Bail rather than
+    -- error out.
+    if not frame.railContent or not frame.detailContent then return end
+
+    local events = WGS.db.global.events or {}
+
+    -- Decorate each event with derived fields so the rail + detail
+    -- don't have to compute them twice.
     local counts = BuildSignupCounts()
-    local now    = time()
-    local rows = {}
+    local decorated = {}
     for _, ev in ipairs(events) do
-        rows[#rows + 1] = setmetatable({
-            _startTs   = EventStartTs(ev),
-            _teamName  = TeamNameById(ev.team_id),
-            _counts    = counts[ev.id] or { committed = 0, tentative = 0 },
+        decorated[#decorated + 1] = setmetatable({
+            _startTs  = EventStartTs(ev),
+            _teamName = TeamNameById(ev.team_id),
+            _counts   = counts[ev.id] or { committed = 0, tentative = 0 },
         }, { __index = ev })
     end
 
-    -- Per-tab sort state. Default: date asc (next event first).
-    local sortKey = frame._sortKey or "date"
-    local sortDir = frame._sortDir or "asc"
-    local function setSort(key)
-        if frame._sortKey == key then
-            frame._sortDir = (frame._sortDir == "asc") and "desc" or "asc"
-        else
-            frame._sortKey = key
-            -- Non-date columns default to desc (highest first) since
-            -- e.g. "sort by signups" almost always means "most signups".
-            frame._sortDir = (key == "date" or key == "title" or key == "team" or key == "type") and "asc" or "desc"
+    -- Sort: date asc (next event on top). The full sortable-table UX
+    -- the previous renderer offered is dropped — the rail is a fixed
+    -- chronological list, and rich sort/filter belongs on the platform.
+    table.sort(decorated, function(a, b) return (a._startTs or 0) < (b._startTs or 0) end)
+
+    -- Pick a default selection on first render: the first non-past
+    -- event, or the first event if everything's in the past.
+    local now = time()
+    if not frame._selectedEventId and #decorated > 0 then
+        for _, ev in ipairs(decorated) do
+            if (ev._startTs or 0) >= now - 3 * 3600 then
+                frame._selectedEventId = ev.id
+                break
+            end
         end
-        PopulateEvents(frame)
+        if not frame._selectedEventId then
+            frame._selectedEventId = decorated[1].id
+        end
     end
 
-    local cmp = CompareEvents(sortKey)
-    table.sort(rows, function(a, b)
-        if sortDir == "asc" then return cmp(a, b) else return cmp(b, a) end
-    end)
-
-    -- Headers
-    local header = CreateFrame("Frame", nil, frame.content)
-    header:SetSize(CONTENT_W, HEADER_H)
-    header:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, 0)
-    BuildHeaderCell(header, COL.DATE,    "date",    sortKey, sortDir, setSort)
-    BuildHeaderCell(header, COL.TITLE,   "title",   sortKey, sortDir, setSort)
-    BuildHeaderCell(header, COL.TYPE,    "type",    sortKey, sortDir, setSort)
-    BuildHeaderCell(header, COL.TEAM,    "team",    sortKey, sortDir, setSort)
-    BuildHeaderCell(header, COL.SIGNUPS, "signups", sortKey, sortDir, setSort)
-    BuildHeaderCell(header, COL.STATUS,  "status",  sortKey, sortDir, setSort)
-
-    local yOff = -HEADER_H - 2
-    for idx, row in ipairs(rows) do
-        local r = CreateFrame("Frame", nil, frame.content)
-        r:SetSize(CONTENT_W, ROW_H)
-        r:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, yOff)
-
-        -- Zebra stripe for readability
-        if idx % 2 == 0 then
-            local bg = r:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints(r)
-            bg:SetColorTexture(1, 1, 1, 0.025)
-        end
-
-        -- Date · Time
-        local dateFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        dateFs:SetPoint("LEFT", r, "LEFT", COL.DATE.x, 0)
-        local dateStr = row.date or "?"
-        if row.time then
-            dateStr = dateStr .. " |cffaaaaaa" .. row.time .. "|r"
-        end
-        dateFs:SetText(dateStr)
-
-        -- Title
-        local titleFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        titleFs:SetPoint("LEFT", r, "LEFT", COL.TITLE.x, 0)
-        titleFs:SetWidth(COL.TITLE.w - 8)
-        titleFs:SetJustifyH("LEFT")
-        titleFs:SetWordWrap(false)
-        titleFs:SetText(row.title or "Untitled")
-
-        -- Type
-        local typeFs = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        typeFs:SetPoint("LEFT", r, "LEFT", COL.TYPE.x, 0)
-        typeFs:SetText("|cff888888" .. (row.type or "—") .. "|r")
-
-        -- Team
-        local teamFs = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        teamFs:SetPoint("LEFT", r, "LEFT", COL.TEAM.x, 0)
-        teamFs:SetText(row._teamName and ("|cffffd100" .. row._teamName .. "|r") or "|cff555555—|r")
-
-        -- Signups: "18 ✓ / 4 ?" with the committed count coloured by
-        -- a 20-raider rule of thumb (green ≥20, orange ≥14, red below).
-        local committed = row._counts.committed
-        local tentative = row._counts.tentative
-        local cColor
-        if committed >= 20 then       cColor = "ff00ff00"
-        elseif committed >= 14 then   cColor = "ffffaa00"
-        else                          cColor = "ffff5555" end
-        local signupFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        signupFs:SetPoint("LEFT", r, "LEFT", COL.SIGNUPS.x, 0)
-        local txt = "|c" .. cColor .. committed .. "|r"
-        if tentative > 0 then
-            txt = txt .. " |cff888888/ " .. tentative .. " ?|r"
-        end
-        signupFs:SetText(txt)
-
-        -- Status pill (TODAY / SOON / UPCOMING / PAST). Plain text in
-        -- the appropriate colour rather than a real pill texture — the
-        -- in-game default font handles this fine and keeps the cell
-        -- compact.
-        local label, color = EventStatus(row, now)
-        local statusFs = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        statusFs:SetPoint("LEFT", r, "LEFT", COL.STATUS.x, 0)
-        statusFs:SetText("|c" .. color .. label .. "|r")
-
-        -- Tooltip on hover: description + signups breakdown. Hover the
-        -- whole row, anchored RIGHT so it doesn't fight the scroll bar.
-        r:EnableMouse(true)
-        r:SetScript("OnEnter", function(self)
-            if not (row.description and row.description ~= "")
-               and (committed + tentative) == 0 then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine("|cffffd100" .. (row.title or "Untitled") .. "|r")
-            if row.description and row.description ~= "" then
-                GameTooltip:AddLine(row.description, 1, 1, 1, true)
-            end
-            if (committed + tentative) > 0 then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine(string.format("Signups: %d committed, %d tentative",
-                    committed, tentative))
-            end
-            GameTooltip:Show()
-        end)
-        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        yOff = yOff - ROW_H - 2
+    -- Resolve the selected event (if it's been removed from import,
+    -- fall back to the first one).
+    local selected
+    for _, ev in ipairs(decorated) do
+        if ev.id == frame._selectedEventId then selected = ev; break end
+    end
+    if not selected and #decorated > 0 then
+        selected = decorated[1]
+        frame._selectedEventId = selected.id
     end
 
-    frame.content:SetHeight(math.abs(yOff) + 10)
+    PopulateRail(frame, decorated, frame._selectedEventId)
+    PopulateDetail(frame, selected)
 end
 
 function WGS:ToggleEventsFrame()
