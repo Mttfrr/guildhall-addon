@@ -57,26 +57,49 @@ end
 -- warms Blizzard's item cache so wishlist tooltips render instantly
 -- during boss fights (otherwise the first hover blocks on a server
 -- round-trip).
+--
+-- The preload itself is the worst single source of import-time stutter:
+-- a single guild's wishlists can easily total 200-500 itemIDs, and
+-- firing that many C_Item requests in one frame is enough to make WoW
+-- visibly hitch on the paste. We collect the IDs synchronously (cheap)
+-- and then drain them in batches of 50 across frames via C_Timer.
+local PRELOAD_BATCH = 50
+
 local function importWishlists(self, data)
     if not data.wishlists then return 0 end
     self.db.global.wishlists = data.wishlists
 
-    if C_Item and C_Item.RequestLoadItemDataByID then
-        local preload = 0
-        for _, entry in ipairs(data.wishlists) do
-            if entry.items then
-                for _, item in ipairs(entry.items) do
-                    if item.itemID then
-                        C_Item.RequestLoadItemDataByID(item.itemID)
-                        preload = preload + 1
-                    end
-                end
+    if not (C_Item and C_Item.RequestLoadItemDataByID) then
+        return #data.wishlists
+    end
+
+    local pending = {}
+    for _, entry in ipairs(data.wishlists) do
+        if entry.items then
+            for _, item in ipairs(entry.items) do
+                if item.itemID then pending[#pending + 1] = item.itemID end
             end
         end
-        if preload > 0 then
-            self:Print("Pre-cached " .. preload .. " wishlist items for tooltip display.")
+    end
+    if #pending == 0 then return #data.wishlists end
+
+    local total = #pending
+    local function drain(start)
+        local stop = math.min(start + PRELOAD_BATCH - 1, total)
+        for i = start, stop do
+            C_Item.RequestLoadItemDataByID(pending[i])
+        end
+        if stop < total then
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0, function() drain(stop + 1) end)
+            else
+                drain(stop + 1)   -- test path: no scheduler, run straight through
+            end
         end
     end
+    drain(1)
+
+    self:Print("Pre-cached " .. total .. " wishlist items for tooltip display.")
     return #data.wishlists
 end
 
@@ -226,7 +249,16 @@ local IMPORTERS = {
 -- Public entry point
 ---------------------------------------------------------------------------
 
--- Process decoded import data from web platform
+-- Process decoded import data from web platform.
+--
+-- Spreads the 13 importers across separate frames via C_Timer when
+-- available — paste-to-finish takes the same wall-clock time, but the
+-- per-frame work stays small enough that WoW doesn't visibly hitch. In
+-- tests (no C_Timer) the loop runs synchronously so assertions can
+-- inspect db.global immediately after the call, matching the legacy
+-- contract that callers and the WGS_IMPORT_APPLIED event still depend
+-- on. Either way the event fires exactly once, after the last importer
+-- completes.
 function WGS:ProcessImport(data)
     if not data or type(data) ~= "table" then
         self:Print(L["IMPORT_FAILED"])
@@ -234,20 +266,39 @@ function WGS:ProcessImport(data)
     end
 
     local count = 0
-    for _, importer in ipairs(IMPORTERS) do
-        count = count + (importer(self, data) or 0)
+    local function finish()
+        -- Ensure character lookup is current (handles partial imports
+        -- where characters weren't included but are already stored in DB).
+        if self.db.global.characters and next(self.db.global.characters) then
+            self:BuildCharacterLookup()
+        end
+
+        self.db.global.lastImport = self:GetTimestamp()
+        self:Print(string.format(L["IMPORT_SUCCESS"], count))
+
+        self:FireEvent("WGS_IMPORT_APPLIED", { count = count, importedAt = self.db.global.lastImport })
     end
 
-    -- Ensure character lookup is current (handles partial imports
-    -- where characters weren't included but are already stored in DB).
-    if self.db.global.characters and next(self.db.global.characters) then
-        self:BuildCharacterLookup()
+    local function runStep(idx)
+        if idx > #IMPORTERS then return finish() end
+        local ok, n = pcall(IMPORTERS[idx], self, data)
+        if not ok then
+            self:FireEvent("WGS_INTERNAL_ERROR", {
+                source = "Import.step." .. idx, error = tostring(n),
+            })
+            n = 0
+        end
+        count = count + (n or 0)
+        if idx == #IMPORTERS then
+            return finish()
+        end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() runStep(idx + 1) end)
+        else
+            runStep(idx + 1)   -- test path: drive synchronously
+        end
     end
-
-    self.db.global.lastImport = self:GetTimestamp()
-    self:Print(string.format(L["IMPORT_SUCCESS"], count))
-
-    self:FireEvent("WGS_IMPORT_APPLIED", { count = count, importedAt = self.db.global.lastImport })
+    runStep(1)
     return true
 end
 
