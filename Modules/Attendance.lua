@@ -357,56 +357,54 @@ function WGS:GetAttendanceStartTime()
     return currentSession and currentSession.startedAt or nil
 end
 
+--- Build the per-unit member record. Shared between the raid and
+--- party branches of GetRaidMembers so the two used to drift on
+--- which fields they read or how isGuildMember was computed.
+---
+--- Returns (fullName, record) on success, or nil if the unit slot
+--- is empty (UnitFullName returned no name).
+local function ReadUnitMember(unit, myGuild, subgroup)
+    local name, realm = UnitFullName(unit)
+    if not name then return nil end
+    local fullName = WGS:NormalizeFullName(name, realm)
+    local _, class = UnitClass(unit)
+    local unitGuild = GetGuildInfo(unit)
+    return fullName, {
+        class = class or "",
+        role = UnitGroupRolesAssigned(unit) or "NONE",
+        subgroup = subgroup or 0,
+        isGuildMember = (myGuild and unitGuild == myGuild) or false,
+    }
+end
+
 function WGS:GetRaidMembers()
     local members = {}
     local myGuild = IsInGuild() and GetGuildInfo("player") or nil
 
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
-            local unit = "raid" .. i
-            local name, realm = UnitFullName(unit)
-            if name then
-                local fullName = WGS:NormalizeFullName(name, realm)
-                local _, class = UnitClass(unit)
-                local role = UnitGroupRolesAssigned(unit)
-                local unitGuild = GetGuildInfo(unit)
-                -- GetRaidRosterInfo returns: name, rank, subgroup, level, class, ...
-                local _, _, subgroup = GetRaidRosterInfo(i)
-                members[fullName] = {
-                    class = class or "",
-                    role = role or "NONE",
-                    subgroup = subgroup or 0,
-                    isGuildMember = (myGuild and unitGuild == myGuild) or false,
-                }
-            end
+            -- GetRaidRosterInfo returns: name, rank, subgroup, level, class, ...
+            local _, _, subgroup = GetRaidRosterInfo(i)
+            local fullName, record = ReadUnitMember("raid" .. i, myGuild, subgroup)
+            if fullName then members[fullName] = record end
         end
     elseif IsInGroup() then
-        local playerName = WGS:GetPlayerKey()
-        local role = UnitGroupRolesAssigned("player")
-        local _, class = UnitClass("player")
-        members[playerName] = {
-            class = class or "",
-            role = role or "NONE",
-            subgroup = 1,
-            isGuildMember = true,
-        }
-
+        -- Party members include the local player via the "player" unit
+        -- (which UnitFullName resolves correctly); party1..N-1 are the
+        -- rest. Party members all share subgroup 1.
+        local fullName, record = ReadUnitMember("player", myGuild, 1)
+        if fullName then
+            -- The local player is by definition in our own guild — the
+            -- generic ReadUnitMember computes this via GetGuildInfo
+            -- which can return nil for the local player while the guild
+            -- info is still loading. Pin it explicitly.
+            record.isGuildMember = true
+            members[fullName] = record
+        end
         local total = GetNumGroupMembers()
         for i = 1, total - 1 do
-            local unit = "party" .. i
-            local name, realm = UnitFullName(unit)
-            if name then
-                local fullName = WGS:NormalizeFullName(name, realm)
-                local _, pClass = UnitClass(unit)
-                local pRole = UnitGroupRolesAssigned(unit)
-                local unitGuild = GetGuildInfo(unit)
-                members[fullName] = {
-                    class = pClass or "",
-                    role = pRole or "NONE",
-                    subgroup = 1,
-                    isGuildMember = (myGuild and unitGuild == myGuild) or false,
-                }
-            end
+            local f, r = ReadUnitMember("party" .. i, myGuild, 1)
+            if f then members[f] = r end
         end
     end
 

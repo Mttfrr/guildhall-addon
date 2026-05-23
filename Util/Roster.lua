@@ -103,7 +103,14 @@ end
 -- Guild group check (>=80% guildmates required, cached 5s)
 ---------------------------------------------------------------------------
 
+local GUILD_GROUP_CACHE_TTL = 5
 local guildGroupCache = { result = nil, expiry = 0 }
+
+local function cacheAndReturn(result, now)
+    guildGroupCache.result = result
+    guildGroupCache.expiry = now + GUILD_GROUP_CACHE_TTL
+    return result
+end
 
 function WGS:IsGuildGroup()
     local now = time()
@@ -111,11 +118,14 @@ function WGS:IsGuildGroup()
         return guildGroupCache.result
     end
 
-    if not IsInGuild() then guildGroupCache.result = false; guildGroupCache.expiry = now + 5; return false end
+    if not IsInGuild() then return cacheAndReturn(false, now) end
     local myGuild = GetGuildInfo("player")
-    if not myGuild then guildGroupCache.result = false; guildGroupCache.expiry = now + 5; return false end
+    if not myGuild then return cacheAndReturn(false, now) end
 
     local total = GetNumGroupMembers()
+    -- Solo: trivially a "guild group" for filter purposes. Not cached
+    -- — a moment later we might be in a real group whose composition
+    -- needs evaluating.
     if total <= 1 then return true end
 
     local guildCount, checked = 0, 0
@@ -138,14 +148,9 @@ function WGS:IsGuildGroup()
         end
     end
 
-    if checked < total * 0.5 then
-        guildGroupCache.result = false
-        guildGroupCache.expiry = now + 5
-        return false
-    end
+    -- Not enough units resolved yet (roster still loading) — refuse to
+    -- decide and force a re-check on the next call.
+    if checked < total * 0.5 then return cacheAndReturn(false, now) end
 
-    local result = (guildCount / checked) >= 0.8
-    guildGroupCache.result = result
-    guildGroupCache.expiry = now + 5
-    return result
+    return cacheAndReturn((guildCount / checked) >= 0.8, now)
 end
