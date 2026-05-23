@@ -287,11 +287,12 @@ function WGS:SelectMainFrameTab(tabIndex, subIndex)
     if not mainFrame then mainFrame = CreateMainFrame() end
     if not mainFrame:IsShown() then mainFrame:Show() end
     SelectTab(mainFrame, tabIndex)
-    if subIndex and tabIndex == TAB_TEAMS then
-        -- Teams is the only tab with sub-views after the event-centric
-        -- rework. Raids dropped Raid Comp / Readiness / Boss Notes
-        -- (now in Events detail panel) and no longer takes a sub-index.
-        SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
+    if subIndex then
+        if tabIndex == TAB_TEAMS then
+            SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
+        elseif tabIndex == ui.TAB_LOGS then
+            SelectSubView(mainFrame.tabContents[ui.TAB_LOGS], subIndex, ui.LOGS_SUB_COUNT)
+        end
     end
     RefreshCurrentTab(mainFrame)
 end

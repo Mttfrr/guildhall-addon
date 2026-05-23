@@ -122,15 +122,15 @@ function WGS:SlashCommand(input)
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
     elseif cmd == "loot" then
-        -- Raids tab is loot-only after the event-centric rework; no
-        -- sub-index needed.
-        self:SelectMainFrameTab(ui.TAB_RAIDS)
+        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_LOOT)
     elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_WISHLISTS)
     elseif cmd == "rostercheck" or cmd == "check" then
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_CHECK)
     elseif cmd == "bank" then
-        self:SelectMainFrameTab(ui.TAB_BANK)
+        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_BANK)
+    elseif cmd == "logs" then
+        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_LOOT)
     elseif cmd == "sync" or cmd == "catchup" then
         -- Manual catch-up. Useful when you join a raid late and the
         -- automatic GROUP_ROSTER_UPDATE debounce hasn't fired yet, or

@@ -2,9 +2,8 @@
     <Script file="MinimapButton.lua"/>
     <Script file="UIHelpers.lua"/>
     <Script file="Tabs\Teams.lua"/>
-    <Script file="Tabs\Bank.lua"/>
     <Script file="Tabs\Events.lua"/>
-    <Script file="Tabs\Raids.lua"/>
+    <Script file="Tabs\Logs.lua"/>
     <Script file="Tabs\Sync.lua"/>
     <Script file="MainFrame.lua"/>
     <Script file="LootFrame.lua"/>

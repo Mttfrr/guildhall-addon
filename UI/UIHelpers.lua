@@ -12,19 +12,17 @@ local ui = WGS._ui
 ---------------------------------------------------------------------------
 
 -- Tab order is officer-flow-first: Events (today's raid) → Teams
--- (rosters / readiness) → Bank → Raids → Sync (paste in/out). Dashboard
--- tab was removed (its summary tiles weren't pulling their weight) and
--- Loot folded into Bank (loot history is capture-log data, same as
--- transactions) and Teams (wishlists are per-player data). Bank+Raids
--- are scheduled to collapse into a single "Logs" tab in a follow-up
--- commit; for now they're just reordered.
+-- (rosters / readiness) → Logs (capture-log surfaces: loot · bank ·
+-- attendance) → Sync (paste in/out). Dashboard tab was removed (its
+-- summary tiles weren't pulling their weight). Bank and Raids were
+-- collapsed into Logs as sub-views since both are capture-log data of
+-- the same shape and didn't pull their weight as top-level tabs.
 ui.TAB_EVENTS = 1
 ui.TAB_TEAMS  = 2
-ui.TAB_BANK   = 3
-ui.TAB_RAIDS  = 4
-ui.TAB_SYNC   = 5
-ui.TAB_COUNT  = 5
-ui.TAB_NAMES  = { "Events", "Teams", "Bank", "Raids", "Sync" }
+ui.TAB_LOGS   = 3
+ui.TAB_SYNC   = 4
+ui.TAB_COUNT  = 4
+ui.TAB_NAMES  = { "Events", "Teams", "Logs", "Sync" }
 
 ui.TEAMS_SUB_TEAMS     = 1
 ui.TEAMS_SUB_CHECK     = 2
@@ -32,13 +30,11 @@ ui.TEAMS_SUB_WISHLISTS = 3
 ui.TEAMS_SUB_COUNT     = 3
 ui.TEAMS_SUB_NAMES     = { "Teams", "Roster Check", "Wishlists" }
 
--- Bank is single-view (no sub-nav). Loot history moved to Raids since
--- it's raid-related data, not bank-ledger data.
---
--- Raids tab no longer has sub-views since the event-centric rework —
--- Raid Comp / Readiness / Boss Notes are all per-event now and live in
--- the Events tab's detail panel. The tab hosts only the loot capture
--- log, which is global across events.
+ui.LOGS_SUB_LOOT       = 1
+ui.LOGS_SUB_BANK       = 2
+ui.LOGS_SUB_ATTENDANCE = 3
+ui.LOGS_SUB_COUNT      = 3
+ui.LOGS_SUB_NAMES      = { "Loot", "Bank", "Attendance" }
 
 ---------------------------------------------------------------------------
 -- Shared frame helpers
