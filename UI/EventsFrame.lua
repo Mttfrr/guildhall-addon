@@ -17,6 +17,9 @@ local BuildNumericCell = ui.BuildNumericCell
 -- later commits.
 
 local RAIL_ROW_H = 50
+
+-- Event time-bucket pill colors (rail row + detail subline). Unrelated
+-- to signup status — these describe how soon the event is.
 local STATUS_COLORS = {
     TODAY    = "ff00ff00",
     SOON     = "ffffd100",
@@ -31,32 +34,13 @@ local ROLE_LABELS = {
     DPS    = "|cffff4444DPS|r",
 }
 
--- Signup status → display group. The full set is mirrored from the
--- platform's ATTENDANCE_STATUSES (client/src/utils.js); label strings
--- are kept verbatim so chat-announce + UI rows read the same here as
--- they do on the website + in the Discord embed.
---
---   P   Present (committed)            L   Late (committed)
---   LT  Late (officer) (committed)     B   Bench (committed)
---   T   Tentative                      A   Absent
---   LE  Left early (tier-2; addon-                RM  Replaced mid-raid (tier-2)
---       rarely produces this, but we surface it if it lands)
-local COMMITTED_STATUSES = { P = true, L = true, LT = true, B = true }
-local STATUS_LABELS = {
-    P  = "Present",
-    L  = "Late",
-    LT = "Late (officer)",
-    B  = "Bench",
-    T  = "Tentative",
-    A  = "Absent",
-    LE = "Left early",
-    RM = "Replaced mid-raid",
-}
-local STATUS_LABEL_COLORS = {
-    P  = "ff00ff00", L  = "ffffd100", LT = "ffffaa00", B = "ff888888",
-    T  = "ffaaaaaa", A  = "ffff5555",
-    LE = "ffff8800", RM = "ff66ccff",
-}
+-- Signup status enum + labels live in Util/SignupStatus.lua so chat
+-- helpers, UI rows, and any future surface stay in sync. Bind the
+-- tables to file-locals so the per-row code stays terse.
+local STATUS_LABELS         = WGS.SIGNUP_STATUS_LABELS
+local STATUS_LABEL_COLORS   = WGS.SIGNUP_STATUS_COLORS
+local COMMITTED_STATUSES    = WGS.SIGNUP_STATUS_COMMITTED
+local ROSTER_GROUP_ORDER    = WGS.SIGNUP_STATUS_ORDER
 
 -- Local copies of the small helpers from the old table renderer.
 -- BuildSignupCounts walks db.global.signups once per refresh; cheap
@@ -304,12 +288,6 @@ local function BuildSectionHeader(parent, anchor, label, width)
     fs._sectionWidth = width    -- caller uses this for child sizing
     return fs
 end
-
--- Order in which the per-status groups render. Mirrors the Discord
--- embed's field order so the addon and the web embed read in the same
--- sequence (Present → Late → Late(officer) → Bench → Tentative →
--- Absent → tier-2 codes). Empty groups are skipped at render time.
-local ROSTER_GROUP_ORDER = { "P", "L", "LT", "B", "T", "A", "LE", "RM" }
 
 -- Render the Roster section. Layout, top to bottom:
 --   Section title + "N gear gaps" summary on the same line
