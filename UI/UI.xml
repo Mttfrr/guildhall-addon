@@ -3,6 +3,7 @@
     <Script file="UIHelpers.lua"/>
     <Script file="Tabs\Dashboard.lua"/>
     <Script file="Tabs\Roster.lua"/>
+    <Script file="Tabs\Raid.lua"/>
     <Script file="MainFrame.lua"/>
     <Script file="LootFrame.lua"/>
     <Script file="AttendanceFrame.lua"/>
