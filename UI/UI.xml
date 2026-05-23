@@ -10,6 +10,7 @@
     <Script file="AttendanceFrame.lua"/>
     <Script file="WishlistTooltip.lua"/>
     <Script file="BossNotesFrame.lua"/>
+    <Script file="EventsDetail.lua"/>
     <Script file="EventsFrame.lua"/>
     <Script file="LootDistHelper.lua"/>
 </Ui>
