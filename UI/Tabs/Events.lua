@@ -34,10 +34,19 @@ local function BuildEventsTab(parent)
     -- stops above the sticky footer so the rail and the detail panel
     -- end at the same y — otherwise the rail's scrollbar dangles
     -- below the detail's, which reads as misaligned.
+    --
+    -- ScrollFrame width = RAIL_W - 22 (not RAIL_W). UIPanelScrollFrame-
+    -- Template anchors its scrollbar 4 px to the RIGHT of the frame's
+    -- TOPRIGHT, so a full-RAIL_W ScrollFrame puts the scrollbar at
+    -- x = RAIL_W+4..+21 — that's inside the detail panel's left edge
+    -- (RAIL_W + GAP_W = 220), so the scrollbar would overlap the
+    -- first ~12 px of the detail content (eating the first letter of
+    -- the title + the section dividers' left edge — which looked like
+    -- a "dark square" in the screenshot).
     local railSf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
     railSf:SetPoint("TOPLEFT",     parent, "TOPLEFT",     0, 0)
     railSf:SetPoint("BOTTOMLEFT",  parent, "BOTTOMLEFT",  0, FOOTER_H + 4)
-    railSf:SetWidth(RAIL_W)
+    railSf:SetWidth(RAIL_CONTENT_W)
     local railContent = CreateFrame("Frame", nil, railSf)
     railContent:SetWidth(RAIL_CONTENT_W)
     railContent:SetHeight(1)
