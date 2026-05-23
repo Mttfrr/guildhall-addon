@@ -25,6 +25,7 @@ local ClearContainer       = ui.ClearContainer
 local CreateScrollContent  = ui.CreateScrollContent
 local SelectSubView        = ui.SelectSubView
 local BuildSubNav          = ui.BuildSubNav
+local ApplyClassIcon       = ui.ApplyClassIcon
 
 -- Forward declarations: BuildRosterCheckSubView + PopulateRosterCheck
 -- are referenced by BuildTeamsTab's sub-nav callback before they're
@@ -35,35 +36,9 @@ local PopulateRosterCheck
 local BuildWishlistsSubView
 local PopulateWishlists
 
----------------------------------------------------------------------------
--- Class icon helper
---
--- WoW ships a 64×64 sprite sheet of all class icons at
--- Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes, indexed
--- via the CLASS_ICON_TCOORDS global. Falls back to a class-coloured
--- square if the class is unknown (defensive — adding a new class
--- mid-expansion would otherwise show a broken texture).
----------------------------------------------------------------------------
-
-local CLASS_ICON_PATH = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
-
-local function ApplyClassIcon(texture, classFile, color)
-    classFile = (classFile or ""):upper()
-    local tc = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
-    if tc then
-        texture:SetTexture(CLASS_ICON_PATH)
-        texture:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
-        texture:SetVertexColor(1, 1, 1, 1)
-    elseif color then
-        -- Class color extracted from "AABBGGRR" hex; class-coloured tile.
-        local r = tonumber(color:sub(3, 4), 16) / 255
-        local g = tonumber(color:sub(5, 6), 16) / 255
-        local b = tonumber(color:sub(7, 8), 16) / 255
-        texture:SetColorTexture(r, g, b, 1)
-    else
-        texture:SetColorTexture(0.4, 0.4, 0.4, 1)
-    end
-end
+-- Class-icon + numeric-cell helpers live in UI/UIHelpers.lua (ui.Apply-
+-- ClassIcon, ui.BuildNumericCell) so the Events tab's Roster section
+-- can reuse them without duplicating the sprite path / severity rules.
 
 ---------------------------------------------------------------------------
 -- Character / gear-info helpers
@@ -237,36 +212,11 @@ local function BuildHeaderCell(parent, col, key, x, sortKey, sortDir, onClick)
     return btn
 end
 
--- Numeric cell: right-aligned text with severity colour.
---   0 → green, 1-3 → orange, 4+ → red. Below-target ilvl follows the
---   same scale (0 issues; ilvl < target counts as 1).
+-- Thin wrapper around ui.BuildNumericCell that adapts the col-record
+-- API to the helper's positional args. Kept here so existing row-build
+-- call sites read identically.
 local function BuildNumericCell(parent, col, x, value, isProblemWhenAbove0, yOff)
-    local cell = CreateFrame("Frame", nil, parent)
-    cell:SetSize(col.w, ROW_H)
-    cell:SetPoint("TOPLEFT", parent, "TOPLEFT", x, yOff)
-
-    local text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("RIGHT", cell, "RIGHT", -10, 0)
-
-    if isProblemWhenAbove0 then
-        local n = value or 0
-        local color
-        if n == 0       then color = "ff00ff00"
-        elseif n >= 4   then color = "ffff4444"
-        else                 color = "ffff8800" end
-        text:SetText("|c" .. color .. n .. "|r")
-    else
-        -- ilvl-style: green at-target, orange below-target.
-        local target = WGS.db.global.targetIlvl or 0
-        if not value or value == 0 then
-            text:SetText("|cff666666\226\128\148|r")  -- em dash
-        elseif target > 0 and value < target then
-            text:SetText("|cffff8800" .. value .. "|r")
-        else
-            text:SetText("|cff00ff00" .. value .. "|r")
-        end
-    end
-    return cell
+    return ui.BuildNumericCell(parent, x, yOff, col.w, ROW_H, value, isProblemWhenAbove0)
 end
 
 -- Build one data row.

@@ -1,5 +1,9 @@
 ---@type GuildHall
 local WGS = GuildHall
+local ui = WGS._ui
+
+local ApplyClassIcon  = ui.ApplyClassIcon
+local BuildNumericCell = ui.BuildNumericCell
 
 -- Events tab render: master-detail. The rail (left, narrow) lists every
 -- imported event sorted by start time; clicking a row loads that event
@@ -349,51 +353,67 @@ local function PopulateRosterSection(content, anchor, roster, width)
         return (a.short or "") < (b.short or "")
     end)
 
+    -- Column geometry. Matches the Teams sub-view's row layout (class
+    -- icon + name → numeric cells for iLvl / Enchants / Gems) but
+    -- narrower since the Events detail panel is ~420 px vs Teams' 660.
+    -- Status is a colored text cell on the left so officers scanning
+    -- top-down see "who's in what bucket" before reading gear.
+    -- Columns chosen to leave ~12 px slack against a typical sectionW
+    -- so a wider detail panel (resized main frame in a future commit)
+    -- still fits without overlap.
+    local ROW_H        = 18
+    local COL_STATUS_X = 4
+    local COL_STATUS_W = 70
+    local COL_ICON_X   = 78
+    local COL_NAME_X   = 98
+    local COL_NAME_W   = 130
+    local COL_ILVL_X   = 232
+    local COL_ILVL_W   = 50
+    local COL_ENCH_X   = 286
+    local COL_ENCH_W   = 60
+    local COL_GEMS_X   = 350
+    local COL_GEMS_W   = 50
+
     local last = header
     for _, row in ipairs(roster.rows) do
         local r = CreateFrame("Frame", nil, content)
-        r:SetSize(width, 16)
+        r:SetSize(width, ROW_H)
         r:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -3)
         r:SetPoint("TOPRIGHT", last == header and header or last, "BOTTOMRIGHT", 0, -3)
 
-        -- Name (class-coloured)
-        local classFile = WGS:NormalizeClassFile(row.class or "")
-        local colorHex  = WGS.CLASS_COLORS[classFile] or "ffffffff"
-        local nameFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        nameFs:SetPoint("LEFT", r, "LEFT", 4, 0)
-        nameFs:SetWidth(140)
-        nameFs:SetJustifyH("LEFT")
-        nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
-
-        -- Status badge
-        local statusFs = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        statusFs:SetPoint("LEFT", nameFs, "RIGHT", 4, 0)
-        statusFs:SetWidth(60)
+        -- Status (colored text — the only Events-specific column; sits
+        -- at the head of the row the way Teams' online dot does).
+        local statusFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        statusFs:SetPoint("LEFT", r, "LEFT", COL_STATUS_X, 0)
+        statusFs:SetWidth(COL_STATUS_W)
+        statusFs:SetJustifyH("LEFT")
         statusFs:SetText(string.format("|c%s%s|r",
             STATUS_LABEL_COLORS[row.status] or "ffaaaaaa",
             STATUS_LABELS[row.status] or row.status or "?"))
 
-        -- iLvl
-        local ilvlFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        ilvlFs:SetPoint("LEFT", statusFs, "RIGHT", 4, 0)
-        ilvlFs:SetWidth(36)
-        ilvlFs:SetJustifyH("RIGHT")
-        ilvlFs:SetText(row.ilvl > 0 and tostring(row.ilvl) or "|cff555555—|r")
+        -- Class icon (real 16×16 sprite from the Blizz class sheet) +
+        -- class-coloured name. Mirrors the Teams tab's name cell.
+        local classFile = WGS:NormalizeClassFile(row.class or "")
+        local colorHex  = WGS.CLASS_COLORS[classFile] or "ffffffff"
 
-        -- Gear-gap badges. Plain numbers (per the Teams tab convention)
-        -- coloured red when non-zero so a glance shows which signups
-        -- have something to fix before pull.
-        local gapText = ""
-        if row.missingEnchants > 0 then
-            gapText = gapText .. "|cffff5555E" .. row.missingEnchants .. "|r "
-        end
-        if row.missingGems > 0 then
-            gapText = gapText .. "|cffff5555G" .. row.missingGems .. "|r"
-        end
-        if gapText == "" then gapText = "|cff00ff00✓|r" end
-        local gapFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        gapFs:SetPoint("LEFT", ilvlFs, "RIGHT", 8, 0)
-        gapFs:SetText(gapText)
+        local icon = r:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(16, 16)
+        icon:SetPoint("LEFT", r, "LEFT", COL_ICON_X, 0)
+        ApplyClassIcon(icon, classFile, colorHex)
+
+        local nameFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        nameFs:SetPoint("LEFT", r, "LEFT", COL_NAME_X, 0)
+        nameFs:SetWidth(COL_NAME_W)
+        nameFs:SetJustifyH("LEFT")
+        nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
+
+        -- Numeric cells via the shared helper — same severity rules as
+        -- the Teams sub-view. ilvl uses the at-target green / below-
+        -- target orange logic; enchants + gems use 0=green / 1-3=orange
+        -- / 4+=red.
+        BuildNumericCell(r, COL_ILVL_X, 0, COL_ILVL_W, ROW_H, row.ilvl, false)
+        BuildNumericCell(r, COL_ENCH_X, 0, COL_ENCH_W, ROW_H, row.missingEnchants, true)
+        BuildNumericCell(r, COL_GEMS_X, 0, COL_GEMS_W, ROW_H, row.missingGems, true)
 
         last = r
     end

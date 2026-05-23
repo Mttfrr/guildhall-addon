@@ -171,3 +171,71 @@ end
 ---------------------------------------------------------------------------
 
 ui.tabs = ui.tabs or {}
+
+---------------------------------------------------------------------------
+-- Shared row chrome — class icon + numeric cell
+--
+-- Both the Teams sub-view (UI/Tabs/Teams.lua) and the Events detail
+-- panel's Roster section (UI/EventsFrame.lua) render rows of
+-- "[class icon] Name … iLvl … Enchants … Gems …". Keeping the helpers
+-- here means the two surfaces can't drift on icon path, severity
+-- thresholds, or em-dash for missing data.
+---------------------------------------------------------------------------
+
+local CLASS_ICON_PATH = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+
+-- WoW ships a 64×64 sprite sheet of all class icons indexed via the
+-- CLASS_ICON_TCOORDS global. Falls back to a class-coloured square if
+-- the class is unknown (defensive — adding a new class mid-expansion
+-- would otherwise show a broken texture).
+function ui.ApplyClassIcon(texture, classFile, color)
+    classFile = (classFile or ""):upper()
+    local tc = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
+    if tc then
+        texture:SetTexture(CLASS_ICON_PATH)
+        texture:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+        texture:SetVertexColor(1, 1, 1, 1)
+    elseif color then
+        -- Class color extracted from "AABBGGRR" hex; class-coloured tile.
+        local r = tonumber(color:sub(3, 4), 16) / 255
+        local g = tonumber(color:sub(5, 6), 16) / 255
+        local b = tonumber(color:sub(7, 8), 16) / 255
+        texture:SetColorTexture(r, g, b, 1)
+    else
+        texture:SetColorTexture(0.4, 0.4, 0.4, 1)
+    end
+end
+
+-- Right-aligned numeric cell with severity colouring.
+--   isProblemWhenAbove0 = true   → 0 green · 1-3 orange · 4+ red
+--   isProblemWhenAbove0 = false  → ilvl-style: at/above target green,
+--                                  below target orange, missing em-dash
+-- Returns the frame so the caller can anchor a tooltip / hit area.
+function ui.BuildNumericCell(parent, x, yOff, width, height, value, isProblemWhenAbove0)
+    local cell = CreateFrame("Frame", nil, parent)
+    cell:SetSize(width, height)
+    cell:SetPoint("TOPLEFT", parent, "TOPLEFT", x, yOff)
+
+    local text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("RIGHT", cell, "RIGHT", -8, 0)
+
+    if isProblemWhenAbove0 then
+        local n = value or 0
+        local color
+        if n == 0       then color = "ff00ff00"
+        elseif n >= 4   then color = "ffff4444"
+        else                 color = "ffff8800" end
+        text:SetText("|c" .. color .. n .. "|r")
+    else
+        local target = WGS.db and WGS.db.global and WGS.db.global.targetIlvl or 0
+        if not value or value == 0 then
+            text:SetText("|cff666666\226\128\148|r")  -- em dash
+        elseif target > 0 and value < target then
+            text:SetText("|cffff8800" .. value .. "|r")
+        else
+            text:SetText("|cff00ff00" .. value .. "|r")
+        end
+    end
+    cell.text = text
+    return cell
+end
