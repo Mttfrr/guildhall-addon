@@ -20,6 +20,27 @@ local STATUS_COLORS = {
     PAST     = "ff666666",
 }
 
+local ROLE_ORDER  = { "TANK", "HEALER", "DPS" }
+local ROLE_LABELS = {
+    TANK   = "|cff5599ffTanks|r",
+    HEALER = "|cff00ff00Healers|r",
+    DPS    = "|cffff4444DPS|r",
+}
+
+-- Signup status → display group. The web platform's status codes:
+--   P  Present (committed)        L  Late (committed)
+--   LT Late tentative (committed) B  Bench (committed but benched)
+--   T  Tentative                  A  Absent
+local COMMITTED_STATUSES = { P = true, L = true, LT = true, B = true }
+local STATUS_LABELS = {
+    P = "Going", L = "Late", LT = "Late?", B = "Bench",
+    T = "Tentative", A = "Absent",
+}
+local STATUS_LABEL_COLORS = {
+    P = "ff00ff00", L = "ffffd100", LT = "ffffaa00", B = "ff888888",
+    T = "ffaaaaaa", A = "ffff5555",
+}
+
 -- Local copies of the small helpers from the old table renderer.
 -- BuildSignupCounts walks db.global.signups once per refresh; cheap
 -- enough at typical guild sizes (a few hundred rows).
@@ -162,12 +183,223 @@ local function PopulateRail(frame, decoratedEvents, selectedId)
 end
 
 ---------------------------------------------------------------------------
+-- Detail panel sections
+---------------------------------------------------------------------------
+
+-- Build the per-signup row list for an event. Each row pairs the
+-- signup status with the character's gear summary from characterDetails
+-- so officers see "Foo-Realm — Going · 632 · 2 enchants missing" on
+-- one line. This is the per-event replacement for the standalone
+-- Readiness sub-view which walked the live raid instead.
+local function BuildEventRoster(eventId)
+    local out = { committedCount = 0, tentativeCount = 0, gearGapCount = 0, rows = {} }
+    local signups = WGS.db.global.signups
+    if type(signups) ~= "table" or not eventId then return out end
+    local details = WGS.db.global.characterDetails or {}
+
+    for _, s in ipairs(signups) do
+        if s.eventId == eventId and s.characterName then
+            local short = s.characterName:match("^([^%-]+)") or s.characterName
+            local d = details[short] or {}
+            local row = {
+                short            = short,
+                fullName         = s.characterName,
+                status           = s.status,
+                class            = d.class or s.class,
+                spec             = d.spec,
+                ilvl             = d.ilvl or 0,
+                missingEnchants  = d.missingEnchants or 0,
+                missingGems      = d.missingGems or 0,
+            }
+            if (row.missingEnchants + row.missingGems) > 0 then
+                out.gearGapCount = out.gearGapCount + 1
+            end
+            if COMMITTED_STATUSES[s.status] then
+                out.committedCount = out.committedCount + 1
+            elseif s.status == "T" then
+                out.tentativeCount = out.tentativeCount + 1
+            end
+            out.rows[#out.rows + 1] = row
+        end
+    end
+    return out
+end
+
+-- Pulls the raid comp for `eventId` from db.global.raidComps. The
+-- comp shape is normalised on import to { eventId, name, assignments }
+-- (see Modules/Import.lua). Returns nil if no comp exists for this
+-- event, in which case the section just renders "No comp planned".
+local function FindRaidCompForEvent(eventId)
+    if not eventId then return nil end
+    local comps = WGS.db.global.raidComps
+    if type(comps) ~= "table" then return nil end
+    for _, c in ipairs(comps) do
+        if c.eventId == eventId then return c end
+    end
+    return nil
+end
+
+-- A horizontal divider with a section label. Used to separate the
+-- detail panel's stacked sections without leaning on heavy frames.
+local function BuildSectionHeader(parent, anchor, label, width)
+    local divider = parent:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT",  anchor, "BOTTOMLEFT",  0, -8)
+    divider:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -8)
+    divider:SetHeight(1)
+    divider:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+
+    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetPoint("TOPLEFT", divider, "BOTTOMLEFT", 4, -4)
+    fs:SetText("|cffffd100" .. label .. "|r")
+    fs._sectionWidth = width    -- caller uses this for child sizing
+    return fs
+end
+
+-- Render the Roster section: one row per signup with class colour,
+-- status badge, ilvl, missing-enchant + missing-gem counts. Sorted by
+-- status group then name so committed players bubble to the top.
+local function PopulateRosterSection(content, anchor, roster, width)
+    local header = BuildSectionHeader(content, anchor, "Roster", width)
+
+    -- Header summary line: "12 committed · 4 tentative · 3 with gear gaps".
+    local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    summary:SetPoint("LEFT", header, "RIGHT", 12, 0)
+    summary:SetText(string.format(
+        "|cff00ff00%d|r committed · |cffaaaaaa%d|r tentative · |cffff5555%d|r gear gaps",
+        roster.committedCount, roster.tentativeCount, roster.gearGapCount))
+
+    if #roster.rows == 0 then
+        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        empty:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+        empty:SetText("No signups yet for this event.")
+        return empty
+    end
+
+    -- Sort: committed first, then tentative, then absent; within each
+    -- group, alphabetic by short name. Officers reading top-down see
+    -- "who's in" first.
+    local function statusBucket(s)
+        if COMMITTED_STATUSES[s] then return 1 end
+        if s == "T" then return 2 end
+        return 3
+    end
+    table.sort(roster.rows, function(a, b)
+        local ba, bb = statusBucket(a.status), statusBucket(b.status)
+        if ba ~= bb then return ba < bb end
+        return (a.short or "") < (b.short or "")
+    end)
+
+    local last = header
+    for _, row in ipairs(roster.rows) do
+        local r = CreateFrame("Frame", nil, content)
+        r:SetSize(width, 16)
+        r:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -3)
+        r:SetPoint("TOPRIGHT", last == header and header or last, "BOTTOMRIGHT", 0, -3)
+
+        -- Name (class-coloured)
+        local classFile = WGS:NormalizeClassFile(row.class or "")
+        local colorHex  = WGS.CLASS_COLORS[classFile] or "ffffffff"
+        local nameFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        nameFs:SetPoint("LEFT", r, "LEFT", 4, 0)
+        nameFs:SetWidth(140)
+        nameFs:SetJustifyH("LEFT")
+        nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
+
+        -- Status badge
+        local statusFs = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        statusFs:SetPoint("LEFT", nameFs, "RIGHT", 4, 0)
+        statusFs:SetWidth(60)
+        statusFs:SetText(string.format("|c%s%s|r",
+            STATUS_LABEL_COLORS[row.status] or "ffaaaaaa",
+            STATUS_LABELS[row.status] or row.status or "?"))
+
+        -- iLvl
+        local ilvlFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        ilvlFs:SetPoint("LEFT", statusFs, "RIGHT", 4, 0)
+        ilvlFs:SetWidth(36)
+        ilvlFs:SetJustifyH("RIGHT")
+        ilvlFs:SetText(row.ilvl > 0 and tostring(row.ilvl) or "|cff555555—|r")
+
+        -- Gear-gap badges. Plain numbers (per the Teams tab convention)
+        -- coloured red when non-zero so a glance shows which signups
+        -- have something to fix before pull.
+        local gapText = ""
+        if row.missingEnchants > 0 then
+            gapText = gapText .. "|cffff5555E" .. row.missingEnchants .. "|r "
+        end
+        if row.missingGems > 0 then
+            gapText = gapText .. "|cffff5555G" .. row.missingGems .. "|r"
+        end
+        if gapText == "" then gapText = "|cff00ff00✓|r" end
+        local gapFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        gapFs:SetPoint("LEFT", ilvlFs, "RIGHT", 8, 0)
+        gapFs:SetText(gapText)
+
+        last = r
+    end
+
+    return last
+end
+
+-- Render the Raid Comp section: assignments grouped by role, mirroring
+-- the old standalone Raid Comp sub-view. Returns the bottom widget so
+-- the next section anchors to it.
+local function PopulateRaidCompSection(content, anchor, comp, width)
+    local header = BuildSectionHeader(content, anchor, "Raid Comp", width)
+
+    if not comp then
+        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        empty:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -6)
+        empty:SetText("No comp planned for this event.")
+        return empty
+    end
+
+    -- Group assignments by role.
+    local assignments = comp.assignments or comp.members or {}
+    local byRole = { TANK = {}, HEALER = {}, DPS = {} }
+    for _, m in ipairs(assignments) do
+        local role = (m.role or "DPS"):upper()
+        if not byRole[role] then role = "DPS" end
+        byRole[role][#byRole[role] + 1] = m
+    end
+
+    local last = header
+    for _, role in ipairs(ROLE_ORDER) do
+        local members = byRole[role]
+        if #members > 0 then
+            local roleFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            roleFs:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, last == header and -6 or -4)
+            roleFs:SetText((ROLE_LABELS[role] or role) .. " (" .. #members .. ")")
+            last = roleFs
+
+            for _, m in ipairs(members) do
+                local nameStr   = m.name or m.playerName or m.characterName or "Unknown"
+                local classFile = WGS:NormalizeClassFile(m.class or m.classFile or "")
+                local colorHex  = WGS.CLASS_COLORS[classFile]
+
+                local row = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 12, -2)
+                row:SetWidth(width - 12)
+                row:SetJustifyH("LEFT")
+                local text = colorHex and ("|c" .. colorHex .. nameStr .. "|r") or nameStr
+                if m.spec and m.spec ~= "" then
+                    text = text .. "  |cff888888" .. m.spec .. "|r"
+                elseif m.note and m.note ~= "" then
+                    text = text .. "  |cff888888" .. m.note .. "|r"
+                end
+                row:SetText(text)
+                last = row
+            end
+        end
+    end
+
+    return last
+end
+
+---------------------------------------------------------------------------
 -- Detail panel rendering
 ---------------------------------------------------------------------------
 
--- Phase 1 detail: header only (title, date, team, status pill, signup
--- summary). The Roster / Raid Comp / Boss Notes / Actions sections
--- land in later commits and slot in below the header.
 local function PopulateDetail(frame, ev)
     local content = frame.detailContent
     for _, child in ipairs({ content:GetChildren() }) do child:Hide() end
@@ -180,6 +412,8 @@ local function PopulateDetail(frame, ev)
         content:SetHeight(40)
         return
     end
+
+    local sectionW = content:GetWidth() - 8
 
     -- Title (large)
     local title = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
@@ -203,28 +437,36 @@ local function PopulateDetail(frame, ev)
     parts[#parts + 1] = "|c" .. statusColor .. statusText .. "|r"
     subline:SetText(table.concat(parts, "  ·  "))
 
-    -- Signup summary (one line; the Roster section in a later commit
-    -- will show the per-player list).
-    local committed = ev._counts and ev._counts.committed or 0
-    local tentative = ev._counts and ev._counts.tentative or 0
-    local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    summary:SetPoint("TOPLEFT", subline, "BOTTOMLEFT", 0, -8)
-    summary:SetText(string.format(
-        "|cff00ff00%d|r committed   |cffaaaaaa%d|r tentative", committed, tentative))
+    local lastAnchor = subline
 
-    -- Description, if any. Truncated tooltips are gone — we now have
-    -- room to show the full text in the detail panel.
+    -- Description, if any.
     if ev.description and ev.description ~= "" then
         local desc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        desc:SetPoint("TOPLEFT", summary, "BOTTOMLEFT", 0, -10)
-        desc:SetPoint("TOPRIGHT", content, "TOPRIGHT", -8, -52)
+        desc:SetPoint("TOPLEFT", subline, "BOTTOMLEFT", 0, -6)
+        desc:SetPoint("TOPRIGHT", subline, "BOTTOMRIGHT", 0, -6)
         desc:SetJustifyH("LEFT")
         desc:SetWordWrap(true)
         desc:SetText("|cffcccccc" .. ev.description .. "|r")
-        content:SetHeight(120)
-    else
-        content:SetHeight(80)
+        lastAnchor = desc
     end
+
+    -- Roster section
+    local roster = BuildEventRoster(ev.id)
+    lastAnchor = PopulateRosterSection(content, lastAnchor, roster, sectionW)
+
+    -- Raid Comp section. Anchor isn't reused yet — later phases (Boss
+    -- Notes, Actions) chain off the next section's bottom.
+    local comp = FindRaidCompForEvent(ev.id)
+    PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
+
+    -- Grow the scroll content so the bottom of the last section is
+    -- reachable. We can't introspect every child's offset cleanly, so
+    -- a generous fixed allowance (roster row × signups + comp rows)
+    -- is fine — the scrollbar handles overflow either way.
+    local approxHeight = 100
+        + (#roster.rows * 19)
+        + (comp and (40 + #(comp.assignments or comp.members or {}) * 18) or 30)
+    content:SetHeight(approxHeight)
 end
 
 ---------------------------------------------------------------------------
