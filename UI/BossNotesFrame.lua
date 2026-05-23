@@ -28,26 +28,36 @@ function WGS:PopulateBossNotes(container, encounterName)
     end
 
     local notes = self:GetBossNotes(encounterName)
-    if not notes then
+    -- MRT shared note is global (not per-boss), but it's what raiders
+    -- actually look at mid-pull — surface it whenever it's present, so
+    -- bosses without GuildHall notes still get the MRT context.
+    local mrtNote = self:GetMRTNote()
+
+    local sections = {}
+    if notes then
+        if notes.strategy then
+            sections[#sections + 1] = "|cffffd100Strategy:|r\n" .. notes.strategy
+        end
+        if notes.assignments then
+            sections[#sections + 1] = "|cffffd100Assignments:|r\n" .. notes.assignments
+        end
+        if notes.notes then
+            sections[#sections + 1] = "|cffffd100Notes:|r\n" .. notes.notes
+        end
+        if notes.videoUrl then
+            sections[#sections + 1] = "|cffffd100Video:|r " .. notes.videoUrl
+        end
+    end
+    if mrtNote then
+        sections[#sections + 1] = "|cff66ccffMRT Note:|r\n" .. mrtNote
+    end
+
+    if #sections == 0 then
         container.noteText:SetText("|cff888888No notes found for: " .. encounterName .. "|r")
         container.content:SetHeight(40)
         return
     end
 
-    local text = ""
-    if notes.strategy then
-        text = text .. "|cffffd100Strategy:|r\n" .. notes.strategy .. "\n\n"
-    end
-    if notes.assignments then
-        text = text .. "|cffffd100Assignments:|r\n" .. notes.assignments .. "\n\n"
-    end
-    if notes.notes then
-        text = text .. "|cffffd100Notes:|r\n" .. notes.notes .. "\n\n"
-    end
-    if notes.videoUrl then
-        text = text .. "|cffffd100Video:|r " .. notes.videoUrl .. "\n"
-    end
-
-    container.noteText:SetText(text)
+    container.noteText:SetText(table.concat(sections, "\n\n"))
     container.content:SetHeight(container.noteText:GetStringHeight() + 20)
 end

@@ -5,4 +5,5 @@
     <Script file="Import.lua"/>
     <Script file="MOTD.lua"/>
     <Script file="EventScheduler.lua"/>
+    <Script file="MRTNotes.lua"/>
 </Ui>

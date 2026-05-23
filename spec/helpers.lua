@@ -98,6 +98,7 @@ function M.setup()
     dofile("Modules/Import.lua")
     dofile("Modules/EventScheduler.lua")
     dofile("Modules/Attendance.lua")
+    dofile("Modules/MRTNotes.lua")
 
     -- Test shim for the public event bus. The real registry is wired
     -- in WGS:OnInitialize via CallbackHandler-1.0, which isn't loaded
