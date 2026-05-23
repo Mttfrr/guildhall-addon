@@ -68,6 +68,19 @@ WGS.CLASS_COLORS = {
     EVOKER      = "ff33937f",
 }
 
+-- Convert any class string into Blizzard's classFile constant form
+-- (UPPERCASE, no spaces). The platform's export ships localized
+-- display names like "Death Knight" / "Demon Hunter"; GetGuildRosterInfo
+-- returns the file constant directly. Both flow through the same
+-- CLASS_COLORS / CLASS_ICON_TCOORDS lookups, so a single normaliser
+-- avoids per-call-site `:upper():gsub("%s", "")` churn — and the
+-- spaces in "Death Knight" / "Demon Hunter" were precisely why those
+-- two classes rendered with a white name + a blank icon rectangle.
+function WGS:NormalizeClassFile(class)
+    if not class or class == "" then return "" end
+    return (class:upper():gsub("%s", ""))
+end
+
 ---------------------------------------------------------------------------
 -- Guild roster lookup (cached 10s)
 ---------------------------------------------------------------------------

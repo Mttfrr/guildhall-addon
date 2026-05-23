@@ -73,13 +73,18 @@ end
 --   characterDetails (most authoritative — server-supplied)
 --   GetGuildRosterInfo lookup
 --   nil (caller renders without a class color)
+--
+-- Always returns the file-constant form ("DEATHKNIGHT", "DEMONHUNTER")
+-- so downstream CLASS_COLORS / CLASS_ICON_TCOORDS lookups work
+-- regardless of source: characterDetails carries localized display
+-- names like "Death Knight"; roster carries the file constant already.
 local function ResolveClass(charName, roster)
     local details = WGS.db.global.characterDetails
     local key = charName:match("^([^%-]+)") or charName
     local d = details and details[key]
-    if d and d.class and d.class ~= "" then return d.class end
+    if d and d.class and d.class ~= "" then return WGS:NormalizeClassFile(d.class) end
     local gi = roster[key]
-    if gi and gi.class then return gi.class end
+    if gi and gi.class then return WGS:NormalizeClassFile(gi.class) end
     return nil
 end
 
@@ -96,8 +101,9 @@ end
 -- Each line is "|cAARRGGBBtext|r" ready to feed into GameTooltip:AddLine.
 local function BuildAltTooltipLines(charName, roster)
     local info = GetCharacterDetails(charName)
+    -- ResolveClass already returns the file-constant form.
     local class = ResolveClass(charName, roster) or ""
-    local colorHex = WGS.CLASS_COLORS[class:upper()] or WGS.CLASS_COLORS[class] or "ffffffff"
+    local colorHex = WGS.CLASS_COLORS[class] or "ffffffff"
     local short = charName:match("^([^%-]+)") or charName
 
     local lines = {}
@@ -276,11 +282,12 @@ local function BuildDataRow(parent, member, roster, yOff, evenStripe)
         bg:SetColorTexture(1, 1, 1, 0.025)
     end
 
-    -- Character cell: online dot + class icon + class-coloured name
+    -- Character cell: online dot + class icon + class-coloured name.
+    -- ResolveClass already normalises to the file-constant form so the
+    -- two lookups below don't have to.
     local short    = member.short
-    local class    = ResolveClass(member.name, roster)
-    local classFile = (class or ""):upper()
-    local colorHex = WGS.CLASS_COLORS[classFile] or WGS.CLASS_COLORS[class] or "ffffffff"
+    local classFile = ResolveClass(member.name, roster) or ""
+    local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
     local gi       = roster[short]
 
     local nameCell = CreateFrame("Frame", nil, row)

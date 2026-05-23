@@ -65,8 +65,10 @@ local function PopulateReadiness(frame)
                 row:SetSize(contentWidth, 32)
                 row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, yOffset)
 
-                -- Class-colored name
-                local classFile = (entry.class or ""):upper()
+                -- Class-colored name. Normalise so "Death Knight" /
+                -- "Demon Hunter" (localised display names from the
+                -- platform import) resolve to the file-constant keys.
+                local classFile = WGS:NormalizeClassFile(entry.class or "")
                 local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
                 local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
                 nameText:SetPoint("TOPLEFT", row, "TOPLEFT", 5, -2)

@@ -86,9 +86,11 @@ local function PopulateRaidComp(frame)
 
                     local nameStr = member.name or member.playerName or member.characterName or "Unknown"
 
-                    -- Apply class color if class info is available
-                    local classFile = member.class or member.classFile or ""
-                    classFile = classFile:upper()
+                    -- Apply class color if class info is available. The
+                    -- normalise step folds localised display names like
+                    -- "Death Knight" into the file-constant key that
+                    -- CLASS_COLORS uses.
+                    local classFile = WGS:NormalizeClassFile(member.class or member.classFile or "")
                     local colorHex = WGS.CLASS_COLORS[classFile]
 
                     local nameText = memberRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
