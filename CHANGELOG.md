@@ -4,6 +4,10 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Fixed
+- **Events tab visual polish.** Three rail/detail tweaks: (1) the rail row now shows the full time range (`20:00–23:00`) instead of just start time when the event carries `end_time` — same in the detail panel subline. (2) The status pill (`TODAY` / `SOON` / `UPCOMING` / `PAST`) moves off the bottom row up to the top-right of the rail row, next to the date; previously it sat 2 px under the title and read as crowding. Row height bumps from 38 to 50 px to give the title its own clean line. (3) The four action buttons (Invite, Share Roster, Share Gear Gaps, Share Comp) become a sticky footer outside the scroll frame, so they stay reachable no matter how far down the user has scrolled a long roster.
+- **Team picker no longer renders as a red CTA button.** The title-bar team dropdown was using `UIPanelButtonTemplate` — the chunky red Blizzard button reserved for action buttons (Invite / Export / Announce). The picker is a chooser, not an action, so it now uses a plain backdrop button with a thin border, faint dark fill, and a listbox hover highlight. Same hit-area, same dropdown, just visually subordinated to the CTAs below.
+
 ### Changed
 - **Top-level IA rationalisation: 4 tabs + global team picker.** Five tabs collapse to four (`Events · Teams · Logs · Sync`) and a new global current-team picker scopes the addon to one team at a time. The reasoning: after the event-centric rework the Raids tab held only loot, Bank was a capture log of the same shape, and nothing in the UI respected the team_id that every event / attendance session already carries. Concrete changes:
   - **Tab order is officer-flow-first.** Events promotes to position 1 (the daily driver); Teams demotes to 2; Bank + Raids collapse into a new **Logs** tab at position 3 with sub-nav `Loot · Bank · Attendance`; Sync (renamed from "Import/Export") stays last. Default tab on open is Events.

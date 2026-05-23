@@ -19,8 +19,9 @@ local ui = WGS._ui
 
 local TAB_INDEX = ui.TAB_EVENTS
 
-local RAIL_W = 210
-local GAP_W  = 10
+local RAIL_W   = 210
+local GAP_W    = 10
+local FOOTER_H = 36   -- sticky action-buttons row at the bottom of the detail panel
 
 -- Inner-content width estimates per panel. The detail panel pin its
 -- right side to parent edge, so the content width is approximate —
@@ -41,10 +42,31 @@ local function BuildEventsTab(parent)
     parent.railScrollFrame = railSf
     parent.railContent     = railContent
 
+    -- Sticky action-button footer at the bottom of the detail panel.
+    -- The four share/invite buttons used to be the last section of the
+    -- scrolling content; for a long roster that meant scrolling all the
+    -- way down to use them. Pulling the footer out of the scroll frame
+    -- keeps the buttons reachable no matter how far down the user has
+    -- scrolled.
+    local detailFooter = CreateFrame("Frame", nil, parent)
+    detailFooter:SetPoint("BOTTOMLEFT",  parent, "BOTTOMLEFT",  RAIL_W + GAP_W, 0)
+    detailFooter:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -2, 0)
+    detailFooter:SetHeight(FOOTER_H)
+    parent.detailFooter = detailFooter
+
+    -- Thin separator above the footer so it reads as a distinct strip.
+    local footerSep = parent:CreateTexture(nil, "ARTWORK")
+    footerSep:SetPoint("BOTTOMLEFT",  detailFooter, "TOPLEFT",  0, 0)
+    footerSep:SetPoint("BOTTOMRIGHT", detailFooter, "TOPRIGHT", 0, 0)
+    footerSep:SetHeight(1)
+    footerSep:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+
     -- Detail (right): starts after rail + gap, runs to the right edge.
+    -- Bottom edge stops above the sticky footer so the scroll content
+    -- never overlaps the buttons.
     local detailSf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
     detailSf:SetPoint("TOPLEFT",     parent, "TOPLEFT",     RAIL_W + GAP_W, 0)
-    detailSf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    detailSf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, FOOTER_H + 4)
     local detailContent = CreateFrame("Frame", nil, detailSf)
     detailContent:SetWidth(DETAIL_CONTENT_W)
     detailContent:SetHeight(1)

@@ -78,18 +78,47 @@ local function TeamPickerLabel()
 end
 
 -- Build the title-bar picker. Anchored to the LEFT of the CloseButton
--- (the X provided by BasicFrameTemplateWithInset). Uses the same manual
--- popup pattern as the Wishlists boss dropdown — UIDropDownMenuTemplate
--- would do, but its sizing/anchoring API is fiddlier than a button + a
--- backdrop-styled frame.
+-- (the X provided by BasicFrameTemplateWithInset). Plain text button
+-- with a subtle border + hover highlight — NOT UIPanelButtonTemplate,
+-- which is the chunky red Blizz button reserved for CTAs (per the
+-- convention in BuildSubNav). The picker is a chooser, not an action.
 local function BuildTeamPicker(parent)
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(180, 20)
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetSize(180, 22)
     -- BasicFrameTemplateWithInset's CloseButton sits at the top-right;
     -- pin our picker just to its left so the title text on the far left
     -- and the picker on the right read as the frame's two header items.
-    btn:SetPoint("TOPRIGHT", parent.CloseButton or parent, "TOPLEFT", -2, -3)
-    btn:SetText(TeamPickerLabel() .. "  v")
+    btn:SetPoint("TOPRIGHT", parent.CloseButton or parent, "TOPLEFT", -2, -4)
+
+    -- Subtle 1px border + faint dark fill so the hit-area reads as
+    -- clickable without competing visually with the CTAs below.
+    btn:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+        insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    btn:SetBackdropColor(0, 0, 0, 0.35)
+    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+    local hl = btn:GetHighlightTexture()
+    if hl then hl:SetAlpha(0.25) end
+
+    -- Label + chevron rendered as separate font strings so the label
+    -- sits flush-left and the chevron sits flush-right inside the
+    -- backdrop.
+    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", btn, "LEFT", 6, 0)
+    label:SetPoint("RIGHT", btn, "RIGHT", -16, 0)
+    label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
+    label:SetText(TeamPickerLabel())
+    btn.label = label
+
+    local chevron = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    chevron:SetPoint("RIGHT", btn, "RIGHT", -4, 0)
+    chevron:SetText("|cffaaaaaav|r")
 
     local menu = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     menu:SetBackdrop({
@@ -153,7 +182,7 @@ local function BuildTeamPicker(parent)
         button  = btn,
         menu    = menu,
         refresh = function()
-            btn:SetText(TeamPickerLabel() .. "  v")
+            btn.label:SetText(TeamPickerLabel())
             if menu:IsShown() then rebuildMenu() end
         end,
     }

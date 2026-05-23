@@ -12,7 +12,7 @@ local WGS = GuildHall
 -- detail sections (Roster, Raid Comp, Boss Notes, Actions) land in
 -- later commits.
 
-local RAIL_ROW_H = 38
+local RAIL_ROW_H = 50
 local STATUS_COLORS = {
     TODAY    = "ff00ff00",
     SOON     = "ffffd100",
@@ -100,9 +100,23 @@ end
 -- Rail rendering
 ---------------------------------------------------------------------------
 
--- One row in the left rail: date · title on the top line, status pill +
--- signup count on the bottom. Clicking selects the event and re-renders
--- the detail panel.
+-- Format an event's time range. Returns "20:00" if only start is known,
+-- "20:00–23:00" (en-dash) when end_time exists.
+local function FormatEventTime(ev)
+    if not ev.time or ev.time == "" then return nil end
+    if ev.end_time and ev.end_time ~= "" then
+        return ev.time .. "\226\128\147" .. ev.end_time
+    end
+    return ev.time
+end
+
+-- One row in the left rail. Vertical layout:
+--   row 1 (top):    date + time-range (left)   ·   status pill (right)
+--   row 2 (middle): title (full width, truncated)
+--   row 3 (bottom): signup count (right)
+-- Status moved off the bottom line so it doesn't crowd the title; the
+-- title gets dedicated breathing room between the two metadata rows.
+-- Clicking selects the event and re-renders the detail panel.
 local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(parent:GetWidth(), RAIL_ROW_H)
@@ -123,29 +137,33 @@ local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
     local hl = btn:GetHighlightTexture()
     if hl then hl:SetAlpha(0.25) end
 
-    -- Top line: date · time + title (truncated)
-    local topLine = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    topLine:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -4)
-    topLine:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
-    topLine:SetJustifyH("LEFT")
-    topLine:SetWordWrap(false)
+    -- Top-left: date + time range
+    local dateText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dateText:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -4)
+    dateText:SetJustifyH("LEFT")
+    dateText:SetWordWrap(false)
     local dateStr = ev.date or "?"
-    if ev.time then dateStr = dateStr .. " |cffaaaaaa" .. ev.time .. "|r" end
-    topLine:SetText(dateStr)
+    local timeStr = FormatEventTime(ev)
+    if timeStr then dateStr = dateStr .. " |cffaaaaaa" .. timeStr .. "|r" end
+    dateText:SetText(dateStr)
 
+    -- Top-right: status pill (was crowding the title on the bottom row
+    -- with only 2 px of vertical separation — moved up here to give the
+    -- title its own clean line).
+    local statusText, statusColor = EventStatus(ev, time())
+    local statusPill = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    statusPill:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
+    statusPill:SetText("|c" .. statusColor .. statusText .. "|r")
+
+    -- Middle: title (with breathing room above and below)
     local titleLine = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    titleLine:SetPoint("TOPLEFT", topLine, "BOTTOMLEFT", 0, -2)
-    titleLine:SetPoint("TOPRIGHT", topLine, "BOTTOMRIGHT", 0, -2)
+    titleLine:SetPoint("TOPLEFT", dateText, "BOTTOMLEFT", 0, -6)
+    titleLine:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -6 - dateText:GetStringHeight())
     titleLine:SetJustifyH("LEFT")
     titleLine:SetWordWrap(false)
     titleLine:SetText("|cffffffff" .. (ev.title or "Untitled") .. "|r")
 
-    -- Bottom line: status pill + signup count
-    local statusText, statusColor = EventStatus(ev, time())
-    local bottomLine = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bottomLine:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 6, 4)
-    bottomLine:SetText("|c" .. statusColor .. statusText .. "|r")
-
+    -- Bottom-right: signup count (status moved off this row).
     if ev._counts and (ev._counts.committed + ev._counts.tentative) > 0 then
         local signupText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         signupText:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -6, 4)
@@ -491,33 +509,36 @@ local function PopulateBossNotesSection(content, anchor, frame, width)
     return body
 end
 
--- Build the four "Share" / "Invite" action buttons in a row below the
--- last section. Each button reuses an existing helper — Invite goes
--- through AutoInvite (already scoped to the next event), the three
--- share buttons funnel through WGS:SendChatLine + SendChatChunked so
--- the chat formatting stays consistent across the addon.
-local function PopulateActionsRow(content, anchor, ev, roster, comp, width)
-    local header = BuildSectionHeader(content, anchor, "Actions", width)
-
-    local row = CreateFrame("Frame", nil, content)
-    row:SetPoint("TOPLEFT",  header, "BOTTOMLEFT",  0, -6)
-    row:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -6)
-    row:SetHeight(26)
+-- Populate the sticky footer at the bottom of the detail panel with the
+-- four "Share" / "Invite" action buttons scoped to `ev`. The footer
+-- frame lives outside the scroll area (built once in UI/Tabs/Events.lua's
+-- BuildEventsTab) so the buttons stay reachable no matter how far down
+-- the user has scrolled.
+--
+-- Invite goes through AutoInvite (already scoped to the next event);
+-- the three share buttons funnel through WGS:SendChatLine +
+-- SendChatChunked so the chat formatting stays consistent across the
+-- addon.
+local function PopulateActionsFooter(footer, ev, roster, comp)
+    if not footer then return end
+    -- Wipe whatever was here for the previous selection.
+    for _, child in ipairs({ footer:GetChildren() }) do child:Hide() end
+    for _, region in ipairs({ footer:GetRegions() }) do region:Hide() end
 
     local function actionBtn(label, x, w, onClick)
-        local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        local btn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
         btn:SetSize(w, 24)
-        btn:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
+        btn:SetPoint("LEFT", footer, "LEFT", x, 0)
         btn:SetText(label)
         btn:SetScript("OnClick", onClick)
         return btn
     end
 
-    actionBtn("Invite", 0, 70, function()
+    actionBtn("Invite", 4, 70, function()
         if WGS.AutoInvite then WGS:AutoInvite() end
     end)
 
-    actionBtn("Share Roster", 74, 100, function()
+    actionBtn("Share Roster", 78, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
         local shorts = {}
@@ -529,7 +550,7 @@ local function PopulateActionsRow(content, anchor, ev, roster, comp, width)
         WGS:SendChatChunked(WGS:PackChatTokens(shorts), channel)
     end)
 
-    actionBtn("Share Gear Gaps", 178, 120, function()
+    actionBtn("Share Gear Gaps", 182, 120, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
         local lines = {}
@@ -549,7 +570,7 @@ local function PopulateActionsRow(content, anchor, ev, roster, comp, width)
         WGS:SendChatChunked(lines, channel)
     end)
 
-    actionBtn("Share Comp", 302, 100, function()
+    actionBtn("Share Comp", 306, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
         if not comp then
@@ -572,8 +593,6 @@ local function PopulateActionsRow(content, anchor, ev, roster, comp, width)
             end
         end
     end)
-
-    return row
 end
 
 ---------------------------------------------------------------------------
@@ -590,6 +609,13 @@ local function PopulateDetail(frame, ev)
         empty:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -10)
         empty:SetText("Select an event from the list.")
         content:SetHeight(40)
+        -- Clear any sticky-footer buttons from the previous selection
+        -- so the user can't click stale Invite/Share when nothing's
+        -- actually selected.
+        if frame.detailFooter then
+            for _, child in ipairs({ frame.detailFooter:GetChildren() }) do child:Hide() end
+            for _, region in ipairs({ frame.detailFooter:GetRegions() }) do region:Hide() end
+        end
         return
     end
 
@@ -612,7 +638,8 @@ local function PopulateDetail(frame, ev)
     local statusText, statusColor = EventStatus(ev, time())
     local parts = {}
     parts[#parts + 1] = "|cffffd100" .. (ev.date or "?") .. "|r"
-    if ev.time then parts[#parts + 1] = "|cffaaaaaa" .. ev.time .. "|r" end
+    local timeStr = FormatEventTime(ev)
+    if timeStr then parts[#parts + 1] = "|cffaaaaaa" .. timeStr .. "|r" end
     if ev._teamName then parts[#parts + 1] = "|cffffd100" .. ev._teamName .. "|r" end
     parts[#parts + 1] = "|c" .. statusColor .. statusText .. "|r"
     subline:SetText(table.concat(parts, "  ·  "))
@@ -638,17 +665,23 @@ local function PopulateDetail(frame, ev)
     local comp = FindRaidCompForEvent(ev.id)
     lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
 
-    -- Boss Notes section
-    lastAnchor = PopulateBossNotesSection(content, lastAnchor, frame, sectionW)
+    -- Boss Notes section. Last scrolling section — Actions used to be
+    -- here too but moved to the sticky footer, so we don't need to keep
+    -- the lastAnchor chain past this point.
+    PopulateBossNotesSection(content, lastAnchor, frame, sectionW)
 
-    -- Actions row (Invite + three Share buttons)
-    PopulateActionsRow(content, lastAnchor, ev, roster, comp, sectionW)
+    -- Actions row (Invite + three Share buttons) renders into the
+    -- persistent footer outside the scroll frame, so it stays visible
+    -- regardless of how far down the user has scrolled.
+    PopulateActionsFooter(frame.detailFooter, ev, roster, comp)
 
     -- Grow the scroll content so the bottom of the last section is
     -- reachable. We can't introspect every child's offset cleanly, so
     -- a generous fixed allowance (roster row × signups + comp rows)
-    -- is fine — the scrollbar handles overflow either way.
-    local approxHeight = 100
+    -- is fine — the scrollbar handles overflow either way. The action
+    -- row's height is no longer accounted for here since it lives in
+    -- the sticky footer outside this scroll area.
+    local approxHeight = 60
         + (#roster.rows * 19)
         + (comp and (40 + #(comp.assignments or comp.members or {}) * 18) or 30)
     content:SetHeight(approxHeight)
