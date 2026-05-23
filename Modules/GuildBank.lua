@@ -5,11 +5,17 @@ local WGS = GuildHall
 local module = WGS:NewModule("GuildBank", "AceEvent-3.0")
 
 local pendingMoneyUpdate = nil
+local pendingBankOpen = nil
 -- Fingerprints of already-captured transactions to prevent duplicates
 local capturedFingerprints = {}
 
 function module:OnEnable()
     self:RegisterEvent("GUILDBANK_UPDATE_MONEY", "OnMoneyUpdate")
+    -- Auto-capture on bank open. GetNumGuildBankMoneyTransactions() returns
+    -- 0 until the player has opened the bank UI in this session, so we
+    -- couldn't usefully scan transactions before this event fires.
+    -- Debounced 1s against rapid re-opens.
+    self:RegisterEvent("GUILDBANKFRAME_OPENED", "OnBankOpened")
 end
 
 function module:OnMoneyUpdate()
@@ -18,6 +24,17 @@ function module:OnMoneyUpdate()
     pendingMoneyUpdate = C_Timer.NewTimer(0.5, function()
         pendingMoneyUpdate = nil
         WGS:OnGoldChanged()
+    end)
+end
+
+function module:OnBankOpened()
+    if pendingBankOpen then pendingBankOpen:Cancel() end
+    pendingBankOpen = C_Timer.NewTimer(1, function()
+        pendingBankOpen = nil
+        -- Gold first (cheap), then transaction log. Both run silently —
+        -- end-of-session export reminder is the user-visible signal.
+        WGS:CaptureGold()
+        WGS:CaptureNewTransactions()
     end)
 end
 
@@ -147,53 +164,23 @@ function WGS:CaptureNewTransactions()
         end
     end
 
-    if added > 0 then
-        self:Print(added .. " new bank transaction(s) captured.")
-    end
+    -- Silent capture: any per-transaction chatter would be noise during a
+    -- raid. The end-of-session export reminder surfaces the totals.
 end
 
--- Manual full scan (button in MainFrame) — captures everything not yet known
-function WGS:ScanBankTransactions()
-    if not IsInGuild() then
-        self:Print("You are not in a guild.")
-        return false
-    end
-
-    if not GetNumGuildBankMoneyTransactions then
-        self:Print("Guild bank transaction API not available.")
-        return false
-    end
-
-    local numTx = GetNumGuildBankMoneyTransactions()
-    if numTx == 0 then
-        self:Print("No guild bank transactions found. Open the guild bank first.")
-        return false
-    end
-
-    self:CaptureNewTransactions()
-    local txCount = self.db.global.guildBankTransactions and #self.db.global.guildBankTransactions or 0
-    self:Print("Bank transactions total: " .. txCount .. " (WoW keeps last " .. numTx .. " entries)")
-    return true
-end
-
--- Manual gold capture (button in MainFrame)
+-- Silent gold snapshot. Called on GUILDBANK_UPDATE_MONEY (debounced) and
+-- on GUILDBANKFRAME_OPENED. Returns true if it captured something useful,
+-- false if it bailed out (no guild / API missing / zero).
 function WGS:CaptureGold()
-    if not IsInGuild() then
-        self:Print("You are not in a guild.")
-        return false
-    end
+    if not IsInGuild() then return false end
 
     local guildMoney = GetGuildBankMoney and GetGuildBankMoney() or 0
-    if guildMoney == 0 then
-        self:Print("Guild bank gold is 0 — open the guild bank once to load the value.")
-        return false
-    end
+    if guildMoney == 0 then return false end
 
     local db = self.db.global
     local previousMoney = db.lastKnownGold
 
     if previousMoney and previousMoney == guildMoney then
-        self:Print("Bank gold unchanged: " .. formatGold(guildMoney))
         return true
     end
 
@@ -212,12 +199,6 @@ function WGS:CaptureGold()
         diffFormatted = sign .. formatGold(math.abs(diff)),
         previousMoney = previousMoney,
     })
-
-    if previousMoney then
-        self:Print("Bank gold captured: " .. formatGold(guildMoney) .. " (" .. sign .. formatGold(math.abs(diff)) .. ")")
-    else
-        self:Print("Bank gold captured: " .. formatGold(guildMoney))
-    end
 
     return true
 end

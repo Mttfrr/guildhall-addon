@@ -77,8 +77,9 @@ function WGS:SlashCommand(input)
     elseif cmd == "import" then
         self:SelectMainFrameTab(5)
     elseif cmd == "attendance" then
-        self:ToggleAttendance()
-        self:RefreshMainFrame()
+        -- Capture is auto-started on raid entry now; /gh attendance is
+        -- a status read-out only.
+        self:AttendanceStatus()
     elseif cmd == "config" or cmd == "options" then
         self:OpenConfig()
     elseif cmd == "teams" then

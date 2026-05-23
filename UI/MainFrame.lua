@@ -108,39 +108,11 @@ local function BuildDashboardTab(parent)
     local col1X, col2X = 5, 310
     local btnW, btnH, gap = 260, 26, 4
 
-    -- Quick Actions
-    local hdr = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hdr:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, 0)
-    hdr:SetText("|cffffd100Quick Actions|r")
-
-    local y = -22
-    parent.btnAttendance = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    parent.btnAttendance:SetSize(btnW, btnH)
-    parent.btnAttendance:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    parent.btnAttendance:SetText("Start Attendance Tracking")
-    y = y - btnH - gap
-
-    local btnGold = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnGold:SetSize(btnW, btnH)
-    btnGold:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    btnGold:SetText("Capture Bank Gold")
-    btnGold:SetScript("OnClick", function()
-        WGS:CaptureGold()
-        WGS:RefreshMainFrame()
-    end)
-    y = y - btnH - gap
-
-    local btnScan = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnScan:SetSize(btnW, btnH)
-    btnScan:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    btnScan:SetText("Scan Bank Transactions")
-    btnScan:SetScript("OnClick", function()
-        WGS:ScanBankTransactions()
-        WGS:RefreshMainFrame()
-    end)
-    y = y - btnH - gap * 3
-
-    -- Raid Leader Tools (officer/leader perms required, button checks at runtime)
+    -- Raid Leader Tools (officer/leader perms required, button checks at runtime).
+    -- Attendance + bank capture used to be three "Quick Actions" buttons here;
+    -- they're now fully automatic (RAID_INSTANCE_WELCOME for attendance,
+    -- GUILDBANKFRAME_OPENED for bank), so the manual buttons were removed.
+    local y = 0
     local hdr2 = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     hdr2:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
     hdr2:SetText("|cffffd100Raid Tools|r")
@@ -220,10 +192,8 @@ local function RefreshDashboard(tab)
     tab.summaryText:SetText(table.concat(lines, "\n"))
 
     if WGS:IsTrackingAttendance() then
-        tab.btnAttendance:SetText("Stop Attendance Tracking")
-        tab.attendanceStatus:SetText("|cff00ff00Attendance tracking active|r")
+        tab.attendanceStatus:SetText("|cff00ff00Attendance: recording|r")
     else
-        tab.btnAttendance:SetText("Start Attendance Tracking")
         tab.attendanceStatus:SetText("")
     end
 
@@ -1490,12 +1460,6 @@ local function CreateMainFrame()
         PopulateRosterCheck(rosterTab.subViews[ROSTER_SUB_CHECK])
     end
 
-    -- Wire attendance button (needs mainFrame ref for refresh)
-    f.tabContents[TAB_DASHBOARD].btnAttendance:SetScript("OnClick", function()
-        WGS:ToggleAttendance()
-        RefreshDashboard(f.tabContents[TAB_DASHBOARD])
-        RefreshCurrentTab(f)
-    end)
 
     -- Show first tab
     SelectTab(f, TAB_DASHBOARD)

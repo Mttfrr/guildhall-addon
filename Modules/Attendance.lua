@@ -1,14 +1,11 @@
 ---@type GuildHall
 local WGS = GuildHall
-local L = GuildHall_L
 
 ---@class WGSAttendanceModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("Attendance", "AceEvent-3.0")
 
 local isTracking = false
 local currentSession = nil
----@type WGSTeamPickerFrame?
-local teamPickerFrame = nil
 
 function module:OnEnable()
     self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
@@ -26,7 +23,7 @@ end
 function module:OnRaidEnter()
     if not IsInRaid() then return end
 
-    -- Auto-show readiness check on raid entry
+    -- Auto-show readiness check on raid entry (independent of attendance)
     C_Timer.After(3, function()
         WGS:CheckRaidReadiness()
     end)
@@ -34,8 +31,17 @@ function module:OnRaidEnter()
     if not WGS.db.profile.autoTrackAttendance then return end
     if isTracking then return end
     if WGS.db.profile.guildGroupsOnly and not WGS:IsGuildGroup() then return end
-    -- Auto-start: show team picker if teams exist, otherwise start without team
-    WGS:PromptAttendanceStart()
+
+    -- Resolve team silently: pick the scheduled event whose window
+    -- contains "now". If none (or ambiguous), start untagged. No modal,
+    -- no HUD — the addon should be invisible at this point.
+    local event = WGS:FindActiveScheduledEvent()
+    local teamId, teamName = nil, nil
+    if event then
+        teamId = event.team_id or event.teamId
+        teamName = WGS:GetTeamName(teamId)
+    end
+    WGS:StartAttendanceForTeam(teamId, teamName, event)
 end
 
 function module:OnGroupRosterUpdate()
@@ -78,43 +84,23 @@ function module:OnGroupRosterUpdate()
     end
 end
 
--- Find today's event for a given team (or any event today if no team)
-function WGS:FindTodayEvent(teamId)
-    local events = self.db.global.events
-    if not events or #events == 0 then return nil end
-
-    local today = date("%Y-%m-%d")
-    for _, event in ipairs(events) do
-        if event.date == today then
-            if not teamId or event.team_id == teamId then
-                return event
-            end
-        end
+--- Resolve a team name from db.global.teams by id. Used so OnRaidEnter
+--- can label the session without the user picking it.
+function WGS:GetTeamName(teamId)
+    if not teamId then return nil end
+    local teams = self.db.global.teams
+    if not teams then return nil end
+    for _, t in ipairs(teams) do
+        if t.id == teamId then return t.name end
     end
     return nil
 end
 
--- Show team picker before starting attendance
-function WGS:PromptAttendanceStart()
-    local teams = self.db.global.teams
-    if not teams or #teams == 0 then
-        -- No teams imported — start without team tag
-        local event = self:FindTodayEvent(nil)
-        self:StartAttendanceForTeam(nil, nil, event)
-        return
-    end
-
-    self:ShowTeamPicker(function(teamId, teamName)
-        local event = self:FindTodayEvent(teamId)
-        self:StartAttendanceForTeam(teamId, teamName, event)
-    end)
-end
-
 function WGS:StartAttendanceForTeam(teamId, teamName, event)
     if not IsInRaid() and not IsInGroup() then
-        self:Print(L["NOT_IN_RAID"])
         return
     end
+    if isTracking then return end
 
     isTracking = true
     local members = self:GetRaidMembers()
@@ -149,15 +135,6 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
             present = true,
         }
     end
-
-    local msg = L["ATTENDANCE_START"]
-    if teamName then
-        msg = msg .. " (Team: " .. teamName .. ")"
-    end
-    if event then
-        msg = msg .. " - Event: " .. (event.title or "?")
-    end
-    self:Print(msg)
 end
 
 function WGS:StopAttendance()
@@ -185,8 +162,6 @@ function WGS:StopAttendance()
 
     table.insert(self.db.global.attendance, currentSession)
 
-    self:Print(string.format(L["ATTENDANCE_STOP"], #memberList))
-
     currentSession = nil
 
     -- Show export reminder after a short delay (let chat settle)
@@ -197,12 +172,20 @@ function WGS:StopAttendance()
     return true
 end
 
-function WGS:ToggleAttendance()
-    if isTracking then
-        self:StopAttendance()
-    else
-        self:PromptAttendanceStart()
+--- Status-only command. `/gh attendance` prints whether capture is active
+--- and, if so, which team/event it's tagged to. Replaces the old toggle
+--- behavior — capture is event-driven now, manual start/stop is gone.
+function WGS:AttendanceStatus()
+    if not isTracking or not currentSession then
+        self:Print("Attendance: not recording.")
+        return
     end
+    local startedHM = date("%H:%M", currentSession.startedAt)
+    local tag = currentSession.teamName or "untagged"
+    if currentSession.eventTitle then
+        tag = tag .. " / " .. currentSession.eventTitle
+    end
+    self:Print(string.format("Attendance: recording since %s (%s).", startedHM, tag))
 end
 
 --- Stable signature for a slots array. Used to dedupe identical snapshots.
@@ -347,144 +330,4 @@ function WGS:GetRaidMembers()
     end
 
     return members
-end
-
----------------------------------------------------------------------------
--- Team Picker UI
----------------------------------------------------------------------------
-
-function WGS:ShowTeamPicker(callback)
-    if not teamPickerFrame then
-        teamPickerFrame = self:CreateTeamPickerFrame()
-    end
-
-    local picker = teamPickerFrame --[[@as WGSTeamPickerFrame]]
-    local teams = self.db.global.teams or {}
-    picker.callback = callback
-    picker:PopulateTeams(teams)
-    picker:Show()
-end
-
-function WGS:CreateTeamPickerFrame()
-    local f = CreateFrame("Frame", "GuildHallTeamPicker", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(260, 50)  -- Will resize based on team count
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
-
-    f.TitleBg:SetHeight(30)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
-    f.title:SetText("Select Team")
-
-    f.buttons = {}
-
-    -- Pool of reusable button/label frames
-    f.buttonPool = {}
-    f.labelPool = {}
-
-    local function GetOrCreateButton(parent)
-        local pool = parent.buttonPool
-        for i, btn in ipairs(pool) do
-            if not btn._inUse then
-                btn._inUse = true
-                btn:Show()
-                return btn
-            end
-        end
-        local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-        btn._inUse = true
-        table.insert(pool, btn)
-        return btn
-    end
-
-    local function GetOrCreateLabel(parent)
-        local pool = parent.labelPool
-        for i, lbl in ipairs(pool) do
-            if not lbl._inUse then
-                lbl._inUse = true
-                lbl:Show()
-                return lbl
-            end
-        end
-        local lbl = CreateFrame("Frame", nil, parent)
-        lbl.text = lbl:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl.text:SetAllPoints()
-        lbl._inUse = true
-        table.insert(pool, lbl)
-        return lbl
-    end
-
-    function f:PopulateTeams(teams)
-        -- Return all frames to pool
-        for _, btn in ipairs(self.buttonPool) do
-            btn._inUse = false
-            btn:Hide()
-        end
-        for _, lbl in ipairs(self.labelPool) do
-            lbl._inUse = false
-            lbl:Hide()
-        end
-        self.buttons = {}
-
-        local btnY = -35
-        local btnHeight = 28
-        local labelHeight = 16
-        local spacing = 4
-
-        for _, team in ipairs(teams) do
-            local todayEvent = WGS:FindTodayEvent(team.id)
-
-            local btn = GetOrCreateButton(self)
-            btn:SetSize(300, btnHeight)
-            btn:ClearAllPoints()
-            btn:SetPoint("TOP", self, "TOP", 0, btnY)
-            btn:SetText(team.name .. " (" .. (team.type or "Raid") .. ")")
-            btn:SetScript("OnClick", function()
-                self:Hide()
-                if self.callback then
-                    self.callback(team.id, team.name)
-                end
-            end)
-            table.insert(self.buttons, btn)
-            btnY = btnY - btnHeight - 1
-
-            if todayEvent then
-                local lbl = GetOrCreateLabel(self)
-                lbl:SetSize(300, labelHeight)
-                lbl:ClearAllPoints()
-                lbl:SetPoint("TOP", self, "TOP", 0, btnY)
-                lbl.text:SetText("|cff00ff00Event: " .. (todayEvent.title or "?") .. " @ " .. (todayEvent.time or "?") .. "|r")
-                table.insert(self.buttons, lbl)
-                btnY = btnY - labelHeight
-            end
-
-            btnY = btnY - spacing
-        end
-
-        -- "No team" button
-        local btnNone = GetOrCreateButton(self)
-        btnNone:SetSize(300, btnHeight)
-        btnNone:ClearAllPoints()
-        btnNone:SetPoint("TOP", self, "TOP", 0, btnY)
-        btnNone:SetText("|cff888888No team (untagged)|r")
-        btnNone:SetScript("OnClick", function()
-            self:Hide()
-            if self.callback then
-                self.callback(nil, nil)
-            end
-        end)
-        table.insert(self.buttons, btnNone)
-        btnY = btnY - btnHeight - spacing
-
-        -- Resize frame to fit
-        self:SetSize(320, math.abs(btnY) + 15)
-    end
-
-    f:Hide()
-    return f
 end

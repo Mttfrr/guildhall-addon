@@ -4,6 +4,10 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Changed
+- **Attendance is fully automatic, no more HUD or team picker.** The 60×180 "Tracking" HUD frame is gone. The team-picker modal that used to appear on raid entry is gone. On `RAID_INSTANCE_WELCOME` the addon now looks for a scheduled event whose window (start − 30 min … start + 1 h) contains "now", uses its `team_id` if exactly one matches, and otherwise starts the session untagged. No prompts, no chat noise. `/gh attendance` is now a status read-out ("Attendance: recording since 20:14 (Team Alpha)") — there's no manual start/stop. The Dashboard's "Start/Stop Attendance Tracking" button was removed.
+- **Bank capture auto-fires when the guild bank UI opens.** `GUILDBANKFRAME_OPENED` now triggers a silent gold snapshot + transaction-log scan (debounced 1 s). The "Capture Bank Gold" and "Scan Bank Transactions" buttons on the Dashboard were removed — they only existed to work around the fact that `GetNumGuildBankMoneyTransactions()` returns 0 before the bank window has been opened in a session. With the auto-trigger that workaround is unnecessary. Per-transaction chat lines were also dropped; the end-of-session export reminder is the single user-visible signal now.
+
 ### Added
 - **/gh invite uses event signups** — `WGS:GetEventInviteList` now picks the invite source in this order: (1) event signups from the web (committed statuses only — P/L/B/LT), (2) raid comp assignments, (3) team roster. Before, signups were ignored and the addon always went straight to comp/roster, which meant officers who used the web sign-up flow were inviting everyone on the team instead of just the people who said they were coming. The web now ships `data.signups` in the export response.
 - **Instant invites** — the 3-second-per-invite stagger in `WGS:AutoInvite` is removed. A 25-person raid used to take 75 seconds to fully invite; now it fires in one tick. The post-invite sort-groups still waits 5s for accepts to land.

@@ -320,6 +320,38 @@ function WGS:GetEventPullTime(event)
     return ParseEventTime(event)
 end
 
+--- Find the event whose scheduled window contains "now" — used by
+--- Modules/Attendance.lua to auto-pick a team without prompting the user.
+---
+--- Window: [scheduledStart - LEAD, scheduledStart + TRAIL]. LEAD covers
+--- raid leaders entering the instance early to set up; TRAIL covers
+--- starting a session late (officer was AFK at pull). If exactly one
+--- event matches, it wins. If zero or multiple match, return nil and
+--- let attendance start untagged — the user explicitly chose this over
+--- a "best match" heuristic to avoid silent mis-tagging.
+local AUTO_WINDOW_LEAD  = 30 * 60      -- 30 minutes before scheduled start
+local AUTO_WINDOW_TRAIL = 60 * 60      -- 1 hour after scheduled start
+
+function WGS:FindActiveScheduledEvent(now)
+    local events = self.db.global.events
+    if not events or #events == 0 then return nil end
+    now = now or time()
+
+    local matched = nil
+    for _, ev in ipairs(events) do
+        local start = ParseEventTime(ev)
+        if start and now >= (start - AUTO_WINDOW_LEAD) and now <= (start + AUTO_WINDOW_TRAIL) then
+            if matched then
+                -- Ambiguous — multiple events overlap this instant. Bail out
+                -- to untagged rather than guess which one this raid is for.
+                return nil
+            end
+            matched = ev
+        end
+    end
+    return matched
+end
+
 ---------------------------------------------------------------------------
 -- Helpers
 ---------------------------------------------------------------------------

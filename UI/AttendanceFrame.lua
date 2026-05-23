@@ -1,88 +1,15 @@
 ---@type GuildHall
 local WGS = GuildHall
 
--- Lightweight attendance HUD shown during raids when tracking is active
-local hudFrame = nil
-
-local function CreateAttendanceHUD()
-    local f = CreateFrame("Frame", "GuildHallAttendanceHUD", UIParent, "BackdropTemplate")
-    f:SetSize(180, 60)
-    f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -250, -10)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    f:SetBackdropColor(0, 0, 0, 0.8)
-
-    -- Title
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.title:SetPoint("TOP", f, "TOP", 0, -8)
-    f.title:SetText("|cff00ff00GuildHall: Tracking|r")
-
-    -- Member count
-    f.memberCount = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.memberCount:SetPoint("TOP", f.title, "BOTTOM", 0, -4)
-    f.memberCount:SetText("Members: 0")
-
-    -- Duration
-    f.duration = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.duration:SetPoint("TOP", f.memberCount, "BOTTOM", 0, -2)
-    f.duration:SetText("Duration: 0:00")
-
-    -- Update ticker
-    f.elapsed = 0
-    f:SetScript("OnUpdate", function(self, elapsed)
-        self.elapsed = self.elapsed + elapsed
-        if self.elapsed < 1 then return end
-        self.elapsed = 0
-        WGS:UpdateAttendanceHUD()
-    end)
-
-    f:Hide()
-    return f
-end
-
-function WGS:UpdateAttendanceHUD()
-    if not hudFrame or not hudFrame:IsShown() then return end
-    if not self:IsTrackingAttendance() then
-        hudFrame:Hide()
-        return
-    end
-
-    local members = self:GetRaidMembers()
-    local count = 0
-    for _ in pairs(members) do count = count + 1 end
-    hudFrame.memberCount:SetText("Members: " .. count)
-
-    local startTime = self:GetAttendanceStartTime()
-    if startTime then
-        local elapsed = time() - startTime
-        local minutes = math.floor(elapsed / 60)
-        local seconds = elapsed % 60
-        hudFrame.duration:SetText(string.format("Duration: %d:%02d", minutes, seconds))
-    end
-end
-
-function WGS:ShowAttendanceHUD()
-    if not hudFrame then
-        hudFrame = CreateAttendanceHUD()
-    end
-    hudFrame:Show()
-end
-
-function WGS:HideAttendanceHUD()
-    if hudFrame then
-        hudFrame:Hide()
-    end
-end
+-- This file used to hold a 60×180 "Tracking" HUD anchored TOPRIGHT that
+-- showed live member count + raid duration. Attendance capture became
+-- silent automation (RAID_INSTANCE_WELCOME → auto-start, GROUP_LEFT →
+-- auto-stop), so the HUD was removed. The export-reminder popup below
+-- is what's left — still useful as the one end-of-raid prompt that
+-- nudges the officer to paste the export string into the web app.
+--
+-- File name kept (`AttendanceFrame.lua`) instead of renamed to
+-- `ExportReminder.lua` to avoid churning UI.xml + the .toc.
 
 ---------------------------------------------------------------------------
 -- Export Reminder popup (shown at end of raid)
@@ -175,20 +102,4 @@ function WGS:ShowExportReminder()
 
     reminderFrame.summary:SetText(table.concat(lines, "\n"))
     reminderFrame:Show()
-end
-
--- Hook attendance start/stop to show/hide HUD
-local origStart = WGS.StartAttendanceForTeam
-function WGS:StartAttendanceForTeam(teamId, teamName, event)
-    origStart(self, teamId, teamName, event)
-    if self:IsTrackingAttendance() then
-        self:ShowAttendanceHUD()
-    end
-end
-
-local origStop = WGS.StopAttendance
-function WGS:StopAttendance()
-    local result = origStop(self)
-    self:HideAttendanceHUD()
-    return result
 end

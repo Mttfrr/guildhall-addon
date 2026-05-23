@@ -91,9 +91,12 @@ function M.setup()
 
     -- EventScheduler + Import register `WGS:GetEventInviteList`,
     -- `WGS:GetEventSignups`, `WGS:ProcessImport`, `WGS:GetRaidComp` etc.
-    -- Load after the stubs above so `WGS:NewModule(...)` succeeds.
+    -- Attendance now lives here too — once the in-game team-picker frame
+    -- was removed, the module is pure logic and safe to dofile without
+    -- a CreateFrame stub.
     dofile("Modules/Import.lua")
     dofile("Modules/EventScheduler.lua")
+    dofile("Modules/Attendance.lua")
 
     return GuildHall
 end
