@@ -139,6 +139,73 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
     self:FireEvent("WGS_SESSION_STARTED", currentSession)
 end
 
+-- MRT (VMRT.Attendance.data[]) stores rosters with a one-character class
+-- code prefix on each name. Mapping mirrors MRT's ExLib.lua. Bump this
+-- table here AND docs/INTEROP.md if a new class is added.
+local MRT_CLASS_LETTER_TO_NAME = {
+    A = "WARRIOR",     B = "PALADIN",   C = "HUNTER",      D = "ROGUE",
+    E = "PRIEST",      F = "DEATHKNIGHT", G = "SHAMAN",    H = "MAGE",
+    I = "WARLOCK",     J = "MONK",      K = "DRUID",       L = "DEMONHUNTER",
+    M = "EVOKER",
+}
+
+--- Decode a single MRT roster entry ("APlayerName" → ("PlayerName",
+--- "WARRIOR")). Returns the raw name unchanged and class="" if the
+--- prefix isn't a known code (defensive against MRT introducing a new
+--- class before we update the table). Empty / non-string entries return
+--- nil so the caller can skip them.
+local function DecodeMRTRosterEntry(raw)
+    if type(raw) ~= "string" or #raw < 2 then return nil end
+    local letter = raw:sub(1, 1)
+    local name = raw:sub(2)
+    if name == "" then return nil end
+    return name, MRT_CLASS_LETTER_TO_NAME[letter] or ""
+end
+
+--- Read MRT's per-encounter roster snapshots (VMRT.Attendance.data) and
+--- return rows whose timestamp falls inside [startedAt, endedAt]. Each
+--- row becomes a `bossAttendance` entry on the session. Returns an
+--- empty table if MRT isn't loaded or has no overlapping rows.
+---
+--- Contract reference: docs/INTEROP.md → MRT → Attendance.
+function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
+    local out = {}
+    if not self:HasAddon("MRT") then return out end
+    local vmrt = _G.VMRT
+    local data = vmrt and vmrt.Attendance and vmrt.Attendance.data
+    if type(data) ~= "table" then return out end
+
+    for _, row in ipairs(data) do
+        if type(row) == "table"
+           and type(row.t) == "number"
+           and row.t >= startedAt
+           and row.t <= endedAt
+        then
+            local roster = {}
+            -- MRT stores players as positional integer keys [1..40].
+            for i = 1, 40 do
+                local entry = row[i]
+                if entry then
+                    local name, class = DecodeMRTRosterEntry(entry)
+                    if name then
+                        roster[#roster + 1] = { name = name, class = class }
+                    end
+                end
+            end
+            out[#out + 1] = {
+                encounterID   = row.eI,
+                encounterName = row.eN,
+                difficultyID  = row.d,
+                time          = row.t,
+                isKill        = row.k and true or false,
+                groupSize     = row.g,
+                roster        = roster,
+            }
+        end
+    end
+    return out
+end
+
 function WGS:StopAttendance()
     if not isTracking or not currentSession then return end
 
@@ -157,6 +224,16 @@ function WGS:StopAttendance()
     end
     currentSession.memberList = memberList
     currentSession.members = nil
+
+    -- Per-encounter rosters from MRT (if MRT is loaded). Strictly
+    -- additive — GuildHall's session-level roster is still authoritative
+    -- for the session as a whole; this gives the web a boss-by-boss
+    -- "who was here for which pull" dimension.
+    local mrtBossAttendance = self:BuildBossAttendanceFromMRT(
+        currentSession.startedAt, currentSession.endedAt)
+    if #mrtBossAttendance > 0 then
+        currentSession.bossAttendance = mrtBossAttendance
+    end
 
     -- Final raid comp snapshot (deduped against any kill snapshots from
     -- this session — if the comp didn't change since the last kill, skip)
