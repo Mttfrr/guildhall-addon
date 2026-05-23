@@ -21,6 +21,12 @@ local dbDefaults = {
         -- nil = "use officer default" (on for officers, off otherwise).
         -- Explicit true/false from the user takes precedence.
         peerSyncEnabled = nil,
+        -- Global current-team filter. nil = "All Teams" (no filter).
+        -- Otherwise a `team.id` from db.global.teams. Read by the main
+        -- frame's title-bar picker + every team-scoped tab via
+        -- WGS:GetCurrentTeamId(). Per-character so different officers
+        -- can default to different teams.
+        currentTeamId = nil,
     },
     global = {
         attendance = {},
@@ -133,6 +139,44 @@ function WGS:SlashCommand(input)
         self:PeerSync_ManualCatchup()
     elseif cmd == "restore" then
         self:RestoreClearedData()
+    elseif cmd == "team" then
+        -- /gh team <name>   → set current-team picker by name (case-
+        --                     insensitive substring match)
+        -- /gh team all      → clear the filter (show all teams)
+        -- /gh team          → print current state
+        local _, arg = self:GetArgs(input, 2)
+        if not arg or arg == "" then
+            local id = self:GetCurrentTeamId()
+            if id then
+                local teams = self.db.global.teams or {}
+                for _, t in ipairs(teams) do
+                    if t.id == id then
+                        self:Print("Current team filter: " .. (t.name or tostring(id)))
+                        return
+                    end
+                end
+                self:Print("Current team filter: (team id " .. tostring(id) .. " — no longer in db)")
+            else
+                self:Print("Current team filter: All Teams")
+            end
+            return
+        end
+        if arg:lower() == "all" or arg:lower() == "none" or arg:lower() == "clear" then
+            self:SetCurrentTeamId(nil)
+            self:Print("Team filter cleared (showing all teams).")
+            return
+        end
+        local needle = arg:lower()
+        local teams = self.db.global.teams or {}
+        for _, t in ipairs(teams) do
+            local n = (t.name or ""):lower()
+            if n == needle or n:find(needle, 1, true) then
+                self:SetCurrentTeamId(t.id)
+                self:Print("Team filter set to: " .. (t.name or tostring(t.id)))
+                return
+            end
+        end
+        self:Print("No team matching: " .. arg)
     else
         self:Print(L["SLASH_HELP"])
     end
@@ -223,6 +267,38 @@ function WGS:RestoreClearedData()
     self:Print(string.format("Restored data cleared %d minute(s) ago.", math.max(1, math.floor(age / 60))))
     if self.RefreshMainFrame then self:RefreshMainFrame() end
     return true
+end
+
+---------------------------------------------------------------------------
+-- Current-team picker
+--
+-- Global filter id that scopes team-aware UI surfaces (Events rail,
+-- Teams tab, Logs sub-views) to a single team. nil = "All Teams" / no
+-- filter. Persisted to db.profile.currentTeamId.
+--
+-- Get coerces orphan ids back to nil — if the picked team is no longer
+-- in db.global.teams (re-import removed it) the filter would otherwise
+-- silently hide every row.
+--
+-- Set fires WGS_CURRENT_TEAM_CHANGED { teamId } so UI surfaces re-render.
+---------------------------------------------------------------------------
+
+function WGS:GetCurrentTeamId()
+    if not self.db or not self.db.profile then return nil end
+    local id = self.db.profile.currentTeamId
+    if id == nil then return nil end
+    local teams = self.db.global and self.db.global.teams or {}
+    for _, t in ipairs(teams) do
+        if t.id == id then return id end
+    end
+    return nil
+end
+
+function WGS:SetCurrentTeamId(teamId)
+    if not self.db or not self.db.profile then return end
+    if self.db.profile.currentTeamId == teamId then return end
+    self.db.profile.currentTeamId = teamId
+    self:FireEvent("WGS_CURRENT_TEAM_CHANGED", { teamId = teamId })
 end
 
 ---------------------------------------------------------------------------

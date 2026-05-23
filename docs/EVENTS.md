@@ -189,6 +189,23 @@ future — a richer source like MRT). Payload: the loot row itself:
 Plus any future fields. Treat unknown keys as forward-compat — read
 what you need, ignore the rest.
 
+### `WGS_CURRENT_TEAM_CHANGED`
+
+Fires when the user changes the global current-team picker (via the
+title-bar dropdown, `/gh team <name>`, or any direct call to
+`WGS:SetCurrentTeamId`). UI surfaces that scope by team subscribe to
+this so they re-render against the new filter. The event does NOT fire
+when the same value is set twice — only on actual changes.
+
+| Field | Type | Notes |
+|---|---|---|
+| `teamId` | integer or nil | the new value; nil means "All Teams" / no filter |
+
+The current value can be read at any time with `WGS:GetCurrentTeamId()`.
+Get coerces orphan ids (set to a team that has since been removed from
+`db.global.teams`) back to nil, so subscribers don't need to defensively
+re-validate.
+
 ## Implementation note
 
 `GuildHall:FireEvent(event, ...)` is the internal entry point modules

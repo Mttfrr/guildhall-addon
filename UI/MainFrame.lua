@@ -53,6 +53,113 @@ local function RefreshCurrentTab(frame)
 end
 
 ---------------------------------------------------------------------------
+-- Current-team picker
+--
+-- The Get/SetCurrentTeamId API lives in Core.lua (pure db.profile state
+-- + a WGS_CURRENT_TEAM_CHANGED event). The widget below is the title-bar
+-- chrome that drives Set and reflects Get; it subscribes to the change
+-- event so slash-command sets refresh the label without poking the
+-- mainFrame upvalue from outside this file.
+---------------------------------------------------------------------------
+
+-- Resolve the display label for the current picker state. "Team: All ▾"
+-- when no filter is active; "Team: <name> ▾" otherwise. Falls back to
+-- the team id if the name lookup misses (shouldn't happen in practice —
+-- GetCurrentTeamId already coerces orphans to nil — but keeps the
+-- widget from breaking if the db is mid-import).
+local function TeamPickerLabel()
+    local id = WGS:GetCurrentTeamId()
+    if not id then return "Team: All" end
+    local teams = WGS.db and WGS.db.global and WGS.db.global.teams or {}
+    for _, t in ipairs(teams) do
+        if t.id == id then return "Team: " .. (t.name or tostring(id)) end
+    end
+    return "Team: " .. tostring(id)
+end
+
+-- Build the title-bar picker. Anchored to the LEFT of the CloseButton
+-- (the X provided by BasicFrameTemplateWithInset). Uses the same manual
+-- popup pattern as the Wishlists boss dropdown — UIDropDownMenuTemplate
+-- would do, but its sizing/anchoring API is fiddlier than a button + a
+-- backdrop-styled frame.
+local function BuildTeamPicker(parent)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(180, 20)
+    -- BasicFrameTemplateWithInset's CloseButton sits at the top-right;
+    -- pin our picker just to its left so the title text on the far left
+    -- and the picker on the right read as the frame's two header items.
+    btn:SetPoint("TOPRIGHT", parent.CloseButton or parent, "TOPLEFT", -2, -3)
+    btn:SetText(TeamPickerLabel() .. "  v")
+
+    local menu = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    menu:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    menu:SetBackdropColor(0, 0, 0, 0.95)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:Hide()
+    menu.buttons = {}
+
+    local function rebuildMenu()
+        for _, b in ipairs(menu.buttons) do b:Hide() end
+        local entries = { { id = nil, name = "All Teams" } }
+        local teams = WGS.db and WGS.db.global and WGS.db.global.teams or {}
+        for _, t in ipairs(teams) do
+            entries[#entries + 1] = { id = t.id, name = t.name or ("Team " .. tostring(t.id)) }
+        end
+
+        local rowH = 20
+        menu:SetSize(180, #entries * rowH + 8)
+        menu:ClearAllPoints()
+        menu:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
+
+        local currentId = WGS:GetCurrentTeamId()
+        for i, entry in ipairs(entries) do
+            local row = menu.buttons[i]
+            if not row then
+                row = CreateFrame("Button", nil, menu)
+                row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.text:SetAllPoints()
+                row.text:SetJustifyH("LEFT")
+                menu.buttons[i] = row
+            end
+            row:SetSize(172, rowH)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -(i - 1) * rowH - 4)
+            local prefix = (entry.id == currentId) and "  > " or "    "
+            row.text:SetText(prefix .. entry.name)
+            row:SetScript("OnClick", function()
+                WGS:SetCurrentTeamId(entry.id)
+                menu:Hide()
+            end)
+            row:Show()
+        end
+    end
+
+    btn:SetScript("OnClick", function()
+        if menu:IsShown() then menu:Hide(); return end
+        rebuildMenu()
+        menu:Show()
+    end)
+
+    -- Refresh hook used by SetCurrentTeamId so the label updates without
+    -- a tab re-render. Keeps the menu hidden — slash commands shouldn't
+    -- pop a UI dropdown open.
+    return {
+        button  = btn,
+        menu    = menu,
+        refresh = function()
+            btn:SetText(TeamPickerLabel() .. "  v")
+            if menu:IsShown() then rebuildMenu() end
+        end,
+    }
+end
+
+---------------------------------------------------------------------------
 -- Main frame creation
 ---------------------------------------------------------------------------
 
@@ -73,6 +180,21 @@ local function CreateMainFrame()
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
     f.title:SetText("GuildHall")
+
+    -- Title-bar team picker. Sits left of the CloseButton; persists to
+    -- db.profile.currentTeamId via WGS:SetCurrentTeamId. Tab readers
+    -- pick it up via WGS:GetCurrentTeamId() on the next render. Stays in
+    -- sync with non-widget setters (e.g. `/gh team`) by subscribing to
+    -- WGS_CURRENT_TEAM_CHANGED, which Set fires.
+    f.teamPicker = BuildTeamPicker(f)
+    if WGS.RegisterCallback then
+        WGS.RegisterCallback(f, "WGS_CURRENT_TEAM_CHANGED", function()
+            if f.teamPicker and f.teamPicker.refresh then
+                f.teamPicker.refresh()
+            end
+            if f:IsShown() then RefreshCurrentTab(f) end
+        end)
+    end
 
     -- Status bar
     f.statusBar = CreateFrame("Frame", nil, f)
@@ -126,6 +248,9 @@ local function CreateMainFrame()
     f.tabContents[TAB_EVENTS]:Show()
 
     f:SetScript("OnShow", function(self)
+        if self.teamPicker and self.teamPicker.refresh then
+            self.teamPicker.refresh()
+        end
         RefreshCurrentTab(self)
     end)
 
