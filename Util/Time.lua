@@ -9,12 +9,15 @@ local cachedPlayerKey
 function WGS:GetPlayerKey()
     if cachedPlayerKey then return cachedPlayerKey end
     local name, realm = UnitFullName("player")
-    realm = realm or GetNormalizedRealmName() or ""
-    if name and name ~= "" and realm ~= "" then
-        cachedPlayerKey = name .. "-" .. realm
+    local key = self:NormalizeFullName(name, realm)
+    if key then
+        cachedPlayerKey = key
         return cachedPlayerKey
     end
-    return (name or "Unknown") .. "-" .. realm
+    -- Defensive fallback for the (impossible-in-practice) case where the
+    -- player has no name. Don't cache — let the next call retry once
+    -- PLAYER_ENTERING_WORLD has actually populated the unit info.
+    return "Unknown-" .. (GetNormalizedRealmName() or "")
 end
 
 function WGS:GetTimestamp()

@@ -18,7 +18,7 @@ local function PopulateReadiness(frame)
 
     -- Cross-reference with current raid members
     local raidMembers = {}
-    if IsInRaid() or IsInGroup() then
+    if WGS:IsInAnyGroup() then
         local members = WGS:GetRaidMembers()
         for name in pairs(members) do
             -- Store both full name and short name for matching
@@ -106,7 +106,7 @@ local function PopulateReadiness(frame)
 
     -- Announce button
     frame.announceBtn:SetScript("OnClick", function()
-        local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or nil)
+        local channel = WGS:GetGroupChannel()
         if not channel then
             WGS:Print("Not in a group.")
             return

@@ -1018,7 +1018,7 @@ local function BuildRosterCheckData()
     -- Actual: characters in current raid (or last session)
     local actual = {}  -- [charName-realm] = true
     local actualSource = nil
-    if IsInRaid() or IsInGroup() then
+    if WGS:IsInAnyGroup() then
         local members = WGS:GetRaidMembers()
         for name in pairs(members) do actual[name] = true end
         actualSource = "current raid"
@@ -1190,10 +1190,10 @@ function PopulateRosterCheck(tab)
     -- Show/hide action buttons based on whether there's anything missing
     if #missing > 0 then
         tab.inviteBtn:Show()
-        if IsInRaid() or IsInGroup() then
+        if WGS:IsInAnyGroup() then
             tab.announceBtn:Show()
             tab.announceBtn:SetScript("OnClick", function()
-                local channel = IsInRaid() and "RAID" or "PARTY"
+                local channel = WGS:GetGroupChannel() or "PARTY"
                 C_ChatInfo.SendChatMessage("[GuildHall] Missing for " .. (data.event.title or "event") .. ":", channel)
                 local names = {}
                 for _, m in ipairs(missing) do

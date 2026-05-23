@@ -7,13 +7,23 @@ local WGS = GuildHall
 --   guildGroupCache   — IsGuildGroup result, refreshed every 5s.
 -- BuildCharacterLookup is repopulated explicitly on each web import.
 
---- Ensure a name is in "CharName-Realm" format. Same-realm members from
---- GetGuildRosterInfo / GetRaidRosterInfo may come back as just "CharName"
---- — append the player's own realm in that case.
-function WGS:NormalizeFullName(name)
+--- Ensure a name is in "CharName-Realm" format. Two call shapes:
+---
+---   NormalizeFullName("Foo")            → "Foo-CurrentRealm"
+---   NormalizeFullName("Foo-Other")      → "Foo-Other"        (already suffixed)
+---   NormalizeFullName("Foo", "Other")   → "Foo-Other"        (explicit realm)
+---   NormalizeFullName("Foo", "")        → "Foo-CurrentRealm" (empty falls back)
+---
+--- Same-realm members from GetGuildRosterInfo / GetRaidRosterInfo /
+--- UnitFullName can come back with an empty or nil realm string — this
+--- collapses that case so callers stop hand-rolling the same defensive
+--- ternary.
+function WGS:NormalizeFullName(name, realm)
     if not name or name == "" then return nil end
     if name:find("-", 1, true) then return name end
-    local realm = GetNormalizedRealmName() or ""
+    if not realm or realm == "" then
+        realm = GetNormalizedRealmName() or ""
+    end
     if realm == "" then return name end
     return name .. "-" .. realm
 end

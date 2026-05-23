@@ -357,7 +357,7 @@ end
 ---------------------------------------------------------------------------
 
 function module:IsInCurrentGroup(fullName)
-    if not (IsInRaid() or IsInGroup()) then return false end
+    if not WGS:IsInAnyGroup() then return false end
     if fullName == WGS:GetPlayerKey() then return true end
 
     -- Use UnitFullName for both raid and party — gives consistent (name, realm)
@@ -367,9 +367,8 @@ function module:IsInCurrentGroup(fullName)
     local count = IsInRaid() and GetNumGroupMembers() or (GetNumGroupMembers() - 1)
     for i = 1, count do
         local uName, uRealm = UnitFullName(prefix .. i)
-        if uName then
-            uRealm = (uRealm and uRealm ~= "") and uRealm or (GetNormalizedRealmName() or "")
-            if (uName .. "-" .. uRealm) == fullName then return true end
+        if uName and WGS:NormalizeFullName(uName, uRealm) == fullName then
+            return true
         end
     end
     return false

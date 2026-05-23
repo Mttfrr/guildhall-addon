@@ -121,7 +121,7 @@ end
 
 function module:OnLootMessage(_, msg, ...)
     if not WGS.db.profile.autoTrackLoot then return end
-    if not (IsInRaid() or IsInGroup()) then return end
+    if not WGS:IsInAnyGroup() then return end
 
     -- Guild group filter
     if WGS.db.profile.guildGroupsOnly and not WGS:IsGuildGroup() then return end

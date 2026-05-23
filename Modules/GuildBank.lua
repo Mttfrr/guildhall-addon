@@ -38,7 +38,11 @@ function module:OnBankOpened()
     end)
 end
 
-local function formatGold(copper)
+--- Format a copper amount as "Ng Ms Pc". Exposed on the WGS namespace
+--- because other modules (UI tiles, sync diagnostics) need the same
+--- shape — keeping it local here meant every caller re-implemented it.
+function WGS:FormatGold(copper)
+    copper = copper or 0
     local gold = math.floor(copper / 10000)
     local silver = math.floor((copper % 10000) / 100)
     local cop = copper % 100
@@ -70,9 +74,9 @@ function WGS:OnGoldChanged()
             timestamp = self:GetTimestamp(),
             recordedBy = self:GetPlayerKey(),
             money = guildMoney,
-            moneyFormatted = formatGold(guildMoney),
+            moneyFormatted = WGS:FormatGold(guildMoney),
             diff = diff,
-            diffFormatted = sign .. formatGold(math.abs(diff)),
+            diffFormatted = sign .. WGS:FormatGold(math.abs(diff)),
             previousMoney = previousMoney,
         })
     end
@@ -148,7 +152,7 @@ function WGS:CaptureNewTransactions()
                     timestamp = entry.timestamp,
                     player = entry.name or "Unknown",
                     amount = entry.amount,
-                    amountFormatted = formatGold(entry.amount),
+                    amountFormatted = WGS:FormatGold(entry.amount),
                     type = entry.mappedType,
                     rawType = entry.rawType or "",
                 })
@@ -194,9 +198,9 @@ function WGS:CaptureGold()
         timestamp = self:GetTimestamp(),
         recordedBy = self:GetPlayerKey(),
         money = guildMoney,
-        moneyFormatted = formatGold(guildMoney),
+        moneyFormatted = WGS:FormatGold(guildMoney),
         diff = diff,
-        diffFormatted = sign .. formatGold(math.abs(diff)),
+        diffFormatted = sign .. WGS:FormatGold(math.abs(diff)),
         previousMoney = previousMoney,
     })
 
@@ -206,7 +210,7 @@ end
 function WGS:GetGuildGoldFormatted()
     local money = self.db.global.lastKnownGold
     if money and money > 0 then
-        return formatGold(money)
+        return WGS:FormatGold(money)
     end
     return nil
 end

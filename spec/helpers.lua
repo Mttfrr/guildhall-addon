@@ -88,6 +88,7 @@ function M.setup()
     dofile("Util/Base64.lua")
     dofile("Util/Roster.lua")
     dofile("Util/Interop.lua")
+    dofile("Util/Group.lua")
     dofile("Sync/Encoder.lua")
     dofile("Sync/Decoder.lua")
 
@@ -133,6 +134,7 @@ function M.setup()
     dofile("Modules/EventScheduler.lua")
     dofile("Modules/Attendance.lua")
     dofile("Modules/MRTNotes.lua")
+    dofile("Modules/GuildBank.lua")
 
     -- Test shim for the public event bus. The real registry is wired
     -- in WGS:OnInitialize via CallbackHandler-1.0, which isn't loaded

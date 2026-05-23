@@ -127,7 +127,7 @@ local function ShowLootHelper(itemLink, itemID, player, wishEntries)
     announceText = announceText .. table.concat(names, ", ")
 
     helperFrame.announceBtn:SetScript("OnClick", function()
-        local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or nil)
+        local channel = WGS:GetGroupChannel()
         if channel then
             C_ChatInfo.SendChatMessage("[GuildHall] " .. announceText, channel)
         else
@@ -153,7 +153,7 @@ function WGS:CheckLootDistribution(itemLink, itemID, player)
     if not itemID then return end
 
     -- Only show in raid/group
-    if not (IsInRaid() or IsInGroup()) then return end
+    if not WGS:IsInAnyGroup() then return end
 
     local wishEntries = self:GetWishlistForItem(itemID)
     if not wishEntries or #wishEntries == 0 then return end

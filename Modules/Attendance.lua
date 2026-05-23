@@ -365,8 +365,7 @@ function WGS:GetRaidMembers()
             local unit = "raid" .. i
             local name, realm = UnitFullName(unit)
             if name then
-                realm = (realm and realm ~= "") and realm or (GetNormalizedRealmName() or "")
-                local fullName = name .. "-" .. realm
+                local fullName = WGS:NormalizeFullName(name, realm)
                 local _, class = UnitClass(unit)
                 local role = UnitGroupRolesAssigned(unit)
                 local unitGuild = GetGuildInfo(unit)
@@ -396,8 +395,7 @@ function WGS:GetRaidMembers()
             local unit = "party" .. i
             local name, realm = UnitFullName(unit)
             if name then
-                realm = (realm and realm ~= "") and realm or (GetNormalizedRealmName() or "")
-                local fullName = name .. "-" .. realm
+                local fullName = WGS:NormalizeFullName(name, realm)
                 local _, pClass = UnitClass(unit)
                 local pRole = UnitGroupRolesAssigned(unit)
                 local unitGuild = GetGuildInfo(unit)
