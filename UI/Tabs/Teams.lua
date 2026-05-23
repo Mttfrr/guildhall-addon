@@ -369,9 +369,27 @@ local function PopulateTeams(tab)
     if not teams or #teams == 0 then
         local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noData:SetText("No teams imported yet. Use the Import/Export tab to import data.")
+        noData:SetText("No teams imported yet. Use the Sync tab to import data.")
         tab.content:SetHeight(30)
         return
+    end
+
+    -- Apply the global current-team filter: when set, render only the
+    -- matching team. nil = "All Teams" (show all, current behaviour).
+    local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
+    if currentTeamId then
+        local filtered = {}
+        for _, t in ipairs(teams) do
+            if t.id == currentTeamId then filtered[#filtered + 1] = t end
+        end
+        teams = filtered
+        if #teams == 0 then
+            local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+            noData:SetText("Picked team is no longer present in the imported teams list.")
+            tab.content:SetHeight(30)
+            return
+        end
     end
 
     local roster     = WGS:GetGuildRosterLookup()
@@ -528,10 +546,15 @@ function BuildRosterCheckSubView(sv)
     end)
 end
 
--- Returns { expected, actual } lists for today's event
+-- Returns { expected, actual } lists for today's event. If the global
+-- current-team picker is set, restrict the search to that team's events.
 local function BuildRosterCheckData()
-    local event = WGS.FindTodayEventForTeam and WGS:FindTodayEventForTeam(nil) or nil
+    local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
+    local event = WGS.FindTodayEventForTeam and WGS:FindTodayEventForTeam(currentTeamId) or nil
     if not event then
+        if currentTeamId then
+            return nil, "No event for the picked team today."
+        end
         return nil, "No event scheduled for today."
     end
 
@@ -878,10 +901,52 @@ function PopulateWishlists(tab)
         return
     end
 
+    -- Build the set of allowed player names if the team picker is set.
+    -- We accept both full ("Foo-Realm") and short ("Foo") forms since
+    -- wishlist.playerName drift between the two depending on the
+    -- import path.
+    local allowedPlayers = nil
+    local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
+    if currentTeamId then
+        allowedPlayers = {}
+        for _, t in ipairs(WGS.db.global.teams or {}) do
+            if t.id == currentTeamId then
+                for _, memberName in ipairs(t.members or {}) do
+                    allowedPlayers[memberName] = true
+                    local short = memberName:match("^([^%-]+)") or memberName
+                    allowedPlayers[short] = true
+                end
+                -- Also accept linked-character alts so a wishlist on an
+                -- alt of a team main still shows up under the team
+                -- filter.
+                local chars = WGS.db.global.characters or {}
+                for _, pm in ipairs(t.playerMembers or {}) do
+                    local info = chars[pm.playerId]
+                    if info and info.alts then
+                        for _, alt in ipairs(info.alts) do
+                            allowedPlayers[alt] = true
+                            local altShort = alt:match("^([^%-]+)") or alt
+                            allowedPlayers[altShort] = true
+                        end
+                    end
+                end
+                break
+            end
+        end
+    end
+
+    local function inScope(playerName)
+        if not allowedPlayers then return true end
+        if not playerName then return false end
+        if allowedPlayers[playerName] then return true end
+        local short = playerName:match("^([^%-]+)") or playerName
+        return allowedPlayers[short] == true
+    end
+
     local itemWishers = {}
     local itemNames = {}
     for _, entry in ipairs(wishlists) do
-        if entry.items then
+        if entry.items and inScope(entry.playerName) then
             for _, item in ipairs(entry.items) do
                 if item.itemID then
                     itemWishers[item.itemID] = itemWishers[item.itemID] or {}

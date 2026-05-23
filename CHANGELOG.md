@@ -5,6 +5,7 @@ All notable changes to GuildHall will be documented in this file.
 ## [0.7.0-beta] — Unreleased
 
 ### Changed
+- **Teams tab respects the global team picker across all three sub-views.** Teams sub-view: renders one team when the picker is set, all teams when "All Teams". Roster Check: today's event is matched per-team (was already team-aware via `FindTodayEventForTeam` — now the wiring actually passes the picked team id, where it used to hardcode nil). Wishlists: only shows wishlist entries from players who are members of the picked team (or alts of linked members). "All Teams" preserves the old guild-wide behaviour.
 - **Events rail respects the global team picker.** When the picker is set to a specific team, the rail (and the detail panel it drives) hides events from other teams. "All Teams" shows everything as before. If the currently-selected event is filtered out (e.g. switching from All Teams to a single team), the selection falls back to the first event in the filtered list.
 
 ### Added
