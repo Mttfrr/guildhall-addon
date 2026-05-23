@@ -91,6 +91,7 @@ function M.setup()
     dofile("Util/Group.lua")
     dofile("Sync/Encoder.lua")
     dofile("Sync/Decoder.lua")
+    dofile("Sync/PeerMessage.lua")
 
     -- AceConsole-3.0 normally mixes Print in; stub it as a no-op so methods
     -- that log status messages don't blow up during tests.
@@ -135,6 +136,7 @@ function M.setup()
     dofile("Modules/Attendance.lua")
     dofile("Modules/MRTNotes.lua")
     dofile("Modules/GuildBank.lua")
+    dofile("Modules/PeerSync.lua")
 
     -- Test shim for the public event bus. The real registry is wired
     -- in WGS:OnInitialize via CallbackHandler-1.0, which isn't loaded

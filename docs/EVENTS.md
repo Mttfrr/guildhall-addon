@@ -96,6 +96,24 @@ Use this if you're caching anything derived from imported data (e.g. a
 nickname push to NSRT) — the registries you care about are guaranteed
 to be in their post-import state by the time this fires.
 
+### `WGS_PEER_SYNC_APPLIED`
+
+Fires after the PeerSync module receives a delta from another officer,
+runs it through the trust gate, decodes the chunk stream, and applies
+the registered merge function for that table. Subscribers (UI tabs,
+notifiers, badge counters) get a single hook regardless of which
+underlying table changed. Payload:
+
+| Field | Type | Notes |
+|---|---|---|
+| `table` | string | one of `"loot"`, `"attendance"`, `"encounters"`, `"raidCompResults"` (more land as Phase 2 wires them) |
+| `row` | table | the decoded row, in the same shape used by the local capture path |
+| `action` | string | `"added"`, `"updated"`, or `"skipped"` — whatever the merge fn returned |
+| `from` | string | sender's normalised character key, e.g. `"Foo-Realm"` |
+
+UI tabs typically subscribe with a debounce — multiple rows can arrive
+in rapid succession during catch-up — and re-render their visible list.
+
 ### `WGS_INTERNAL_ERROR`
 
 Fires when a `pcall`-guarded internal operation throws. The addon
@@ -110,8 +128,11 @@ can surface or aggregate these for debugging. Payload:
 
 Sites that fire today: `Modules/Attendance.lua` (roster-walk
 exception during a session), `Modules/MRTNotes.lua` (MRT's note
-accessor throwing), `Util/JSON.lua` (parse failure on import). Stable
-contract — adding new sites is additive.
+accessor throwing), `Util/JSON.lua` (parse failure on import),
+`Modules/PeerSync.lua` (`PeerSync.gate.rejected`, `PeerSync.Broadcast`,
+`PeerSync.dispatch`, `PeerSync.merge.<table>`),
+`Sync/PeerMessage.lua` (`PeerMessage.Decode`). Stable contract —
+adding new sites is additive.
 
 ### `WGS_LOOT_RECORDED`
 
