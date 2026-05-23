@@ -31,10 +31,20 @@ function module:OnBankOpened()
     if pendingBankOpen then pendingBankOpen:Cancel() end
     pendingBankOpen = C_Timer.NewTimer(1, function()
         pendingBankOpen = nil
-        -- Gold first (cheap), then transaction log. Both run silently —
-        -- end-of-session export reminder is the user-visible signal.
-        WGS:CaptureGold()
-        WGS:CaptureNewTransactions()
+        -- Surface a single summary line so the user sees that capture
+        -- happened. Without it, opening the bank looked like a no-op —
+        -- there's no other UI feedback that the addon registered the
+        -- event. Format: "GuildHall: bank ok (Ng Ms Pc, N new tx)".
+        local goldOk = WGS:CaptureGold()
+        local txAdded = WGS:CaptureNewTransactions() or 0
+        if goldOk then
+            local gold = WGS:GetGuildGoldFormatted() or "?"
+            if txAdded > 0 then
+                WGS:Print(string.format("Bank captured: %s, %d new transaction(s).", gold, txAdded))
+            else
+                WGS:Print(string.format("Bank captured: %s.", gold))
+            end
+        end
     end)
 end
 
@@ -87,10 +97,13 @@ end
 
 -- Scan the transaction log and capture only entries we haven't seen yet
 function WGS:CaptureNewTransactions()
-    if not GetNumGuildBankMoneyTransactions then return end
+    if not GetNumGuildBankMoneyTransactions then return 0 end
 
     local numTx = GetNumGuildBankMoneyTransactions()
-    if numTx == 0 then return end
+    -- numTx == 0 happens before the user clicks the Money Log tab.
+    -- Bail out quietly — clicking the tab will fire another
+    -- GUILDBANK_UPDATE_MONEY that runs this again.
+    if numTx == 0 then return 0 end
 
     local db = self.db.global
     db.guildBankTransactions = db.guildBankTransactions or {}
@@ -168,8 +181,10 @@ function WGS:CaptureNewTransactions()
         end
     end
 
-    -- Silent capture: any per-transaction chatter would be noise during a
-    -- raid. The end-of-session export reminder surfaces the totals.
+    -- Returns the count of rows added so OnBankOpened can surface a
+    -- single summary line. Per-transaction chatter during a raid is
+    -- noise; the summary is the only user-visible signal.
+    return added
 end
 
 -- Silent gold snapshot. Called on GUILDBANK_UPDATE_MONEY (debounced) and
