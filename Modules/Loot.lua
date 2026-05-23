@@ -106,6 +106,16 @@ function module:OnEncounterEnd(_, encounterID, encounterName, difficultyID, grou
             difficultyID = difficultyID,
             difficultyName = difficultyName,
         })
+
+        -- MRT loot reconciliation: 5s after ENCOUNTER_END (gives the
+        -- last CHAT_MSG_LOOT messages time to land in laggy raids) we
+        -- walk VMRT.LootHistory.list and gap-fill any drops we missed.
+        -- Skips silently when MRT isn't loaded.
+        if WGS:HasAddon("MRT") then
+            C_Timer.After(5, function()
+                WGS:ReconcileLootFromMRT(encounterID)
+            end)
+        end
     end
 end
 
@@ -209,4 +219,135 @@ function module:GetItemIDFromLink(link)
     if not link then return nil end
     local id = link:match("item:(%d+)")
     return id and tonumber(id) or nil
+end
+
+---------------------------------------------------------------------------
+-- MRT loot reconciliation
+---------------------------------------------------------------------------
+
+-- How far back from "now" we trust an MRT loot row to belong to the
+-- encounter that just ended. Big enough to absorb laggy MRT writes,
+-- small enough to avoid pulling in loot from earlier pulls.
+local MRT_LOOT_WINDOW_SECONDS = 300
+
+-- Tolerance for "is this MRT row the same drop as one we already have".
+-- 60s is generous — CHAT_MSG_LOOT and MRT's ENCOUNTER_LOOT_RECEIVED
+-- usually fire within ~1s of each other; the window only matters when
+-- the player's clock has drifted.
+local MRT_LOOT_DEDUP_WINDOW = 60
+
+--- Parse one MRT VMRT.LootHistory.list entry. Format (verified in
+--- docs/INTEROP.md against akbyrd/method-raid-tools):
+---   "timestamp#encounterID#instanceID#difficulty#playerName#classID#quantity#itemLink"
+--- Returns a table with named fields, or nil if the row is malformed.
+local function ParseMRTLootRow(s)
+    if type(s) ~= "string" then return nil end
+    -- Split on "#"; itemLink may contain "|" but never "#", so 8 segments
+    local segs = {}
+    for seg in s:gmatch("([^#]+)") do segs[#segs + 1] = seg end
+    if #segs < 8 then return nil end
+
+    local timestamp = tonumber(segs[1])
+    local encounterID = tonumber(segs[2])
+    if not timestamp or not encounterID then return nil end
+
+    return {
+        timestamp   = timestamp,
+        encounterID = encounterID,
+        instanceID  = tonumber(segs[3]) or 0,
+        difficulty  = tonumber(segs[4]) or 0,
+        player      = segs[5] or "",
+        classID     = tonumber(segs[6]) or 0,
+        quantity    = tonumber(segs[7]) or 1,
+        itemLink    = segs[8] or "",
+    }
+end
+
+--- Extract itemID from an item link. Used both for our existing rows
+--- and for MRT-sourced rows so reconciliation compares apples to apples.
+local function ItemIDFromLink(link)
+    if type(link) ~= "string" then return nil end
+    local id = link:match("item:(%d+)")
+    return id and tonumber(id) or nil
+end
+
+--- Does our db.global.loot already contain a row matching this MRT
+--- drop? Match by (itemID + player + timestamp ±60s). Player names
+--- are compared with realm normalisation — our rows always carry the
+--- realm suffix (OnLootMessage at line ~123) while MRT can store
+--- either form depending on whether the drop was cross-realm.
+local function HasExistingMatch(mrtRow)
+    local existing = WGS.db.global.loot
+    if not existing then return false end
+
+    local mrtItemID = ItemIDFromLink(mrtRow.itemLink)
+    if not mrtItemID then return false end
+
+    local mrtPlayerShort = mrtRow.player:match("^([^%-]+)") or mrtRow.player
+
+    for _, row in ipairs(existing) do
+        if row.itemID == mrtItemID then
+            local rowShort = (row.player or ""):match("^([^%-]+)") or row.player or ""
+            if rowShort == mrtPlayerShort then
+                local dt = math.abs((row.timestamp or 0) - mrtRow.timestamp)
+                if dt <= MRT_LOOT_DEDUP_WINDOW then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+--- Walk VMRT.LootHistory.list for rows that belong to the encounter
+--- that just ended, and insert any we don't already have into
+--- db.global.loot tagged source = "mrt". Returns the count of
+--- gap-filled rows (0 if nothing new). Idempotent: a second call for
+--- the same encounter is a no-op because HasExistingMatch will now
+--- find the rows we just inserted.
+function WGS:ReconcileLootFromMRT(endedEncounterID)
+    if not self:HasAddon("MRT") then return 0 end
+    local vmrt = _G.VMRT
+    local hist = vmrt and vmrt.LootHistory and vmrt.LootHistory.list
+    if type(hist) ~= "table" then return 0 end
+
+    local now = self:GetTimestamp()
+    local windowStart = now - MRT_LOOT_WINDOW_SECONDS
+
+    local added = 0
+    for _, raw in ipairs(hist) do
+        local row = ParseMRTLootRow(raw)
+        if row
+           and row.encounterID == endedEncounterID
+           and row.timestamp >= windowStart
+           and row.timestamp <= now
+        then
+            if not HasExistingMatch(row) then
+                local itemID = ItemIDFromLink(row.itemLink) or 0
+                local player = row.player
+                if player ~= "" and not player:find("-") then
+                    player = player .. "-" .. (GetNormalizedRealmName() or "")
+                end
+                local entry = {
+                    timestamp   = row.timestamp,
+                    player      = player,
+                    playerId    = WGS:ResolvePlayerForCharacter(player),
+                    itemLink    = row.itemLink,
+                    itemID      = itemID,
+                    itemName    = "",       -- MRT doesn't carry it; web hydrates from itemID
+                    itemQuality = 0,        -- ditto; threshold check skipped (MRT pre-filtered)
+                    itemLevel   = 0,
+                    instance    = GetInstanceInfo() or "Unknown",
+                    difficulty  = row.difficulty,
+                    boss        = lastBossName,
+                    recordedBy  = WGS:GetPlayerKey(),
+                    source      = "mrt",    -- distinguishes gap-fill rows from CHAT_MSG_LOOT
+                }
+                table.insert(WGS.db.global.loot, entry)
+                WGS:FireEvent("WGS_LOOT_RECORDED", entry)
+                added = added + 1
+            end
+        end
+    end
+    return added
 end
