@@ -151,28 +151,24 @@ end
 ---------------------------------------------------------------------------
 
 function WGS:AutoInvite()
-    -- Permission check: must be in group as leader/assistant, or not in group
-    if IsInRaid() then
-        if not UnitIsGroupLeader("player") and not UnitIsGroupAssistant("player") then
+    -- Permission gate. Lead-or-assist on the group (if any) + officer
+    -- rank in the guild. Both branches print a clear reason and bail
+    -- before we touch anything.
+    local ok, reason = self:HasGroupLeadOrAssist()
+    if not ok then
+        if reason == "raid-need-lead" then
             self:Print("|cffff4444You must be raid leader or assistant to auto-invite.|r")
-            return
-        end
-    elseif IsInGroup() then
-        if not UnitIsGroupLeader("player") then
+        elseif reason == "party-need-lead" then
             self:Print("|cffff4444You must be party leader to auto-invite.|r")
-            return
         end
+        return
     end
-
-    -- Officer check (top 3 guild ranks)
-    if IsInGuild() then
-        local _, _, rankIndex = GetGuildInfo("player")
-        if not rankIndex or rankIndex > 2 then
-            self:Print("|cffff4444Auto-invite requires officer rank or higher.|r")
-            return
-        end
-    else
+    if not IsInGuild() then
         self:Print("|cffff4444You must be in a guild.|r")
+        return
+    end
+    if not self:IsGuildOfficer() then
+        self:Print("|cffff4444Auto-invite requires officer rank or higher.|r")
         return
     end
 
@@ -234,7 +230,8 @@ function WGS:SortRaidGroups()
         self:Print("|cffff4444Must be in a raid to sort groups.|r")
         return
     end
-    if not UnitIsGroupLeader("player") and not UnitIsGroupAssistant("player") then
+    local ok = self:HasGroupLeadOrAssist()
+    if not ok then
         self:Print("|cffff4444Must be raid leader or assistant to sort groups.|r")
         return
     end

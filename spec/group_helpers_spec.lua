@@ -109,6 +109,116 @@ describe("WGS:NormalizeFullName (2-arg form)", function()
     end)
 end)
 
+describe("WGS:HasGroupLeadOrAssist", function()
+    local WGS
+    local origInRaid, origInGroup, origLeader, origAssist
+
+    before_each(function()
+        WGS = helpers.setup()
+        origInRaid  = _G.IsInRaid
+        origInGroup = _G.IsInGroup
+        origLeader  = _G.UnitIsGroupLeader
+        origAssist  = _G.UnitIsGroupAssistant
+    end)
+    after_each(function()
+        _G.IsInRaid              = origInRaid
+        _G.IsInGroup             = origInGroup
+        _G.UnitIsGroupLeader     = origLeader
+        _G.UnitIsGroupAssistant  = origAssist
+    end)
+
+    it("returns true,nil for raid leader", function()
+        _G.IsInRaid  = function() return true end
+        _G.UnitIsGroupLeader = function() return true end
+        _G.UnitIsGroupAssistant = function() return false end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_true(ok); assert.is_nil(reason)
+    end)
+
+    it("returns true,nil for raid assistant", function()
+        _G.IsInRaid  = function() return true end
+        _G.UnitIsGroupLeader = function() return false end
+        _G.UnitIsGroupAssistant = function() return true end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_true(ok); assert.is_nil(reason)
+    end)
+
+    it("returns false,'raid-need-lead' for a raid grunt", function()
+        _G.IsInRaid  = function() return true end
+        _G.UnitIsGroupLeader = function() return false end
+        _G.UnitIsGroupAssistant = function() return false end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_false(ok); assert.are.equal("raid-need-lead", reason)
+    end)
+
+    it("returns true,nil for party leader", function()
+        _G.IsInRaid  = function() return false end
+        _G.IsInGroup = function() return true end
+        _G.UnitIsGroupLeader = function() return true end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_true(ok); assert.is_nil(reason)
+    end)
+
+    it("returns false,'party-need-lead' for a party non-leader", function()
+        _G.IsInRaid  = function() return false end
+        _G.IsInGroup = function() return true end
+        _G.UnitIsGroupLeader = function() return false end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_false(ok); assert.are.equal("party-need-lead", reason)
+    end)
+
+    it("returns true,nil when solo (no group → nothing to gate on)", function()
+        _G.IsInRaid  = function() return false end
+        _G.IsInGroup = function() return false end
+        local ok, reason = WGS:HasGroupLeadOrAssist()
+        assert.is_true(ok); assert.is_nil(reason)
+    end)
+end)
+
+describe("WGS:IsGuildOfficer", function()
+    local WGS
+    local origInGuild, origGuildInfo
+
+    before_each(function()
+        WGS = helpers.setup()
+        origInGuild   = _G.IsInGuild
+        origGuildInfo = _G.GetGuildInfo
+    end)
+    after_each(function()
+        _G.IsInGuild     = origInGuild
+        _G.GetGuildInfo  = origGuildInfo
+    end)
+
+    it("is true for rank index 0 (Guild Master)", function()
+        _G.IsInGuild     = function() return true end
+        _G.GetGuildInfo  = function() return "Guild", "Master", 0 end
+        assert.is_true(WGS:IsGuildOfficer())
+    end)
+
+    it("is true for rank index 2 (third tier — typically 'Officer Alt')", function()
+        _G.IsInGuild     = function() return true end
+        _G.GetGuildInfo  = function() return "Guild", "Officer Alt", 2 end
+        assert.is_true(WGS:IsGuildOfficer())
+    end)
+
+    it("is false for rank index 3+", function()
+        _G.IsInGuild     = function() return true end
+        _G.GetGuildInfo  = function() return "Guild", "Raider", 3 end
+        assert.is_false(WGS:IsGuildOfficer())
+    end)
+
+    it("is false when not in a guild", function()
+        _G.IsInGuild = function() return false end
+        assert.is_false(WGS:IsGuildOfficer())
+    end)
+
+    it("is false when GetGuildInfo returns no rank", function()
+        _G.IsInGuild     = function() return true end
+        _G.GetGuildInfo  = function() return "Guild", "Member" end  -- nil rankIndex
+        assert.is_false(WGS:IsGuildOfficer())
+    end)
+end)
+
 describe("WGS:FormatGold", function()
     local WGS
     before_each(function() WGS = helpers.setup() end)
