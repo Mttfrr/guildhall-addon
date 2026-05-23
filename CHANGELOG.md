@@ -4,6 +4,15 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Fixed
+- **Events tab alignment + roster reorg.** Five tweaks from screenshot review:
+  - **Rail row overlap**: the date+time-range text and the status pill both anchored to the row edges; when `end_time` extended the date string (e.g. `15:00–18:00`), `Upcoming` overwrote the end time. Date text now anchors its right edge to the pill's left edge with a 6 px gap, so they can never collide regardless of time-range length.
+  - **Roster: group by status header instead of per-row column.** The "Present" column repeated up to 18+ times per render. Replaced with one group header per non-empty status (`Present (18)`, `Late (3)`, `Tentative (1)`, etc.) in the status color — matches the Discord embed layout one step closer. The per-row status cell is gone; rows are indented 8 px under their group header so the grouping reads at a glance.
+  - **Roster: column-header row** (`iLvl  Enchants  Gems`, dimmed) above the data rows. Single row at the top of the section, not repeated per group. Removes the "what does this number mean?" guesswork.
+  - **Numeric columns reach the right edge.** Were x-anchored from the left with hardcoded widths that left ~70 px of dead space on the right. Now right-anchored: Gems sits 4 px from the section's right edge, Enchants and iLvl step left from there with a 10 px gap.
+  - **Rail bottom aligns with the detail panel bottom.** The rail extended all the way to the parent's bottom while the detail panel stopped above the sticky footer, so the rail's scrollbar dangled below the detail's. Rail now stops at the same y. The footer Frame also spans the full panel width (not just the detail half) so the separator above it reads as one clean horizontal rule. Action buttons stay inset to the detail half via a `_buttonInsetLeft` hint.
+  - Roster summary line drops the per-status counts (now in the group headers) and shows only the gear-gap total when non-zero.
+
 ### Changed
 - **Events tab Roster rows match the Teams tab's row chrome.** The Events detail panel's Roster section was hand-rolling its own player-row layout: an `E2`/`G1`/✓ glyph-soup for gear gaps, a plain-text class-coloured name with no class icon, and a manually-padded ilvl cell with its own em-dash for "no data". Teams' Roster sub-view already solved this cleanly (class icon + class-coloured name + plain numeric columns with severity colouring) so the helpers are lifted into `UI/UIHelpers.lua` (`ui.ApplyClassIcon`, `ui.BuildNumericCell`) and consumed by both. The Events Roster row now reads: Status text · Class icon · Name · iLvl · Enchants · Gems — same severity rules (0=green / 1-3=orange / 4+=red for gear gaps; at-target green / below-target orange for iLvl), no special-character abbreviations.
 - **Addon labels normalised to match the platform.** The addon and the website were using ad-hoc divergent wording for the same data; now they match the canonical strings from `client/src/utils.js` `ATTENDANCE_STATUSES`.

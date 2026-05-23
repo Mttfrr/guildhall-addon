@@ -157,23 +157,28 @@ local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
     local hl = btn:GetHighlightTexture()
     if hl then hl:SetAlpha(0.25) end
 
-    -- Top-left: date + time range
+    -- Top-right: status pill (was crowding the title on the bottom row
+    -- with only 2 px of vertical separation — moved up here to give the
+    -- title its own clean line). Created before the date text so the
+    -- date can anchor its right edge to the pill's left edge and avoid
+    -- overlapping when end_time is included (e.g. "15:00–18:00" eats
+    -- most of the row, the pill used to overwrite it).
+    local statusText, statusColor = EventStatus(ev, time())
+    local statusPill = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    statusPill:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
+    statusPill:SetText("|c" .. statusColor .. statusText .. "|r")
+
+    -- Top-left: date + time range. Clamped left of the status pill so
+    -- they can't overlap on long time-ranges.
     local dateText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    dateText:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, -4)
+    dateText:SetPoint("TOPLEFT",  btn, "TOPLEFT",  6, -4)
+    dateText:SetPoint("TOPRIGHT", statusPill, "TOPLEFT", -6, 0)
     dateText:SetJustifyH("LEFT")
     dateText:SetWordWrap(false)
     local dateStr = ev.date or "?"
     local timeStr = FormatEventTime(ev)
     if timeStr then dateStr = dateStr .. " |cffaaaaaa" .. timeStr .. "|r" end
     dateText:SetText(dateStr)
-
-    -- Top-right: status pill (was crowding the title on the bottom row
-    -- with only 2 px of vertical separation — moved up here to give the
-    -- title its own clean line).
-    local statusText, statusColor = EventStatus(ev, time())
-    local statusPill = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    statusPill:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
-    statusPill:SetText("|c" .. statusColor .. statusText .. "|r")
 
     -- Middle: title (with breathing room above and below)
     local titleLine = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -300,37 +305,37 @@ local function BuildSectionHeader(parent, anchor, label, width)
     return fs
 end
 
--- Order in which per-status counts render across the header summary
--- line. Mirrors the Discord embed's field order so the addon and the
--- web embed read in the same sequence (Present → Late → Tentative →
--- Bench). Absent + tier-2 codes (LE / RM) are skipped from this
--- summary line — they show up on the per-row badges below either way.
-local SUMMARY_STATUS_ORDER = { "P", "L", "T", "B" }
+-- Order in which the per-status groups render. Mirrors the Discord
+-- embed's field order so the addon and the web embed read in the same
+-- sequence (Present → Late → Late(officer) → Bench → Tentative →
+-- Absent → tier-2 codes). Empty groups are skipped at render time.
+local ROSTER_GROUP_ORDER = { "P", "L", "LT", "B", "T", "A", "LE", "RM" }
 
--- Render the Roster section: one row per signup with class colour,
--- status badge, ilvl, missing-enchant + missing-gem counts. Sorted by
--- status group then name so committed signups bubble to the top.
+-- Render the Roster section. Layout, top to bottom:
+--   Section title + "N gear gaps" summary on the same line
+--   Column headers (iLvl / Enchants / Gems) right-aligned, dimmed
+--   For each non-empty status group:
+--     Status group header in the status color ("Present (18)")
+--     Indented data rows: [class icon] Name … iLvl Ench Gems
+--
+-- The per-row status column was dropped — it just repeated the same
+-- word ("Present") 15-20 times per row, where the Discord embed has
+-- one group header per status. Numeric columns now right-anchor so
+-- they reach the right edge of the section instead of dangling in the
+-- middle.
 local function PopulateRosterSection(content, anchor, roster, width)
     local header = BuildSectionHeader(content, anchor, "Roster", width)
 
-    -- Header summary line: per-status breakdown matching the platform's
-    -- Discord embed grouping. Empty counts are skipped so the line
-    -- doesn't show "Bench (0)" on a typical mythic raid.
+    -- Inline summary on the section-title row: gear-gap total only.
+    -- Per-status counts moved into the group headers below to remove
+    -- the duplication.
     local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     summary:SetPoint("LEFT", header, "RIGHT", 12, 0)
-    local parts = {}
-    for _, code in ipairs(SUMMARY_STATUS_ORDER) do
-        local n = roster.byStatus[code] or 0
-        if n > 0 then
-            parts[#parts + 1] = string.format("|c%s%s (%d)|r",
-                STATUS_LABEL_COLORS[code] or "ffffffff",
-                STATUS_LABELS[code] or code, n)
-        end
-    end
     if roster.gearGapCount > 0 then
-        parts[#parts + 1] = string.format("|cffff5555%d gear gaps|r", roster.gearGapCount)
+        summary:SetText(string.format("|cffff5555%d gear gaps|r", roster.gearGapCount))
+    else
+        summary:SetText("")
     end
-    summary:SetText(table.concat(parts, " · "))
 
     if #roster.rows == 0 then
         local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -339,83 +344,104 @@ local function PopulateRosterSection(content, anchor, roster, width)
         return empty
     end
 
-    -- Sort: committed first, then tentative, then absent; within each
-    -- group, alphabetic by short name. Officers reading top-down see
-    -- "who's in" first.
-    local function statusBucket(s)
-        if COMMITTED_STATUSES[s] then return 1 end
-        if s == "T" then return 2 end
-        return 3
-    end
-    table.sort(roster.rows, function(a, b)
-        local ba, bb = statusBucket(a.status), statusBucket(b.status)
-        if ba ~= bb then return ba < bb end
-        return (a.short or "") < (b.short or "")
-    end)
-
-    -- Column geometry. Matches the Teams sub-view's row layout (class
-    -- icon + name → numeric cells for iLvl / Enchants / Gems) but
-    -- narrower since the Events detail panel is ~420 px vs Teams' 660.
-    -- Status is a colored text cell on the left so officers scanning
-    -- top-down see "who's in what bucket" before reading gear.
-    -- Columns chosen to leave ~12 px slack against a typical sectionW
-    -- so a wider detail panel (resized main frame in a future commit)
-    -- still fits without overlap.
-    local ROW_H        = 18
-    local COL_STATUS_X = 4
-    local COL_STATUS_W = 70
-    local COL_ICON_X   = 78
-    local COL_NAME_X   = 98
-    local COL_NAME_W   = 130
-    local COL_ILVL_X   = 232
-    local COL_ILVL_W   = 50
-    local COL_ENCH_X   = 286
-    local COL_ENCH_W   = 60
-    local COL_GEMS_X   = 350
-    local COL_GEMS_W   = 50
-
-    local last = header
+    -- Bucket rows by status code; sort within each by short name.
+    local byStatus = {}
+    for _, code in ipairs(ROSTER_GROUP_ORDER) do byStatus[code] = {} end
     for _, row in ipairs(roster.rows) do
-        local r = CreateFrame("Frame", nil, content)
-        r:SetSize(width, ROW_H)
-        r:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -3)
-        r:SetPoint("TOPRIGHT", last == header and header or last, "BOTTOMRIGHT", 0, -3)
+        local bucket = byStatus[row.status]
+        if bucket then bucket[#bucket + 1] = row end
+    end
+    for _, code in ipairs(ROSTER_GROUP_ORDER) do
+        table.sort(byStatus[code], function(a, b)
+            return (a.short or "") < (b.short or "")
+        end)
+    end
 
-        -- Status (colored text — the only Events-specific column; sits
-        -- at the head of the row the way Teams' online dot does).
-        local statusFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        statusFs:SetPoint("LEFT", r, "LEFT", COL_STATUS_X, 0)
-        statusFs:SetWidth(COL_STATUS_W)
-        statusFs:SetJustifyH("LEFT")
-        statusFs:SetText(string.format("|c%s%s|r",
-            STATUS_LABEL_COLORS[row.status] or "ffaaaaaa",
-            STATUS_LABELS[row.status] or row.status or "?"))
+    -- Column geometry. Numeric cells right-anchor to the row's RIGHT
+    -- edge so they always reach the right edge of the section, no
+    -- matter how wide the panel is. Name fills the remaining space
+    -- between the class icon and the iLvl column.
+    local ROW_H        = 18
+    local HEADER_H     = 14
+    local GROUP_HDR_H  = 18
+    local INDENT       = 8           -- left-indent for rows under a group header
+    local NUM_W        = 50          -- each numeric column
+    local NUM_GAP      = 10
+    local COL_GEMS_X   = width - 4  - NUM_W                       -- right-most
+    local COL_ENCH_X   = COL_GEMS_X  - NUM_GAP - NUM_W
+    local COL_ILVL_X   = COL_ENCH_X  - NUM_GAP - NUM_W
+    local NAME_RIGHT_LIMIT = COL_ILVL_X - 4
+    local ICON_X       = INDENT
+    local NAME_X       = ICON_X + 20
 
-        -- Class icon (real 16×16 sprite from the Blizz class sheet) +
-        -- class-coloured name. Mirrors the Teams tab's name cell.
-        local classFile = WGS:NormalizeClassFile(row.class or "")
-        local colorHex  = WGS.CLASS_COLORS[classFile] or "ffffffff"
+    -- Column-header row above the data. Dimmed so it reads as a label
+    -- not a value. Single row at the top of the section; not repeated
+    -- per group.
+    local columnHdr = CreateFrame("Frame", nil, content)
+    columnHdr:SetSize(width, HEADER_H)
+    columnHdr:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
+    columnHdr:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -4)
 
-        local icon = r:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(16, 16)
-        icon:SetPoint("LEFT", r, "LEFT", COL_ICON_X, 0)
-        ApplyClassIcon(icon, classFile, colorHex)
+    local function colLabel(x, text)
+        local fs = columnHdr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("LEFT", columnHdr, "LEFT", x, 0)
+        fs:SetWidth(NUM_W)
+        fs:SetJustifyH("RIGHT")
+        fs:SetText(text)
+        return fs
+    end
+    colLabel(COL_ILVL_X, "iLvl")
+    colLabel(COL_ENCH_X, "Enchants")
+    colLabel(COL_GEMS_X, "Gems")
 
-        local nameFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        nameFs:SetPoint("LEFT", r, "LEFT", COL_NAME_X, 0)
-        nameFs:SetWidth(COL_NAME_W)
-        nameFs:SetJustifyH("LEFT")
-        nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
+    local last = columnHdr
 
-        -- Numeric cells via the shared helper — same severity rules as
-        -- the Teams sub-view. ilvl uses the at-target green / below-
-        -- target orange logic; enchants + gems use 0=green / 1-3=orange
-        -- / 4+=red.
-        BuildNumericCell(r, COL_ILVL_X, 0, COL_ILVL_W, ROW_H, row.ilvl, false)
-        BuildNumericCell(r, COL_ENCH_X, 0, COL_ENCH_W, ROW_H, row.missingEnchants, true)
-        BuildNumericCell(r, COL_GEMS_X, 0, COL_GEMS_W, ROW_H, row.missingGems, true)
+    for _, code in ipairs(ROSTER_GROUP_ORDER) do
+        local rows = byStatus[code]
+        if #rows > 0 then
+            -- Group header: "Present (18)" in the status color.
+            local groupHdr = CreateFrame("Frame", nil, content)
+            groupHdr:SetSize(width, GROUP_HDR_H)
+            groupHdr:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -4)
+            groupHdr:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -4)
 
-        last = r
+            local fs = groupHdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            fs:SetPoint("LEFT", groupHdr, "LEFT", 2, 0)
+            fs:SetText(string.format("|c%s%s (%d)|r",
+                STATUS_LABEL_COLORS[code] or "ffffffff",
+                STATUS_LABELS[code] or code, #rows))
+            last = groupHdr
+
+            for _, row in ipairs(rows) do
+                local r = CreateFrame("Frame", nil, content)
+                r:SetSize(width, ROW_H)
+                r:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -1)
+                r:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -1)
+
+                -- Class icon + class-coloured name. Indented under the
+                -- group header so the visual grouping reads at a glance.
+                local classFile = WGS:NormalizeClassFile(row.class or "")
+                local colorHex  = WGS.CLASS_COLORS[classFile] or "ffffffff"
+
+                local icon = r:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(16, 16)
+                icon:SetPoint("LEFT", r, "LEFT", ICON_X, 0)
+                ApplyClassIcon(icon, classFile, colorHex)
+
+                local nameFs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                nameFs:SetPoint("LEFT", r, "LEFT", NAME_X, 0)
+                nameFs:SetWidth(NAME_RIGHT_LIMIT - NAME_X)
+                nameFs:SetJustifyH("LEFT")
+                nameFs:SetWordWrap(false)
+                nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
+
+                BuildNumericCell(r, COL_ILVL_X, 0, NUM_W, ROW_H, row.ilvl, false)
+                BuildNumericCell(r, COL_ENCH_X, 0, NUM_W, ROW_H, row.missingEnchants, true)
+                BuildNumericCell(r, COL_GEMS_X, 0, NUM_W, ROW_H, row.missingGems, true)
+
+                last = r
+            end
+        end
     end
 
     return last
@@ -587,10 +613,15 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
     for _, child in ipairs({ footer:GetChildren() }) do child:Hide() end
     for _, region in ipairs({ footer:GetRegions() }) do region:Hide() end
 
+    -- Buttons sit inside the detail half of the footer; the rail half
+    -- (left of _buttonInsetLeft) stays empty so the buttons line up
+    -- under the detail content rather than under the rail. Falls back
+    -- to 0 if the inset wasn't stashed (defensive, shouldn't happen).
+    local insetLeft = footer._buttonInsetLeft or 0
     local function actionBtn(label, x, w, onClick)
         local btn = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
         btn:SetSize(w, 24)
-        btn:SetPoint("LEFT", footer, "LEFT", x, 0)
+        btn:SetPoint("LEFT", footer, "LEFT", insetLeft + x, 0)
         btn:SetText(label)
         btn:SetScript("OnClick", onClick)
         return btn
