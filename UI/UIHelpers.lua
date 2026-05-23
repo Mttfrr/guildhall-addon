@@ -30,16 +30,15 @@ ui.TEAMS_SUB_WISHLISTS = 3
 ui.TEAMS_SUB_COUNT     = 3
 ui.TEAMS_SUB_NAMES     = { "Teams", "Roster Check", "Wishlists" }
 
-ui.BANK_SUB_LEDGER = 1
-ui.BANK_SUB_LOOT   = 2
-ui.BANK_SUB_COUNT  = 2
-ui.BANK_SUB_NAMES  = { "Ledger", "Loot History" }
+-- Bank is single-view (no sub-nav). Loot history moved to Raids since
+-- it's raid-related data, not bank-ledger data.
 
 ui.RAIDS_SUB_COMP      = 1
 ui.RAIDS_SUB_READINESS = 2
 ui.RAIDS_SUB_BOSSNOTES = 3
-ui.RAIDS_SUB_COUNT     = 3
-ui.RAIDS_SUB_NAMES     = { "Raid Comp", "Readiness", "Boss Notes" }
+ui.RAIDS_SUB_LOOT      = 4
+ui.RAIDS_SUB_COUNT     = 4
+ui.RAIDS_SUB_NAMES     = { "Raid Comp", "Readiness", "Boss Notes", "Loot History" }
 
 ---------------------------------------------------------------------------
 -- Shared frame helpers
@@ -69,24 +68,43 @@ function ui.CreateScrollContent(parent)
     return sf, content
 end
 
+-- Sub-nav visual states. The active tab gets a gold underline + bright
+-- label; inactives are dimmed; hover splits the difference. Kept here
+-- so the colors are tweakable in one place and read alongside the
+-- tab construction.
+local TAB_COLOR_ACTIVE   = { 1.00, 0.82, 0.00, 1.00 }  -- gold
+local TAB_COLOR_INACTIVE = { 0.65, 0.65, 0.65, 1.00 }  -- dim grey
+local TAB_COLOR_HOVER    = { 1.00, 1.00, 1.00, 1.00 }  -- white
+
+local function paintTab(btn, active)
+    if not btn or not btn.label then return end
+    local c = active and TAB_COLOR_ACTIVE or TAB_COLOR_INACTIVE
+    btn.label:SetTextColor(c[1], c[2], c[3], c[4])
+    if btn.underline then
+        if active then btn.underline:Show() else btn.underline:Hide() end
+    end
+end
+
 -- Generic sub-view selector. Hides all sub-views, shows the selected
--- one, and updates button font weight to indicate selection.
+-- one, and updates the sub-nav highlight to indicate selection.
 function ui.SelectSubView(tab, index, count)
     for i = 1, count do
         tab.subViews[i]:Hide()
-        if tab.subButtons[i] then
-            tab.subButtons[i]:SetNormalFontObject("GameFontNormalSmall")
-        end
+        paintTab(tab.subButtons[i], false)
     end
     tab.subViews[index]:Show()
-    if tab.subButtons[index] then
-        tab.subButtons[index]:SetNormalFontObject("GameFontHighlightSmall")
-    end
+    paintTab(tab.subButtons[index], true)
     tab.selectedSub = index
 end
 
 -- Build a sub-navigation row across the top of a tab plus N sub-view
 -- frames. onSelect(tab, index) is called when a sub-button is clicked.
+--
+-- Visual style: text-only tabs with a gold underline indicator on the
+-- active one. UIPanelButtonTemplate (the chunky red Blizzard buttons)
+-- is reserved for CTAs — Invite, Announce, Export, etc. — so the
+-- distinction between "switch views" and "do an action" reads
+-- cleanly at a glance.
 function ui.BuildSubNav(parent, names, onSelect)
     parent.subButtons = {}
     parent.subViews = {}
@@ -94,18 +112,52 @@ function ui.BuildSubNav(parent, names, onSelect)
     local count = #names
     local btnW = math.floor(660 / count) - 4
     local btnX = 0
+    local btnH = 24
+
     for i = 1, count do
-        local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-        btn:SetSize(btnW, 22)
+        local btn = CreateFrame("Button", nil, parent)
+        btn:SetSize(btnW, btnH)
         btn:SetPoint("TOPLEFT", parent, "TOPLEFT", btnX, 0)
-        btn:SetText(names[i])
+
+        local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetPoint("CENTER", btn, "CENTER", 0, 1)
+        label:SetText(names[i])
+        btn.label = label
+
+        local underline = btn:CreateTexture(nil, "ARTWORK")
+        underline:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 6, 0)
+        underline:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -6, 0)
+        underline:SetHeight(2)
+        underline:SetColorTexture(TAB_COLOR_ACTIVE[1], TAB_COLOR_ACTIVE[2], TAB_COLOR_ACTIVE[3], 1)
+        underline:Hide()
+        btn.underline = underline
+
+        btn:SetScript("OnEnter", function(self)
+            -- Hover lift only on non-active tabs; the active one stays gold.
+            if parent.selectedSub ~= i then
+                self.label:SetTextColor(TAB_COLOR_HOVER[1], TAB_COLOR_HOVER[2], TAB_COLOR_HOVER[3], 1)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            paintTab(self, parent.selectedSub == i)
+        end)
         btn:SetScript("OnClick", function() onSelect(parent, i) end)
+
+        paintTab(btn, false)  -- start inactive; SelectSubView paints the chosen one
         parent.subButtons[i] = btn
         btnX = btnX + btnW + 4
     end
+
+    -- Thin separator line under the whole nav row.
+    local sep = parent:CreateTexture(nil, "ARTWORK")
+    sep:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -btnH)
+    sep:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -btnH)
+    sep:SetHeight(1)
+    sep:SetColorTexture(0.3, 0.3, 0.3, 0.6)
+
     for i = 1, count do
         local sv = CreateFrame("Frame", nil, parent)
-        sv:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
+        sv:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(btnH + 4))
         sv:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
         sv:Hide()
         parent.subViews[i] = sv

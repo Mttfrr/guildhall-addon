@@ -28,13 +28,16 @@ function module:OnMoneyUpdate()
 end
 
 function module:OnBankOpened()
+    -- Immediate "the event fired" feedback. Without this, opening the
+    -- bank looks like a no-op for 1s while the debounce runs, and on
+    -- cold-open WoW hasn't populated GetGuildBankMoney yet so the
+    -- post-debounce summary may also print nothing useful. This line
+    -- confirms the addon noticed.
+    WGS:Print("Scanning guild bank…")
+
     if pendingBankOpen then pendingBankOpen:Cancel() end
     pendingBankOpen = C_Timer.NewTimer(1, function()
         pendingBankOpen = nil
-        -- Surface a single summary line so the user sees that capture
-        -- happened. Without it, opening the bank looked like a no-op —
-        -- there's no other UI feedback that the addon registered the
-        -- event. Format: "GuildHall: bank ok (Ng Ms Pc, N new tx)".
         local goldOk = WGS:CaptureGold()
         local txAdded = WGS:CaptureNewTransactions() or 0
         if goldOk then
@@ -44,6 +47,13 @@ function module:OnBankOpened()
             else
                 WGS:Print(string.format("Bank captured: %s.", gold))
             end
+        else
+            -- Gold capture bailed (no guild / API not loaded / 0 balance).
+            -- Most common cause: balance hasn't loaded yet; another
+            -- GUILDBANK_UPDATE_MONEY will fire once it has and the
+            -- captures will run silently then. Still, the user deserves
+            -- a clear "we tried" message.
+            WGS:Print("Bank scan: no data yet. Click the Money Log tab to load transactions.")
         end
     end)
 end

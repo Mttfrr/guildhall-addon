@@ -117,13 +117,13 @@ function WGS:SlashCommand(input)
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
     elseif cmd == "loot" then
-        self:SelectMainFrameTab(ui.TAB_BANK, ui.BANK_SUB_LOOT)
+        self:SelectMainFrameTab(ui.TAB_RAIDS, ui.RAIDS_SUB_LOOT)
     elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_WISHLISTS)
     elseif cmd == "rostercheck" or cmd == "check" then
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_CHECK)
     elseif cmd == "bank" then
-        self:SelectMainFrameTab(ui.TAB_BANK, ui.BANK_SUB_LEDGER)
+        self:SelectMainFrameTab(ui.TAB_BANK)
     elseif cmd == "restore" then
         self:RestoreClearedData()
     else

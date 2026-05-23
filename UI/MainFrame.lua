@@ -10,7 +10,6 @@ local ui = WGS._ui
 -- Tab indices used by the shell. Other tab IDs come through
 -- ui.TAB_* directly at their lone call sites in SelectMainFrameTab.
 local TAB_TEAMS  = ui.TAB_TEAMS
-local TAB_BANK   = ui.TAB_BANK
 local TAB_RAIDS  = ui.TAB_RAIDS
 local TAB_SYNC   = ui.TAB_SYNC
 local TAB_COUNT  = ui.TAB_COUNT
@@ -160,8 +159,6 @@ function WGS:SelectMainFrameTab(tabIndex, subIndex)
             SelectSubView(mainFrame.tabContents[TAB_RAIDS], subIndex, ui.RAIDS_SUB_COUNT)
         elseif tabIndex == TAB_TEAMS then
             SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
-        elseif tabIndex == TAB_BANK then
-            SelectSubView(mainFrame.tabContents[TAB_BANK], subIndex, ui.BANK_SUB_COUNT)
         end
     end
     RefreshCurrentTab(mainFrame)
