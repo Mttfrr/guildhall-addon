@@ -1,5 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
+local L = GuildHall_L
 
 ---@class WGSAttendanceModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("Attendance", "AceEvent-3.0")
@@ -259,7 +260,7 @@ end
 --- behavior — capture is event-driven now, manual start/stop is gone.
 function WGS:AttendanceStatus()
     if not isTracking or not currentSession then
-        self:Print("Attendance: not recording.")
+        self:Print(L["ATTENDANCE_NOT_RECORDING"])
         return
     end
     local startedHM = date("%H:%M", currentSession.startedAt)
@@ -267,7 +268,7 @@ function WGS:AttendanceStatus()
     if currentSession.eventTitle then
         tag = tag .. " / " .. currentSession.eventTitle
     end
-    self:Print(string.format("Attendance: recording since %s (%s).", startedHM, tag))
+    self:Print(string.format(L["ATTENDANCE_RECORDING"], startedHM, tag))
 end
 
 --- Stable signature for a slots array. Used to dedupe identical snapshots.

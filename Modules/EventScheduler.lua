@@ -1,5 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
+local L = GuildHall_L
 
 ---@class WGSEventSchedulerModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("EventScheduler", "AceEvent-3.0")
@@ -157,31 +158,31 @@ function WGS:AutoInvite()
     local ok, reason = self:HasGroupLeadOrAssist()
     if not ok then
         if reason == "raid-need-lead" then
-            self:Print("|cffff4444You must be raid leader or assistant to auto-invite.|r")
+            self:Print(L["ERR_RAID_LEAD_FOR_INVITE"])
         elseif reason == "party-need-lead" then
-            self:Print("|cffff4444You must be party leader to auto-invite.|r")
+            self:Print(L["ERR_PARTY_LEAD_FOR_INVITE"])
         end
         return
     end
     if not IsInGuild() then
-        self:Print("|cffff4444You must be in a guild.|r")
+        self:Print(L["ERR_NEED_GUILD"])
         return
     end
     if not self:IsGuildOfficer() then
-        self:Print("|cffff4444Auto-invite requires officer rank or higher.|r")
+        self:Print(L["ERR_NEED_OFFICER_INVITE"])
         return
     end
 
     -- Find today's event
     local event = self:FindTodayEventForTeam(nil)
     if not event then
-        self:Print("No event found for today.")
+        self:Print(L["NO_EVENT_TODAY"])
         return
     end
 
     local names, source = self:GetEventInviteList(event)
     if #names == 0 then
-        self:Print("No members to invite for: " .. (event.title or "?"))
+        self:Print(string.format(L["INVITE_NONE_FOR"], event.title or "?"))
         return
     end
 
@@ -208,7 +209,7 @@ function WGS:AutoInvite()
     end
 
     if invited > 0 then
-        self:Print(string.format("|cffffd100Inviting %d member(s) for %s (from %s)|r", invited, event.title or "?", source or "roster"))
+        self:Print(string.format(L["INVITE_SUMMARY"], invited, event.title or "?", source or "roster"))
         -- Auto-sort raid groups once invites have had time to land. Only
         -- meaningful when we know the planned groups (raid comp source).
         if source == "raid comp" then
@@ -217,7 +218,7 @@ function WGS:AutoInvite()
             end)
         end
     else
-        self:Print("All members are already in group or offline.")
+        self:Print(L["INVITE_ALL_IN"])
     end
 end
 
@@ -227,30 +228,30 @@ end
 
 function WGS:SortRaidGroups()
     if not IsInRaid() then
-        self:Print("|cffff4444Must be in a raid to sort groups.|r")
+        self:Print(L["ERR_NEED_RAID_TO_SORT"])
         return
     end
     local ok = self:HasGroupLeadOrAssist()
     if not ok then
-        self:Print("|cffff4444Must be raid leader or assistant to sort groups.|r")
+        self:Print(L["ERR_RAID_LEAD_FOR_SORT"])
         return
     end
 
     local event = self:FindTodayEventForTeam(nil)
     if not event then
-        self:Print("No event found for today.")
+        self:Print(L["NO_EVENT_TODAY"])
         return
     end
 
     local eventId = event.id or event.eventId
     if not eventId then
-        self:Print("Event has no ID — can't match raid comp.")
+        self:Print(L["EVENT_NO_ID"])
         return
     end
 
     local comp = self:GetRaidComp(eventId)
     if not comp or not comp.assignments then
-        self:Print("No raid comp found for this event.")
+        self:Print(L["NO_COMP_FOR_EVENT"])
         return
     end
 
@@ -293,9 +294,9 @@ function WGS:SortRaidGroups()
     end
 
     if moved > 0 then
-        self:Print("|cffffd100Sorted " .. moved .. " player(s) into raid groups.|r")
+        self:Print(string.format(L["SORT_SUMMARY"], moved))
     else
-        self:Print("All players already in correct groups.")
+        self:Print(L["SORT_NONE"])
     end
 end
 
