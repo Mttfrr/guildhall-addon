@@ -27,18 +27,31 @@ local ROLE_LABELS = {
     DPS    = "|cffff4444DPS|r",
 }
 
--- Signup status → display group. The web platform's status codes:
---   P  Present (committed)        L  Late (committed)
---   LT Late tentative (committed) B  Bench (committed but benched)
---   T  Tentative                  A  Absent
+-- Signup status → display group. The full set is mirrored from the
+-- platform's ATTENDANCE_STATUSES (client/src/utils.js); label strings
+-- are kept verbatim so chat-announce + UI rows read the same here as
+-- they do on the website + in the Discord embed.
+--
+--   P   Present (committed)            L   Late (committed)
+--   LT  Late (officer) (committed)     B   Bench (committed)
+--   T   Tentative                      A   Absent
+--   LE  Left early (tier-2; addon-                RM  Replaced mid-raid (tier-2)
+--       rarely produces this, but we surface it if it lands)
 local COMMITTED_STATUSES = { P = true, L = true, LT = true, B = true }
 local STATUS_LABELS = {
-    P = "Going", L = "Late", LT = "Late?", B = "Bench",
-    T = "Tentative", A = "Absent",
+    P  = "Present",
+    L  = "Late",
+    LT = "Late (officer)",
+    B  = "Bench",
+    T  = "Tentative",
+    A  = "Absent",
+    LE = "Left early",
+    RM = "Replaced mid-raid",
 }
 local STATUS_LABEL_COLORS = {
-    P = "ff00ff00", L = "ffffd100", LT = "ffffaa00", B = "ff888888",
-    T = "ffaaaaaa", A = "ffff5555",
+    P  = "ff00ff00", L  = "ffffd100", LT = "ffffaa00", B = "ff888888",
+    T  = "ffaaaaaa", A  = "ffff5555",
+    LE = "ffff8800", RM = "ff66ccff",
 }
 
 -- Local copies of the small helpers from the old table renderer.
@@ -88,12 +101,15 @@ local function EventStatus(ev, now)
     local startTs = EventStartTs(ev)
     if startTs == 0 then return "?", "ff888888" end
     local delta = startTs - now
-    if delta < -3 * 3600 then return "PAST", STATUS_COLORS.PAST end
+    -- Mixed-case strings to match the platform's section/tab labels
+    -- ("Upcoming", "Past"). The all-caps form was addon-only invention
+    -- and read as shoutier than the rest of the UI.
+    if delta < -3 * 3600 then return "Past", STATUS_COLORS.PAST end
     if delta < 86400 and ev.date == date("%Y-%m-%d", now) then
-        return "TODAY", STATUS_COLORS.TODAY
+        return "Today", STATUS_COLORS.TODAY
     end
-    if delta < 7 * 86400 then return "SOON", STATUS_COLORS.SOON end
-    return "UPCOMING", STATUS_COLORS.UPCOMING
+    if delta < 7 * 86400 then return "Soon", STATUS_COLORS.SOON end
+    return "Upcoming", STATUS_COLORS.UPCOMING
 end
 
 ---------------------------------------------------------------------------
@@ -206,11 +222,20 @@ end
 
 -- Build the per-signup row list for an event. Each row pairs the
 -- signup status with the character's gear summary from characterDetails
--- so officers see "Foo-Realm — Going · 632 · 2 enchants missing" on
+-- so officers see "Foo-Realm — Present · 632 · 2 enchants missing" on
 -- one line. This is the per-event replacement for the standalone
 -- Readiness sub-view which walked the live raid instead.
+--
+-- Returned fields:
+--   rows          { ... } per-signup rows (see body)
+--   byStatus      { P=N, L=N, LT=N, B=N, T=N, A=N, LE=N, RM=N }
+--   gearGapCount  signups with at least one missing enchant or gem
 local function BuildEventRoster(eventId)
-    local out = { committedCount = 0, tentativeCount = 0, gearGapCount = 0, rows = {} }
+    local out = {
+        byStatus = { P = 0, L = 0, LT = 0, B = 0, T = 0, A = 0, LE = 0, RM = 0 },
+        gearGapCount = 0,
+        rows = {},
+    }
     local signups = WGS.db.global.signups
     if type(signups) ~= "table" or not eventId then return out end
     local details = WGS.db.global.characterDetails or {}
@@ -232,10 +257,8 @@ local function BuildEventRoster(eventId)
             if (row.missingEnchants + row.missingGems) > 0 then
                 out.gearGapCount = out.gearGapCount + 1
             end
-            if COMMITTED_STATUSES[s.status] then
-                out.committedCount = out.committedCount + 1
-            elseif s.status == "T" then
-                out.tentativeCount = out.tentativeCount + 1
+            if out.byStatus[s.status] ~= nil then
+                out.byStatus[s.status] = out.byStatus[s.status] + 1
             end
             out.rows[#out.rows + 1] = row
         end
@@ -273,18 +296,37 @@ local function BuildSectionHeader(parent, anchor, label, width)
     return fs
 end
 
+-- Order in which per-status counts render across the header summary
+-- line. Mirrors the Discord embed's field order so the addon and the
+-- web embed read in the same sequence (Present → Late → Tentative →
+-- Bench). Absent + tier-2 codes (LE / RM) are skipped from this
+-- summary line — they show up on the per-row badges below either way.
+local SUMMARY_STATUS_ORDER = { "P", "L", "T", "B" }
+
 -- Render the Roster section: one row per signup with class colour,
 -- status badge, ilvl, missing-enchant + missing-gem counts. Sorted by
--- status group then name so committed players bubble to the top.
+-- status group then name so committed signups bubble to the top.
 local function PopulateRosterSection(content, anchor, roster, width)
     local header = BuildSectionHeader(content, anchor, "Roster", width)
 
-    -- Header summary line: "12 committed · 4 tentative · 3 with gear gaps".
+    -- Header summary line: per-status breakdown matching the platform's
+    -- Discord embed grouping. Empty counts are skipped so the line
+    -- doesn't show "Bench (0)" on a typical mythic raid.
     local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     summary:SetPoint("LEFT", header, "RIGHT", 12, 0)
-    summary:SetText(string.format(
-        "|cff00ff00%d|r committed · |cffaaaaaa%d|r tentative · |cffff5555%d|r gear gaps",
-        roster.committedCount, roster.tentativeCount, roster.gearGapCount))
+    local parts = {}
+    for _, code in ipairs(SUMMARY_STATUS_ORDER) do
+        local n = roster.byStatus[code] or 0
+        if n > 0 then
+            parts[#parts + 1] = string.format("|c%s%s (%d)|r",
+                STATUS_LABEL_COLORS[code] or "ffffffff",
+                STATUS_LABELS[code] or code, n)
+        end
+    end
+    if roster.gearGapCount > 0 then
+        parts[#parts + 1] = string.format("|cffff5555%d gear gaps|r", roster.gearGapCount)
+    end
+    summary:SetText(table.concat(parts, " · "))
 
     if #roster.rows == 0 then
         local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -541,13 +583,32 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
     actionBtn("Share Roster", 78, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
-        local shorts = {}
+        -- Group by status to match the platform's Discord embed
+        -- layout — one line per non-empty status (Present / Late /
+        -- Tentative / Bench) so raiders can see who's in what bucket
+        -- at a glance, instead of one flat "N committed" header.
+        local byStatus = { P = {}, L = {}, T = {}, B = {} }
         for _, r in ipairs(roster.rows) do
-            if COMMITTED_STATUSES[r.status] then shorts[#shorts + 1] = r.short end
+            if byStatus[r.status] then
+                byStatus[r.status][#byStatus[r.status] + 1] = r.short
+            end
         end
-        WGS:SendChatLine("Roster for " .. (ev.title or "event") .. " ("
-            .. roster.committedCount .. " committed):", channel)
-        WGS:SendChatChunked(WGS:PackChatTokens(shorts), channel)
+        local ROSTER_STATUS_ORDER = { "P", "L", "T", "B" }
+        local anyShared = false
+        for _, code in ipairs(ROSTER_STATUS_ORDER) do
+            if #byStatus[code] > 0 then
+                if not anyShared then
+                    WGS:SendChatLine("Roster for " .. (ev.title or "event") .. ":", channel)
+                    anyShared = true
+                end
+                WGS:SendChatLine(string.format("%s (%d):",
+                    STATUS_LABELS[code], #byStatus[code]), channel)
+                WGS:SendChatChunked(WGS:PackChatTokens(byStatus[code]), channel)
+            end
+        end
+        if not anyShared then
+            WGS:Print("No signups to share yet.")
+        end
     end)
 
     actionBtn("Share Gear Gaps", 182, 120, function()

@@ -4,6 +4,14 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Changed
+- **Addon labels normalised to match the platform.** The addon and the website were using ad-hoc divergent wording for the same data; now they match the canonical strings from `client/src/utils.js` `ATTENDANCE_STATUSES`.
+  - **Signup status labels**: P `Going` → `Present`, LT `Late?` → `Late (officer)`. Two new codes the addon previously ignored — LE `Left early` and RM `Replaced mid-raid` — are added to `STATUS_LABELS` + `STATUS_LABEL_COLORS` so signups with those codes render correctly.
+  - **Time-bucket pills** on the Events rail go mixed-case: `TODAY / SOON / UPCOMING / PAST` → `Today / Soon / Upcoming / Past`. Matches the platform's "Upcoming" / "Past Events" section headers and stops the rail row from reading shoutier than the rest of the UI.
+  - **Roster section summary** breaks down per-status (`Present (12) · Late (3) · Tentative (4) · Bench (1) · 3 gear gaps`) instead of the old internal-jargon `N committed · N tentative · N gear gaps`. Empty counts are skipped so a typical mythic raid summary stays short. Mirrors the field order of the platform's Discord embed.
+  - **"Share Roster" chat output** also splits by status — one labelled chunk per non-empty bucket (`Roster for X:`, then `Present (12):`, `Late (3):`, `Tentative (4):`, `Bench (1):` each on their own line, comma-joined names underneath). Replaces the previous flat `Roster for X (N committed):` header. Raiders watching the chat now see exactly the same status grouping they'd see in the Discord embed.
+- **Roles**: no change needed — addon's `Tanks / Healers / DPS` already match the platform's plural labels.
+
 ### Fixed
 - **Events tab visual polish.** Three rail/detail tweaks: (1) the rail row now shows the full time range (`20:00–23:00`) instead of just start time when the event carries `end_time` — same in the detail panel subline. (2) The status pill (`TODAY` / `SOON` / `UPCOMING` / `PAST`) moves off the bottom row up to the top-right of the rail row, next to the date; previously it sat 2 px under the title and read as crowding. Row height bumps from 38 to 50 px to give the title its own clean line. (3) The four action buttons (Invite, Share Roster, Share Gear Gaps, Share Comp) become a sticky footer outside the scroll frame, so they stay reachable no matter how far down the user has scrolled a long roster.
 - **Team picker no longer renders as a red CTA button.** The title-bar team dropdown was using `UIPanelButtonTemplate` — the chunky red Blizzard button reserved for action buttons (Invite / Export / Announce). The picker is a chooser, not an action, so it now uses a plain backdrop button with a thin border, faint dark fill, and a listbox hover highlight. Same hit-area, same dropdown, just visually subordinated to the CTAs below.
