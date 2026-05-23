@@ -273,7 +273,7 @@ function WGS:SortRaidGroups()
         for _, a in ipairs(comp.assignments) do
             if a.name then
                 local short = (a.name:match("^([^%-]+)") or a.name):lower()
-                local role = (a.role or "DPS"):upper()
+                local role = self:NormalizeRole(a.role)
                 targetGroup[short] = roleGroup[role] or dpsGroup
             end
         end

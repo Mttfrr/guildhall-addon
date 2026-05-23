@@ -336,15 +336,10 @@ local function FormatDuration(startedAt, endedAt)
     return string.format("%dm", m)
 end
 
-local function NormalizeRole(role)
-    if not role then return "DPS" end
-    if role == "TANK" then return "TANK" end
-    if role == "HEALER" then return "HEALER" end
-    -- "DAMAGER" (live UnitGroupRolesAssigned) and "DPS" (import path)
-    -- both bucket as damage; "NONE" / nil / anything else also defaults
-    -- so the tally doesn't drop members on a stale role.
-    return "DPS"
-end
+-- WGS:NormalizeRole lives in Util/Roles.lua — handles the DAMAGER ↔ DPS
+-- mismatch + the platform's "TANK/HEALER/DPS" enum. All role bucketing
+-- in the addon routes through it so a new role bucket on the platform
+-- only needs to update one file.
 
 local function BuildAttendanceSubView(sv)
     local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
@@ -478,7 +473,7 @@ local function PopulateAttendance(sv)
             -- Role tally
             local tally = { TANK = 0, HEALER = 0, DPS = 0 }
             for _, m in ipairs(members) do
-                local r = NormalizeRole(m.role)
+                local r = WGS:NormalizeRole(m.role)
                 tally[r] = (tally[r] or 0) + 1
             end
 
@@ -501,8 +496,8 @@ local function PopulateAttendance(sv)
             for _, m in ipairs(members) do sorted[#sorted + 1] = m end
             local roleOrder = { TANK = 1, HEALER = 2, DPS = 3 }
             table.sort(sorted, function(a, b)
-                local ra = roleOrder[NormalizeRole(a.role)] or 4
-                local rb = roleOrder[NormalizeRole(b.role)] or 4
+                local ra = roleOrder[WGS:NormalizeRole(a.role)] or 4
+                local rb = roleOrder[WGS:NormalizeRole(b.role)] or 4
                 if ra ~= rb then return ra < rb end
                 return ((a.name or ""):lower()) < ((b.name or ""):lower())
             end)

@@ -3,6 +3,7 @@
     <Script file="JSON.lua"/>
     <Script file="Base64.lua"/>
     <Script file="Roster.lua"/>
+    <Script file="Roles.lua"/>
     <Script file="Interop.lua"/>
     <Script file="Group.lua"/>
     <Script file="Announce.lua"/>

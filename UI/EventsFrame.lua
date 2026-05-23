@@ -464,8 +464,7 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
     local assignments = comp.assignments or comp.members or {}
     local byRole = { TANK = {}, HEALER = {}, DPS = {} }
     for _, m in ipairs(assignments) do
-        local role = (m.role or "DPS"):upper()
-        if not byRole[role] then role = "DPS" end
+        local role = WGS:NormalizeRole(m.role)
         byRole[role][#byRole[role] + 1] = m
     end
 
@@ -692,8 +691,7 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         local assignments = comp.assignments or comp.members or {}
         local byRole = { TANK = {}, HEALER = {}, DPS = {} }
         for _, m in ipairs(assignments) do
-            local role = (m.role or "DPS"):upper()
-            if not byRole[role] then role = "DPS" end
+            local role = WGS:NormalizeRole(m.role)
             byRole[role][#byRole[role] + 1] = m.name or m.playerName or "?"
         end
         WGS:SendChatLine("Raid Comp for " .. (ev.title or "event") .. ":", channel)
