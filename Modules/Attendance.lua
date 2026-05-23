@@ -24,11 +24,6 @@ end
 function module:OnRaidEnter()
     if not IsInRaid() then return end
 
-    -- Auto-show readiness check on raid entry (independent of attendance)
-    C_Timer.After(3, function()
-        WGS:CheckRaidReadiness()
-    end)
-
     if not WGS.db.profile.autoTrackAttendance then return end
     if isTracking then return end
     if WGS.db.profile.guildGroupsOnly and not WGS:IsGuildGroup() then return end

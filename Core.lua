@@ -17,7 +17,6 @@ local dbDefaults = {
         guildGroupsOnly = true,
         guildWebId = "",
         showLootDistHelper = true,
-        showReadinessCheck = true,
         showBossNotes = true,
         -- nil = "use officer default" (on for officers, off otherwise).
         -- Explicit true/false from the user takes precedence.
@@ -112,14 +111,14 @@ function WGS:SlashCommand(input)
         end
     elseif cmd == "events" then
         self:SelectMainFrameTab(ui.TAB_EVENTS)
-    elseif cmd == "readiness" or cmd == "ready" then
-        self:SelectMainFrameTab(ui.TAB_RAIDS, ui.RAIDS_SUB_READINESS)
     elseif cmd == "invite" or cmd == "autoinvite" then
         self:AutoInvite()
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
     elseif cmd == "loot" then
-        self:SelectMainFrameTab(ui.TAB_RAIDS, ui.RAIDS_SUB_LOOT)
+        -- Raids tab is loot-only after the event-centric rework; no
+        -- sub-index needed.
+        self:SelectMainFrameTab(ui.TAB_RAIDS)
     elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
         self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_WISHLISTS)
     elseif cmd == "rostercheck" or cmd == "check" then

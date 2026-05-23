@@ -11,8 +11,6 @@
     <Script file="AttendanceFrame.lua"/>
     <Script file="WishlistTooltip.lua"/>
     <Script file="BossNotesFrame.lua"/>
-    <Script file="RaidCompFrame.lua"/>
     <Script file="EventsFrame.lua"/>
     <Script file="LootDistHelper.lua"/>
-    <Script file="ReadinessCheck.lua"/>
 </Ui>

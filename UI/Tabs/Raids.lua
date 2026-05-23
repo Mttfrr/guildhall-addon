@@ -2,32 +2,14 @@
 local WGS = GuildHall
 local ui = WGS._ui
 
--- Raids tab: four sub-views, all raid-flow data.
---   Raid Comp     — current planned comp for today's event (data via
---                   WGS:PopulateRaidComp in UI/RaidCompFrame.lua)
---   Readiness     — gear-readiness audit (WGS:PopulateReadiness in
---                   UI/ReadinessCheck.lua) + announce-to-raid button
---   Boss Notes    — per-boss notes panel with a custom dropdown
---                   (PopulateBossNotes in UI/BossNotesFrame.lua, plus
---                   MRTNotes read-through when MRT is loaded)
---   Loot History  — chronological list of captured loot drops with a
---                   search box. Moved here from the Bank tab — loot is
---                   raid-flow data, not bank-ledger data.
---
--- The Events sub-view that used to live here was promoted to a
--- top-level tab; see UI/Tabs/Events.lua.
+-- Raids tab: loot capture-log only. The other former sub-views —
+-- Raid Comp, Readiness, Boss Notes — were per-event surfaces, so
+-- they moved into the Events tab's detail panel (master-detail
+-- rework). Loot History stays here because the loot log is global
+-- across events, not per-event.
 
 local TAB_INDEX            = ui.TAB_RAIDS
-local RAIDS_SUB_COMP       = ui.RAIDS_SUB_COMP
-local RAIDS_SUB_READINESS  = ui.RAIDS_SUB_READINESS
-local RAIDS_SUB_BOSSNOTES  = ui.RAIDS_SUB_BOSSNOTES
-local RAIDS_SUB_LOOT       = ui.RAIDS_SUB_LOOT
-local RAIDS_SUB_COUNT      = ui.RAIDS_SUB_COUNT
-local RAIDS_SUB_NAMES      = ui.RAIDS_SUB_NAMES
 local ClearContainer       = ui.ClearContainer
-local CreateScrollContent  = ui.CreateScrollContent
-local SelectSubView        = ui.SelectSubView
-local BuildSubNav          = ui.BuildSubNav
 
 local ITEM_QUALITY_COLORS = {
     [2] = "ff1eff00",
@@ -38,89 +20,8 @@ local ITEM_QUALITY_COLORS = {
     [7] = "ff00ccff",
 }
 
-local function BuildBossNotesSubView(sv)
-    local lbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    lbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, 0)
-    lbl:SetText("Boss:")
-
-    sv.dropBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
-    sv.dropBtn:SetSize(250, 22)
-    sv.dropBtn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
-    sv.dropBtn:SetText("Select a boss...")
-    sv.selectedBoss = nil
-
-    sv.dropMenu = CreateFrame("Frame", nil, sv, "BackdropTemplate")
-    sv.dropMenu:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    sv.dropMenu:SetBackdropColor(0, 0, 0, 0.95)
-    sv.dropMenu:SetFrameStrata("FULLSCREEN_DIALOG")
-    sv.dropMenu:Hide()
-    sv.dropMenuButtons = {}
-
-    sv.dropBtn:SetScript("OnClick", function()
-        if sv.dropMenu:IsShown() then
-            sv.dropMenu:Hide()
-            return
-        end
-        for _, btn in ipairs(sv.dropMenuButtons) do btn:Hide() end
-        local bosses = WGS:GetBossNotesList()
-        if #bosses == 0 then return end
-
-        local bh = 22
-        sv.dropMenu:SetSize(250, #bosses * bh + 8)
-        sv.dropMenu:ClearAllPoints()
-        sv.dropMenu:SetPoint("TOPLEFT", sv.dropBtn, "BOTTOMLEFT", 0, -2)
-
-        for i, name in ipairs(bosses) do
-            local btn = sv.dropMenuButtons[i]
-            if not btn then
-                btn = CreateFrame("Button", nil, sv.dropMenu)
-                btn:SetSize(242, bh)
-                btn:SetNormalFontObject("GameFontHighlightSmall")
-                btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-                btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                btn.text:SetAllPoints()
-                btn.text:SetJustifyH("LEFT")
-                sv.dropMenuButtons[i] = btn
-            end
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", sv.dropMenu, "TOPLEFT", 4, -(i - 1) * bh - 4)
-            btn.text:SetText("  " .. name)
-            btn:SetScript("OnClick", function()
-                sv.selectedBoss = name
-                sv.dropBtn:SetText(name)
-                sv.dropMenu:Hide()
-                WGS:PopulateBossNotes(sv, name)
-            end)
-            btn:Show()
-        end
-        sv.dropMenu:Show()
-    end)
-
-    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
-    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(660)
-    content:SetHeight(1)
-    sf:SetScrollChild(content)
-
-    sv.scrollFrame = sf
-    sv.content = content
-    sv.noteText = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    sv.noteText:SetPoint("TOPLEFT", content, "TOPLEFT", 5, -5)
-    sv.noteText:SetPoint("TOPRIGHT", content, "TOPRIGHT", -5, -5)
-    sv.noteText:SetJustifyH("LEFT")
-    sv.noteText:SetJustifyV("TOP")
-    sv.noteText:SetWordWrap(true)
-end
-
 ---------------------------------------------------------------------------
--- Loot History sub-view (moved from the Bank tab)
+-- Loot History (the only thing this tab still hosts)
 ---------------------------------------------------------------------------
 
 local function BuildLootHistorySubView(sv)
@@ -235,72 +136,18 @@ local function PopulateLootHistory(tab)
     tab.countText:SetText(string.format("|cff888888Showing %d of %d|r", shown, #loot))
 end
 
+-- The tab no longer has a sub-nav — Loot History is the only surface
+-- so it builds directly into `parent`. Keeping the build/refresh
+-- registry contract unchanged so MainFrame.lua's dispatch loop doesn't
+-- need to special-case Raids.
 local function BuildRaidsTab(parent)
-    BuildSubNav(parent, RAIDS_SUB_NAMES, function(p, i)
-        SelectSubView(p, i, RAIDS_SUB_COUNT)
-        local sv = p.subViews[i]
-        if i == RAIDS_SUB_COMP then
-            WGS:PopulateRaidComp(sv)
-        elseif i == RAIDS_SUB_READINESS then
-            WGS:PopulateReadiness(sv)
-        elseif i == RAIDS_SUB_BOSSNOTES then
-            WGS:PopulateBossNotes(sv, sv.selectedBoss)
-        elseif i == RAIDS_SUB_LOOT then
-            PopulateLootHistory(sv)
-        end
-    end)
-
-    -- Raid Comp sub-view
-    local sv1 = parent.subViews[RAIDS_SUB_COMP]
-    sv1.scrollFrame, sv1.content = CreateScrollContent(sv1)
-
-    -- Readiness sub-view
-    local sv2 = parent.subViews[RAIDS_SUB_READINESS]
-    sv2.summary = sv2:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sv2.summary:SetPoint("TOPLEFT", sv2, "TOPLEFT", 5, 0)
-    sv2.summary:SetWidth(660)
-    sv2.summary:SetJustifyH("LEFT")
-
-    local rsf = CreateFrame("ScrollFrame", nil, sv2, "UIPanelScrollFrameTemplate")
-    rsf:SetPoint("TOPLEFT", sv2, "TOPLEFT", 0, -35)
-    rsf:SetPoint("BOTTOMRIGHT", sv2, "BOTTOMRIGHT", -22, 30)
-    local rc = CreateFrame("Frame", nil, rsf)
-    rc:SetWidth(660)
-    rc:SetHeight(1)
-    rsf:SetScrollChild(rc)
-    sv2.scrollFrame = rsf
-    sv2.content = rc
-
-    sv2.announceBtn = CreateFrame("Button", nil, sv2, "UIPanelButtonTemplate")
-    sv2.announceBtn:SetSize(160, 26)
-    sv2.announceBtn:SetPoint("BOTTOMLEFT", sv2, "BOTTOMLEFT", 5, 0)
-    sv2.announceBtn:SetText("Announce to Raid")
-
-    -- Boss Notes sub-view
-    BuildBossNotesSubView(parent.subViews[RAIDS_SUB_BOSSNOTES])
-
-    -- Loot History sub-view
-    BuildLootHistorySubView(parent.subViews[RAIDS_SUB_LOOT])
-    parent.subViews[RAIDS_SUB_LOOT]._refreshFn = function()
-        PopulateLootHistory(parent.subViews[RAIDS_SUB_LOOT])
-    end
-
-    SelectSubView(parent, RAIDS_SUB_COMP, RAIDS_SUB_COUNT)
+    BuildLootHistorySubView(parent)
+    parent._refreshFn = function() PopulateLootHistory(parent) end
 end
 
-local function RefreshRaidsSubView(tab)
+local function RefreshRaidsTab(tab)
     if not tab or not tab:IsVisible() then return end
-    local sub = tab.selectedSub or RAIDS_SUB_COMP
-    local sv = tab.subViews[sub]
-    if sub == RAIDS_SUB_COMP then
-        WGS:PopulateRaidComp(sv)
-    elseif sub == RAIDS_SUB_READINESS then
-        WGS:PopulateReadiness(sv)
-    elseif sub == RAIDS_SUB_BOSSNOTES then
-        WGS:PopulateBossNotes(sv, sv.selectedBoss)
-    elseif sub == RAIDS_SUB_LOOT then
-        PopulateLootHistory(sv)
-    end
+    PopulateLootHistory(tab)
 end
 
-ui.tabs[TAB_INDEX] = { build = BuildRaidsTab, refresh = RefreshRaidsSubView }
+ui.tabs[TAB_INDEX] = { build = BuildRaidsTab, refresh = RefreshRaidsTab }

@@ -32,13 +32,11 @@ ui.TEAMS_SUB_NAMES     = { "Teams", "Roster Check", "Wishlists" }
 
 -- Bank is single-view (no sub-nav). Loot history moved to Raids since
 -- it's raid-related data, not bank-ledger data.
-
-ui.RAIDS_SUB_COMP      = 1
-ui.RAIDS_SUB_READINESS = 2
-ui.RAIDS_SUB_BOSSNOTES = 3
-ui.RAIDS_SUB_LOOT      = 4
-ui.RAIDS_SUB_COUNT     = 4
-ui.RAIDS_SUB_NAMES     = { "Raid Comp", "Readiness", "Boss Notes", "Loot History" }
+--
+-- Raids tab no longer has sub-views since the event-centric rework —
+-- Raid Comp / Readiness / Boss Notes are all per-event now and live in
+-- the Events tab's detail panel. The tab hosts only the loot capture
+-- log, which is global across events.
 
 ---------------------------------------------------------------------------
 -- Shared frame helpers

@@ -66,15 +66,6 @@ local options = {
                     get = function() return WGS.db.profile.showLootDistHelper end,
                     set = function(_, val) WGS.db.profile.showLootDistHelper = val end,
                 },
-                showReadinessCheck = {
-                    order = 22,
-                    type = "toggle",
-                    name = "Raid Readiness Check",
-                    desc = "Show a warning when entering a raid if players have missing enchants or gems. Can also be triggered with /gh readiness.",
-                    width = "full",
-                    get = function() return WGS.db.profile.showReadinessCheck end,
-                    set = function(_, val) WGS.db.profile.showReadinessCheck = val end,
-                },
                 showBossNotes = {
                     order = 23,
                     type = "toggle",

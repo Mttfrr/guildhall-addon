@@ -10,7 +10,6 @@ local ui = WGS._ui
 -- Tab indices used by the shell. Other tab IDs come through
 -- ui.TAB_* directly at their lone call sites in SelectMainFrameTab.
 local TAB_TEAMS  = ui.TAB_TEAMS
-local TAB_RAIDS  = ui.TAB_RAIDS
 local TAB_SYNC   = ui.TAB_SYNC
 local TAB_COUNT  = ui.TAB_COUNT
 local TAB_NAMES  = ui.TAB_NAMES
@@ -154,25 +153,13 @@ function WGS:SelectMainFrameTab(tabIndex, subIndex)
     if not mainFrame then mainFrame = CreateMainFrame() end
     if not mainFrame:IsShown() then mainFrame:Show() end
     SelectTab(mainFrame, tabIndex)
-    if subIndex then
-        if tabIndex == TAB_RAIDS then
-            SelectSubView(mainFrame.tabContents[TAB_RAIDS], subIndex, ui.RAIDS_SUB_COUNT)
-        elseif tabIndex == TAB_TEAMS then
-            SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
-        end
+    if subIndex and tabIndex == TAB_TEAMS then
+        -- Teams is the only tab with sub-views after the event-centric
+        -- rework. Raids dropped Raid Comp / Readiness / Boss Notes
+        -- (now in Events detail panel) and no longer takes a sub-index.
+        SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
     end
     RefreshCurrentTab(mainFrame)
-end
-
-function WGS:SelectBossInTab(encounterName)
-    if not mainFrame then return end
-    local raidsTab = mainFrame.tabContents[TAB_RAIDS]
-    if not raidsTab then return end
-    local sv = raidsTab.subViews[ui.RAIDS_SUB_BOSSNOTES]
-    if not sv then return end
-    sv.selectedBoss = encounterName
-    sv.dropBtn:SetText(encounterName)
-    WGS:PopulateBossNotes(sv, encounterName)
 end
 
 function WGS:RefreshMainFrame()
