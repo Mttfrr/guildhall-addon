@@ -425,3 +425,188 @@ describe("WGS:PeerSync standard wiring", function()
         assert.are.equal(999, WGS.db.global.loot[1].itemID)
     end)
 end)
+
+describe("WGS:PeerSync_Catchup handshake", function()
+    local WGS, sent
+    before_each(function()
+        WGS = setup()
+        sent = fakeChat()
+        fakeGuild({
+            ["Tester-TestRealm"] = 1,    -- us
+            ["Officer-TestRealm"] = 1,   -- peer
+        })
+        _G.IsInRaid = function() return true end
+        _G.GetGuildInfo = function(unit)
+            if unit == "player" then return "TestGuild", "Officer", 1 end
+            return nil
+        end
+        WGS:_PeerSync_InstallStandardWiring()
+    end)
+
+    -- The probe is the user-facing entry point: officer joins a raid
+    -- and we ship a __probe so peers can offer their state. Officer
+    -- gate + channel gate apply via PeerSync_Broadcast.
+    it("Catchup sends a __probe and opens a session", function()
+        WGS:PeerSync_Catchup()
+        assert.is_true(#sent >= 1)
+        -- Decode the chunk to verify the table name.
+        local delta = WGS:DecodePeerMessage("Tester-TestRealm", sent[1].msg)
+        -- DecodePeerMessage uses the trust-buffer keyed by senderKey, so
+        -- decoding our own outbound chunk with our own key works fine
+        -- in tests. Production receivers see the same shape.
+        assert.is_table(delta)
+        assert.are.equal("__probe", delta.table)
+        -- The session is open until offers are processed.
+        assert.is_table(WGS:_PeerSync_CatchupSession())
+    end)
+
+    it("Catchup is debounced (60s window)", function()
+        WGS:PeerSync_Catchup()
+        local firstCount = #sent
+        assert.is_true(firstCount >= 1)
+        -- Immediate re-trigger should be a no-op.
+        WGS:PeerSync_Catchup()
+        assert.are.equal(firstCount, #sent, "second probe within debounce window leaked traffic")
+    end)
+
+    it("non-officers don't probe", function()
+        _G.GetGuildInfo = function() return "TestGuild", "Member", 5 end
+        WGS:_PeerSyncResetQueue()
+        WGS:PeerSync_Catchup()
+        assert.are.equal(0, #sent)
+    end)
+
+    -- A peer receiving __probe responds with its per-table max
+    -- timestamps. The response carries replyTo so the joiner can tell
+    -- which OFFERs are addressed to them.
+    it("handling __probe emits an __offer with local maxes", function()
+        WGS.db.global.loot[1]            = { itemID = 1, player = "X", timestamp = 1234 }
+        WGS.db.global.attendance[1]      = { startedAt = 5678, startedBy = "Y" }
+        WGS.db.global.encounters[1]      = { encounterID = 9, timestamp = 999 }
+        WGS.db.global.raidCompResults[1] = { startedAt = 5678, signature = "s" }
+
+        local probe = assert(WGS:EncodePeerMessage({ table = "__probe", row = {} }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", probe[1], false)
+
+        -- Decode every outbound chunk and look for an __offer frame.
+        local offer
+        for _, s in ipairs(sent) do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", s.msg)
+            if d and d.table == "__offer" then offer = d.row end
+        end
+        assert.is_table(offer)
+        assert.are.equal("Officer-TestRealm", offer.replyTo)
+        assert.are.equal(1234, offer.maxes.loot)
+        assert.are.equal(5678, offer.maxes.attendance)
+        assert.are.equal(999, offer.maxes.encounters)
+        assert.are.equal(5678, offer.maxes.raidCompResults)
+    end)
+
+    -- The joiner collects __offer responses inside the open session
+    -- and ignores anything not addressed to them.
+    it("__offer is only accepted while a catch-up session is open AND addressed to us", function()
+        local offerFrame = assert(WGS:EncodePeerMessage({
+            table = "__offer",
+            row = { replyTo = "Tester-TestRealm", maxes = { loot = 9999 } },
+        }))
+        -- No session open → dropped.
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", offerFrame[1], false)
+        assert.is_nil(WGS:_PeerSync_CatchupSession())
+
+        -- Open a session and replay.
+        WGS:PeerSync_Catchup()
+        assert.is_table(WGS:_PeerSync_CatchupSession())
+        -- The offer above was already decoded once; decoding it a second
+        -- time would normally be partial — re-encode fresh.
+        offerFrame = assert(WGS:EncodePeerMessage({
+            table = "__offer",
+            row = { replyTo = "Tester-TestRealm", maxes = { loot = 9999 } },
+        }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", offerFrame[1], false)
+        local session = WGS:_PeerSync_CatchupSession()
+        assert.is_table(session.offers["Officer-TestRealm"])
+        assert.are.equal(9999, session.offers["Officer-TestRealm"].loot)
+
+        -- An offer addressed to someone else is ignored.
+        local otherFrame = assert(WGS:EncodePeerMessage({
+            table = "__offer",
+            row = { replyTo = "OtherPerson-Realm", maxes = { loot = 11111 } },
+        }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", otherFrame[1], false)
+        assert.are.equal(9999, session.offers["Officer-TestRealm"].loot)
+    end)
+
+    -- After offers are collected, the joiner sends a __request per
+    -- table to the peer with the highest remote max for that table.
+    it("processing offers emits __request for tables where the peer is ahead", function()
+        WGS.db.global.loot       = {}    -- we're empty
+        WGS.db.global.attendance = { { startedAt = 5000, startedBy = "X" } }
+
+        WGS:PeerSync_Catchup()
+        -- Inject an offer manually so we don't depend on a real round trip.
+        local session = WGS:_PeerSync_CatchupSession()
+        session.offers["Officer-TestRealm"] = { loot = 9999, attendance = 4000, encounters = 0, raidCompResults = 0 }
+
+        local before = #sent
+        WGS._PeerSync_ProcessCatchupOffers()
+
+        -- Walk the new chunks and pull out __request payloads.
+        local reqs = {}
+        for i = before + 1, #sent do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", sent[i].msg)
+            if d and d.table == "__request" then reqs[#reqs + 1] = d.row end
+        end
+        -- Peer leads on loot (9999 > 0) → one request.
+        -- Peer trails on attendance (4000 < 5000) → no request.
+        assert.are.equal(1, #reqs, "expected exactly one __request (loot only)")
+        assert.are.equal("loot", reqs[1].table)
+        assert.are.equal("Officer-TestRealm", reqs[1].target)
+        assert.are.equal(0, reqs[1].since)
+        -- Session is closed after processing.
+        assert.is_nil(WGS:_PeerSync_CatchupSession())
+    end)
+
+    -- The peer receiving __request replays the matching rows. Each
+    -- replayed row goes through the normal broadcast path and so is
+    -- subject to dedup on the receiver via the merge fns.
+    it("__request triggers replay of post-since rows for the target peer", function()
+        -- Realistic timestamps: the replay logic floors below now-7days
+        -- to stop a fresh joiner from replaying ancient history, so the
+        -- test rows have to be recent for replay to fire at all.
+        local now = os.time()
+        WGS.db.global.loot = {
+            { itemID = 1, player = "X", timestamp = now - 300, recordedBy = "Tester-TestRealm" },
+            { itemID = 2, player = "Y", timestamp = now - 200, recordedBy = "Tester-TestRealm" },
+            { itemID = 3, player = "Z", timestamp = now - 100, recordedBy = "Tester-TestRealm" },
+        }
+
+        local before = #sent
+        local reqFrame = assert(WGS:EncodePeerMessage({
+            table = "__request",
+            row = { table = "loot", since = now - 250, target = "Tester-TestRealm" },
+        }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", reqFrame[1], false)
+
+        -- Items 2 and 3 are after `since`; item 1 is before.
+        local replays = {}
+        for i = before + 1, #sent do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", sent[i].msg)
+            if d and d.table == "loot" then replays[#replays + 1] = d.row end
+        end
+        assert.are.equal(2, #replays)
+        table.sort(replays, function(a, b) return a.timestamp < b.timestamp end)
+        assert.are.equal(now - 200, replays[1].timestamp)
+        assert.are.equal(now - 100, replays[2].timestamp)
+    end)
+
+    it("__request addressed to someone else is ignored", function()
+        WGS.db.global.loot = { { itemID = 1, player = "X", timestamp = os.time() } }
+        local before = #sent
+        local reqFrame = assert(WGS:EncodePeerMessage({
+            table = "__request",
+            row = { table = "loot", since = 0, target = "SomeoneElse-Realm" },
+        }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", reqFrame[1], false)
+        assert.are.equal(before, #sent)
+    end)
+end)

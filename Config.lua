@@ -93,6 +93,24 @@ local options = {
                     get = function() return WGS.db.profile.showWebMOTD end,
                     set = function(_, val) WGS.db.profile.showWebMOTD = val end,
                 },
+                headerPeerSync = {
+                    order = 28,
+                    type = "header",
+                    name = "Officer Sync",
+                },
+                peerSyncEnabled = {
+                    order = 29,
+                    type = "toggle",
+                    name = "Enable Officer-to-Officer Sync",
+                    desc = "Broadcast loot drops, attendance sessions, encounter kills, and raid-comp snapshots to other officers in your raid/guild so everyone's addon stays in sync without copy-pasting. Officer rank required on both sides; reads from the guild roster. Default: on for officers, off for everyone else. Takes effect on next /reload.",
+                    width = "full",
+                    get = function()
+                        local v = WGS.db.profile.peerSyncEnabled
+                        if v == nil then return WGS:IsGuildOfficer() end
+                        return v
+                    end,
+                    set = function(_, val) WGS.db.profile.peerSyncEnabled = val end,
+                },
                 headerMinimap = {
                     order = 30,
                     type = "header",

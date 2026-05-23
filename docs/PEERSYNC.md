@@ -108,17 +108,57 @@ state.
 Plus the `WGS_PEER_SYNC_APPLIED` and `WGS_INTERNAL_ERROR` events
 documented in `docs/EVENTS.md`.
 
+## Catch-up handshake
+
+An officer who logs in mid-raid has none of the captures peers have
+already broadcast. The handshake fills that gap without requiring
+either side to know "who's new":
+
+```
+joiner  →  __probe            broadcast: GROUP_ROSTER_UPDATE saw IsInRaid()
+peers   →  __offer            broadcast: each peer responds with their per-table max(ts)
+joiner  →  __request          broadcast: pick best peer per table, ask for since=local_max
+peer    →  normal deltas      replays matching rows via PeerSync_Broadcast
+```
+
+The three reserved table names (`__probe`, `__offer`, `__request`)
+ride the same wire format as data deltas — the dispatcher in
+`PeerSync_HandleIncoming` intercepts them before the per-table merge
+lookup. They go through the same trust gate (officer rank, in-guild)
+as normal traffic, so a kicked officer can't catch themselves up.
+
+Knobs:
+
+| Name | Default | What |
+|---|---|---|
+| `CATCHUP_DEBOUNCE` | 60s | minimum gap between probes — keeps GROUP_ROSTER_UPDATE storms cheap |
+| `CATCHUP_OFFER_WAIT` | 5s | how long the joiner waits to collect offers before requesting |
+| `CATCHUP_MAX_HISTORY` | 7 days | replay floor — never re-broadcast rows older than this regardless of `since` |
+
+Each `__offer` carries a `replyTo` so the joiner can distinguish
+offers responding to *their* probe from incidental traffic between
+other peers; each `__request` carries a `target` so only the chosen
+peer replays. Replay still goes out on the shared channel (addon
+messages don't unicast outside WHISPER), but other peers' merge fns
+treat the rows as duplicates and skip — wasted bandwidth, not wasted
+state.
+
+## Settings
+
+`/gh config` → **Officer Sync** → "Enable Officer-to-Officer Sync".
+
+The flag lives at `db.profile.peerSyncEnabled` and is read at
+`module:OnEnable`. Default is `nil`, which means "use the officer
+default" — on for officers, off otherwise. Explicit `true` / `false`
+overrides. Takes effect on `/reload` because the gate runs once at
+module enable rather than on every broadcast (cheap, but also lets
+us stop registering for `GROUP_ROSTER_UPDATE` etc. when the feature
+is off).
+
 ## What this layer doesn't do
 
 - **Per-table semantics** — dedup keys, merge rules, ordering
-  guarantees. Each capture module owns its merge fn (Phase 2).
-- **Catch-up on raid entry** — sending historical rows to an officer
-  who joined mid-shift. Handled by the `PROBE` / `OFFER` / `REQUEST`
-  protocol in Phase 3.
-- **Settings** — turning sync on/off per table. Phase 4 surfaces a
-  toggle in the existing `Config.lua` AceConfig group.
-
-These are deliberately separate because each one has different
-production-stability characteristics: the wire format is the contract
-peers must agree on, so we lock it down first; merge rules are
-table-specific and can evolve independently per surface.
+  guarantees. Each capture module owns its merge fn.
+- **Settings per table** — there's a single on/off; per-table opt-out
+  was specced but cut because the merge fns already make per-table
+  participation cheap to ignore.

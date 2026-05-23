@@ -34,6 +34,25 @@ local CHANNEL_THROTTLE = {
 -- WGS_PEER_SYNC_APPLIED event downstream UIs can react selectively.
 local mergeFns = {}
 
+-- Tables that participate in catch-up + their per-row timestamp field.
+-- Listed here once so probe/offer/request all agree on the set.
+local CATCHUP_TABLES = {
+    loot            = "timestamp",
+    attendance      = "startedAt",
+    encounters      = "timestamp",
+    raidCompResults = "startedAt",
+}
+
+-- Catch-up tuning. The probe debounce keeps GROUP_ROSTER_UPDATE storms
+-- from flooding the channel; the history cap stops a peer with months
+-- of saved data from replaying everything on a fresh install.
+local CATCHUP_DEBOUNCE        = 60        -- seconds between probes
+local CATCHUP_OFFER_WAIT      = 5         -- seconds to collect offers before requesting
+local CATCHUP_MAX_HISTORY     = 86400 * 7 -- never replay older than 7 days
+
+local lastProbeAt    = 0
+local catchupSession = nil   -- { startedAt, offers = { [peerKey] = { [tableName] = ts } } }
+
 -- Outbound queue + last-send timestamps per channel. Used by the
 -- throttle path: when called faster than the channel allows, the
 -- payload is queued and flushed on a C_Timer.After tail.
@@ -101,14 +120,17 @@ local function flushQueue()
 
     -- Walk the queue: send anything whose channel-throttle has elapsed,
     -- requeue the rest, and schedule another flush for the soonest
-    -- still-blocked item.
+    -- still-blocked item. Without a scheduler (test env), the throttle
+    -- can't be enforced — there's nothing to drain the queue later —
+    -- so just send everything inline. Production always has C_Timer.
+    local canDefer = C_Timer and C_Timer.After
     local now = nowSeconds()
     local kept = {}
     local soonestWait
     for _, item in ipairs(outQueue) do
         local gap = CHANNEL_THROTTLE[item.channel] or 0
         local elapsed = now - (lastSendAt[item.channel] or 0)
-        if elapsed >= gap then
+        if not canDefer or elapsed >= gap then
             sendOne(item.channel, item.chunkStr)
             now = nowSeconds()
         else
@@ -119,7 +141,7 @@ local function flushQueue()
     end
     outQueue = kept
 
-    if #outQueue > 0 and soonestWait and C_Timer and C_Timer.After and not flushScheduled then
+    if #outQueue > 0 and soonestWait and canDefer and not flushScheduled then
         flushScheduled = true
         C_Timer.After(soonestWait + 0.05, flushQueue)
     end
@@ -167,6 +189,140 @@ function WGS:_PeerSync_GetMergeFn(tableName)
     return mergeFns[tableName]
 end
 
+---------------------------------------------------------------------------
+-- Catch-up handshake (PROBE / OFFER / REQUEST)
+--
+-- An officer logging in mid-raid has none of the captures the others
+-- have already broadcast. The catch-up flow gives them a way to pull
+-- the missing rows without bothering anyone:
+--
+--   joiner  →  __probe         "what's everyone's max(timestamp) per table?"
+--   peers   →  __offer         "mine are: { loot=ts, attendance=ts, ... }"
+--   joiner  →  __request       "send me everything since ts for table X (peer Y)"
+--   peer    →  normal deltas   (replayed via the existing PeerSync_Broadcast)
+--
+-- The reserved table names "__probe" / "__offer" / "__request" travel
+-- through the existing encode / chunk / trust-gate path; the dispatcher
+-- intercepts them before the per-table merge lookup. This way the wire
+-- format stays unchanged and the trust gate (officer rank, in-guild)
+-- governs catch-up the same way it governs deltas.
+---------------------------------------------------------------------------
+
+-- Largest row timestamp in db.global[tableName]. Used both to build
+-- the local OFFER and to filter rows in REQUEST replay.
+local function maxTimestampForTable(tableName)
+    local rows = WGS.db and WGS.db.global and WGS.db.global[tableName]
+    if type(rows) ~= "table" then return 0 end
+    local tsField = CATCHUP_TABLES[tableName]
+    if not tsField then return 0 end
+    local maxTs = 0
+    for _, row in ipairs(rows) do
+        local ts = tonumber(row[tsField]) or 0
+        if ts > maxTs then maxTs = ts end
+    end
+    return maxTs
+end
+
+local function buildLocalOffer()
+    local offer = {}
+    for tbl in pairs(CATCHUP_TABLES) do
+        offer[tbl] = maxTimestampForTable(tbl)
+    end
+    return offer
+end
+
+local function handleProbe(senderKey)
+    -- A peer is asking for our offer. Reply with our per-table maxes.
+    -- The OFFER carries replyTo so the joiner knows which OFFERs are
+    -- responses to their probe (peers see each other's OFFERs too).
+    WGS:PeerSync_Broadcast("__offer", {
+        replyTo = senderKey,
+        maxes   = buildLocalOffer(),
+    })
+end
+
+local function handleOffer(senderKey, row)
+    -- Only listen to offers if we have an open catch-up session AND
+    -- the offer is a reply to our probe. Otherwise it's another
+    -- officer's catch-up traffic — ignore.
+    if not catchupSession then return end
+    if type(row) ~= "table" or type(row.maxes) ~= "table" then return end
+    if row.replyTo ~= WGS:GetPlayerKey() then return end
+    catchupSession.offers[senderKey] = row.maxes
+end
+
+-- Replay rows from a single table whose timestamp > `since`. Capped at
+-- CATCHUP_MAX_HISTORY so a fresh joiner doesn't request the entire
+-- history. Returns the number of rows broadcast.
+local function replayTable(tableName, since)
+    local rows = WGS.db and WGS.db.global and WGS.db.global[tableName]
+    if type(rows) ~= "table" then return 0 end
+    local tsField = CATCHUP_TABLES[tableName]
+    if not tsField then return 0 end
+    local floor = math.max(since or 0, (tonumber(time and time()) or 0) - CATCHUP_MAX_HISTORY)
+    local sent = 0
+    for _, row in ipairs(rows) do
+        local ts = tonumber(row[tsField]) or 0
+        if ts > floor then
+            WGS:PeerSync_Broadcast(tableName, row)
+            sent = sent + 1
+        end
+    end
+    return sent
+end
+
+local function handleRequest(_senderKey, row)
+    if type(row) ~= "table" then return end
+    if row.target ~= WGS:GetPlayerKey() then return end   -- not addressed to us
+    if not CATCHUP_TABLES[row.table] then return end       -- unknown table
+    replayTable(row.table, tonumber(row.since) or 0)
+end
+
+-- Inspect collected OFFERs and send one REQUEST per table to the peer
+-- with the highest remote max for that table. Idempotent across the
+-- catch-up window — only called once when the offer-collection timeout
+-- fires.
+local function processCatchupOffers()
+    if not catchupSession then return end
+    local localMaxes = buildLocalOffer()
+    for tbl in pairs(CATCHUP_TABLES) do
+        local bestPeer, bestTs = nil, localMaxes[tbl] or 0
+        for peer, offer in pairs(catchupSession.offers) do
+            local ts = tonumber(offer[tbl]) or 0
+            if ts > bestTs then bestPeer, bestTs = peer, ts end
+        end
+        if bestPeer then
+            WGS:PeerSync_Broadcast("__request", {
+                table  = tbl,
+                since  = localMaxes[tbl] or 0,
+                target = bestPeer,
+            })
+        end
+    end
+    catchupSession = nil
+end
+WGS._PeerSync_ProcessCatchupOffers = processCatchupOffers   -- for tests
+
+-- Public trigger. Called from GROUP_ROSTER_UPDATE on entering a raid,
+-- or directly via /gh catchup for manual recovery. Debounced so a
+-- raid-frame storm can't flood the channel.
+function WGS:PeerSync_Catchup()
+    if not self:IsGuildOfficer() then return end
+    if not self:PeerSync_PreferredChannel() then return end
+    local now = tonumber(time and time()) or 0
+    if now - lastProbeAt < CATCHUP_DEBOUNCE then return end
+    lastProbeAt = now
+
+    catchupSession = { startedAt = now, offers = {} }
+    self:PeerSync_Broadcast("__probe", { from = self:GetPlayerKey() })
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(CATCHUP_OFFER_WAIT, processCatchupOffers)
+    end
+    -- Without a scheduler (test env), the caller drives via
+    -- WGS._PeerSync_ProcessCatchupOffers when they're ready.
+end
+
 -- Trust gate + dispatch for a single received chunk. Called by the
 -- CHAT_MSG_ADDON listener in OnEnable, and directly by tests.
 --
@@ -193,6 +349,11 @@ function WGS:PeerSync_HandleIncoming(senderKey, chunkStr, isSelf)
         })
         return
     end
+
+    -- Catch-up control messages: handled inline, no merge fn lookup.
+    if delta.table == "__probe"   then return handleProbe(senderKey) end
+    if delta.table == "__offer"   then return handleOffer(senderKey, delta.row) end
+    if delta.table == "__request" then return handleRequest(senderKey, delta.row) end
 
     local fn = mergeFns[delta.table]
     if not fn then
@@ -359,11 +520,27 @@ function WGS:_PeerSync_InstallStandardWiring()
 end
 
 function module:OnEnable()
+    -- Settings gate. Officers default-on, everyone else default-off;
+    -- if the user has flipped it explicitly, respect that.
+    local enabled = WGS.db and WGS.db.profile and WGS.db.profile.peerSyncEnabled
+    if enabled == false then return end
+    if enabled == nil and not WGS:IsGuildOfficer() then return end
+
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PEER_FRAME_PREFIX)
     end
     self:RegisterEvent("CHAT_MSG_ADDON", "OnAddonMessage")
+    -- GROUP_ROSTER_UPDATE fires on raid entry, member churn, and zone
+    -- changes inside an instance. The 60s debounce inside
+    -- PeerSync_Catchup keeps the noisy ones cheap; one probe per raid
+    -- entry is what we actually care about.
+    self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
     WGS:_PeerSync_InstallStandardWiring()
+end
+
+function module:OnGroupRosterUpdate()
+    if not IsInRaid or not IsInRaid() then return end
+    WGS:PeerSync_Catchup()
 end
 
 function module:OnAddonMessage(_, prefix, msg, _channel, sender)
@@ -387,6 +564,10 @@ function WGS:_PeerSyncResetQueue()
     lastSendAt = {}
     flushScheduled = false
     mergeFns = {}
+    lastProbeAt = 0
+    catchupSession = nil
 end
 
 function WGS:_PeerSyncOutQueueCount() return #outQueue end
+
+function WGS:_PeerSync_CatchupSession() return catchupSession end

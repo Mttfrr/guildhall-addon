@@ -20,6 +20,9 @@ local dbDefaults = {
         showReadinessCheck = true,
         showBossNotes = true,
         showWebMOTD = true,
+        -- nil = "use officer default" (on for officers, off otherwise).
+        -- Explicit true/false from the user takes precedence.
+        peerSyncEnabled = nil,
     },
     global = {
         attendance = {},
