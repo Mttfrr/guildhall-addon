@@ -53,6 +53,7 @@ function M.setup()
     dofile("Util/JSON.lua")
     dofile("Util/Base64.lua")
     dofile("Util/Roster.lua")
+    dofile("Util/Interop.lua")
     dofile("Sync/Encoder.lua")
     dofile("Sync/Decoder.lua")
 
