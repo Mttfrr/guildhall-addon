@@ -241,15 +241,13 @@ local function PopulateTeams(tab)
             .. (team.type or "Team") .. " \226\128\148 " .. #memberNames .. " members)|r")
         yOff = yOff - 22
 
-        -- No members? Emit a placeholder row and move on.
+        -- No members? Emit a placeholder row. Otherwise render each one.
         if #memberNames == 0 then
             local noM = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
             noM:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 16, yOff)
             noM:SetText("(no members)")
             yOff = yOff - 16
-            yOff = yOff - 6
-            goto continue
-        end
+        else
 
         -- Build a name → playerId lookup from team.playerMembers so we
         -- can decorate each row with its alt strip. Linked members
@@ -327,8 +325,8 @@ local function PopulateTeams(tab)
 
             yOff = yOff - ROW_H
         end
+        end  -- close the `if #memberNames == 0 ... else ... end`
         yOff = yOff - 6  -- inter-team gap
-        ::continue::
     end
     tab.content:SetHeight(math.abs(yOff) + 10)
 end
