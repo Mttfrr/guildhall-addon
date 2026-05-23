@@ -310,7 +310,12 @@ local function BuildDataRow(parent, member, roster, yOff, evenStripe)
     BuildNumericCell(row, COL.GEMS, COL.GEMS.x, member.missingGems, true, 0)
 
     -- Alts cell: count + hover-tooltip with per-alt breakdown.
-    local altsCell = CreateFrame("Frame", nil, row)
+    -- Created as a Button (not a Frame) because SetHighlightTexture
+    -- only exists on Button — Frame has no such method and calling it
+    -- crashes the row render. The cell still doesn't behave like a
+    -- typical clickable button; we just want the highlight texture
+    -- for the hover affordance.
+    local altsCell = CreateFrame("Button", nil, row)
     altsCell:SetSize(COL.ALTS.w, ROW_H)
     altsCell:SetPoint("TOPLEFT", row, "TOPLEFT", COL.ALTS.x, 0)
 
