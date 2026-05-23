@@ -2,211 +2,48 @@
 local WGS = GuildHall
 local L = GuildHall_L
 
+-- Tab/sub-view constants and shared frame helpers live in UI/UIHelpers.lua
+-- under the private WGS._ui namespace. Aliased here so the per-tab
+-- builder code reads the same as before the extraction.
+local ui = WGS._ui
+
+local TAB_DASHBOARD = ui.TAB_DASHBOARD
+local TAB_ROSTER    = ui.TAB_ROSTER
+local TAB_RAID      = ui.TAB_RAID
+local TAB_LOOT      = ui.TAB_LOOT
+local TAB_SYNC      = ui.TAB_SYNC
+local TAB_COUNT     = ui.TAB_COUNT
+local TAB_NAMES     = ui.TAB_NAMES
+
+local RAID_SUB_COMP      = ui.RAID_SUB_COMP
+local RAID_SUB_READINESS = ui.RAID_SUB_READINESS
+local RAID_SUB_EVENTS    = ui.RAID_SUB_EVENTS
+local RAID_SUB_BOSSNOTES = ui.RAID_SUB_BOSSNOTES
+local RAID_SUB_COUNT     = ui.RAID_SUB_COUNT
+local RAID_SUB_NAMES     = ui.RAID_SUB_NAMES
+
+local ROSTER_SUB_TEAMS = ui.ROSTER_SUB_TEAMS
+local ROSTER_SUB_CHECK = ui.ROSTER_SUB_CHECK
+local ROSTER_SUB_COUNT = ui.ROSTER_SUB_COUNT
+local ROSTER_SUB_NAMES = ui.ROSTER_SUB_NAMES
+
+local LOOT_SUB_HISTORY   = ui.LOOT_SUB_HISTORY
+local LOOT_SUB_WISHLISTS = ui.LOOT_SUB_WISHLISTS
+local LOOT_SUB_COUNT     = ui.LOOT_SUB_COUNT
+local LOOT_SUB_NAMES     = ui.LOOT_SUB_NAMES
+
+local ClearContainer     = ui.ClearContainer
+local CreateScrollContent = ui.CreateScrollContent
+local SelectSubView      = ui.SelectSubView
+local BuildSubNav        = ui.BuildSubNav
+
 local mainFrame = nil
-
-local TAB_DASHBOARD = 1
-local TAB_ROSTER    = 2
-local TAB_RAID      = 3
-local TAB_LOOT      = 4
-local TAB_SYNC      = 5
-local TAB_COUNT     = 5
-local TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Loot", "Import/Export" }
-
-local RAID_SUB_COMP      = 1
-local RAID_SUB_READINESS = 2
-local RAID_SUB_EVENTS    = 3
-local RAID_SUB_BOSSNOTES = 4
-local RAID_SUB_COUNT     = 4
-local RAID_SUB_NAMES     = { "Raid Comp", "Readiness", "Events", "Boss Notes" }
-
-local ROSTER_SUB_TEAMS = 1
-local ROSTER_SUB_CHECK = 2
-local ROSTER_SUB_COUNT = 2
-local ROSTER_SUB_NAMES = { "Teams", "Roster Check" }
-
-local LOOT_SUB_HISTORY   = 1
-local LOOT_SUB_WISHLISTS = 2
-local LOOT_SUB_COUNT     = 2
-local LOOT_SUB_NAMES     = { "History", "Wishlists" }
 
 -- Forward declarations: these are defined later in the file, but referenced
 -- earlier (e.g. inside BuildRosterTab's sub-nav callback). Without this,
 -- the closures would capture _ENV.X (a nil global) instead of the local.
 local BuildRosterCheckSubView
 local PopulateRosterCheck
-
----------------------------------------------------------------------------
--- Helpers
----------------------------------------------------------------------------
-
-local function ClearContainer(container)
-    for _, child in ipairs({ container:GetChildren() }) do child:Hide() end
-    for _, region in ipairs({ container:GetRegions() }) do region:Hide() end
-end
-
-local function CreateScrollContent(parent)
-    local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    sf:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
-
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(660)
-    content:SetHeight(1)
-    sf:SetScrollChild(content)
-
-    return sf, content
-end
-
---- Generic sub-view selector. Hides all sub-views, shows the selected one,
---- and updates button font weight to indicate selection.
-local function SelectSubView(tab, index, count)
-    for i = 1, count do
-        tab.subViews[i]:Hide()
-        if tab.subButtons[i] then
-            tab.subButtons[i]:SetNormalFontObject("GameFontNormalSmall")
-        end
-    end
-    tab.subViews[index]:Show()
-    if tab.subButtons[index] then
-        tab.subButtons[index]:SetNormalFontObject("GameFontHighlightSmall")
-    end
-    tab.selectedSub = index
-end
-
---- Build a sub-navigation row across the top of a tab plus N sub-view frames.
---- onSelect(tab, index) is called when a sub-button is clicked.
-local function BuildSubNav(parent, names, onSelect)
-    parent.subButtons = {}
-    parent.subViews = {}
-    parent.selectedSub = 1
-    local count = #names
-    local btnW = math.floor(660 / count) - 4
-    local btnX = 0
-    for i = 1, count do
-        local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-        btn:SetSize(btnW, 22)
-        btn:SetPoint("TOPLEFT", parent, "TOPLEFT", btnX, 0)
-        btn:SetText(names[i])
-        btn:SetScript("OnClick", function() onSelect(parent, i) end)
-        parent.subButtons[i] = btn
-        btnX = btnX + btnW + 4
-    end
-    for i = 1, count do
-        local sv = CreateFrame("Frame", nil, parent)
-        sv:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -28)
-        sv:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-        sv:Hide()
-        parent.subViews[i] = sv
-    end
-end
-
----------------------------------------------------------------------------
--- Tab 1: Dashboard
----------------------------------------------------------------------------
-
-local function BuildDashboardTab(parent)
-    local col1X, col2X = 5, 310
-    local btnW, btnH, gap = 260, 26, 4
-
-    -- Raid Leader Tools (officer/leader perms required, button checks at runtime).
-    -- Attendance + bank capture used to be three "Quick Actions" buttons here;
-    -- they're now fully automatic (RAID_INSTANCE_WELCOME for attendance,
-    -- GUILDBANKFRAME_OPENED for bank), so the manual buttons were removed.
-    local y = 0
-    local hdr2 = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hdr2:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    hdr2:SetText("|cffffd100Raid Tools|r")
-    y = y - 18
-
-    local btnInvite = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnInvite:SetSize(btnW, btnH)
-    btnInvite:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    btnInvite:SetText("Auto-Invite Team")
-    btnInvite:SetScript("OnClick", function()
-        WGS:AutoInvite()
-    end)
-    y = y - btnH - gap
-
-    local btnSort = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnSort:SetSize(btnW, btnH)
-    btnSort:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    btnSort:SetText("Sort Raid Groups")
-    btnSort:SetScript("OnClick", function()
-        WGS:SortRaidGroups()
-    end)
-    y = y - btnH - gap * 3
-
-    local info = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    info:SetPoint("TOPLEFT", parent, "TOPLEFT", col1X, y)
-    info:SetWidth(btnW)
-    info:SetJustifyH("LEFT")
-    info:SetText("|cff888888guildhall.run|r")
-
-    -- Settings
-    local btnSettings = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btnSettings:SetSize(80, 22)
-    btnSettings:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", col1X, 0)
-    btnSettings:SetText("Settings")
-    btnSettings:SetScript("OnClick", function() WGS:OpenConfig() end)
-
-    -- Summary column
-    local hdrSummary = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hdrSummary:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, 0)
-    hdrSummary:SetText("|cffffd100Summary|r")
-
-    parent.summaryText = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    parent.summaryText:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, -22)
-    parent.summaryText:SetWidth(270)
-    parent.summaryText:SetJustifyH("LEFT")
-    parent.summaryText:SetJustifyV("TOP")
-
-    parent.attendanceStatus = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    parent.attendanceStatus:SetPoint("TOPLEFT", parent, "TOPLEFT", col2X, -140)
-    parent.attendanceStatus:SetWidth(270)
-    parent.attendanceStatus:SetJustifyH("LEFT")
-
-    -- Bottom-of-tab banner: only shown when the server's MIN_ADDON_VERSION
-    -- exceeds our running version. Spans both columns so it's hard to miss.
-    parent.outdatedBanner = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    parent.outdatedBanner:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 100, 4)
-    parent.outdatedBanner:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -10, 4)
-    parent.outdatedBanner:SetJustifyH("LEFT")
-    parent.outdatedBanner:SetText("")
-end
-
-local function RefreshDashboard(tab)
-    if not tab or not tab:IsVisible() then return end
-    local db = WGS.db.global
-    local lines = {}
-    lines[#lines + 1] = "|cff888888Loot:|r " .. (db.loot and #db.loot or 0)
-        .. "  |cff888888Attend:|r " .. (db.attendance and #db.attendance or 0)
-    lines[#lines + 1] = "|cff888888Bank Tx:|r " .. (db.guildBankTransactions and #db.guildBankTransactions or 0)
-    local gold = WGS.GetGuildGoldFormatted and WGS:GetGuildGoldFormatted() or nil
-    if gold then lines[#lines + 1] = "|cff888888Gold:|r " .. gold end
-    if db.lastExport > 0 then
-        lines[#lines + 1] = "|cff555555Exported: " .. date("%m/%d %H:%M", db.lastExport) .. "|r"
-    end
-    if db.lastImport > 0 then
-        lines[#lines + 1] = "|cff555555Imported: " .. date("%m/%d %H:%M", db.lastImport) .. "|r"
-    end
-    tab.summaryText:SetText(table.concat(lines, "\n"))
-
-    if WGS:IsTrackingAttendance() then
-        tab.attendanceStatus:SetText("|cff00ff00Attendance: recording|r")
-    else
-        tab.attendanceStatus:SetText("")
-    end
-
-    if tab.outdatedBanner then
-        if WGS:IsOutdated() then
-            tab.outdatedBanner:SetText(string.format(
-                "|cffff8800Addon outdated:|r v%s required, you have v%s. Update at |cff8888ffaddons.wago.io/addons/guildhall-addon|r",
-                db.serverMinAddonVersion or "?", WGS.version))
-        else
-            tab.outdatedBanner:SetText("")
-        end
-    end
-end
 
 ---------------------------------------------------------------------------
 -- Tab 2: Roster (Teams + Roster Check sub-views)
@@ -1361,8 +1198,14 @@ end
 
 local function RefreshCurrentTab(frame)
     local tab = frame.selectedTab or TAB_DASHBOARD
-    if tab == TAB_DASHBOARD then
-        RefreshDashboard(frame.tabContents[TAB_DASHBOARD])
+    -- Dispatch to the registered refresher. Tabs without a refresh
+    -- function (e.g. Sync) are no-ops here — their content updates on
+    -- explicit events instead.
+    local entry = ui.tabs[tab]
+    if entry and entry.refresh then
+        entry.refresh(frame.tabContents[tab])
+    -- Fall back to the legacy local refresher for tabs that haven't
+    -- been extracted yet. Each tab migration removes its branch.
     elseif tab == TAB_ROSTER then
         RefreshRosterSubView(frame.tabContents[TAB_ROSTER])
     elseif tab == TAB_RAID then
@@ -1370,7 +1213,6 @@ local function RefreshCurrentTab(frame)
     elseif tab == TAB_LOOT then
         RefreshLootSubView(frame.tabContents[TAB_LOOT])
     end
-    -- Sync tab doesn't need auto-refresh
 
     -- Status bar
     if frame.statusText then
@@ -1439,12 +1281,24 @@ local function CreateMainFrame()
 
     PanelTemplates_SetNumTabs(f, TAB_COUNT)
 
-    -- Build tab content
-    BuildDashboardTab(f.tabContents[TAB_DASHBOARD])
-    BuildRosterTab(f.tabContents[TAB_ROSTER])
-    BuildRaidTab(f.tabContents[TAB_RAID])
-    BuildLootTab(f.tabContents[TAB_LOOT])
-    BuildSyncTab(f.tabContents[TAB_SYNC])
+    -- Build tab content. Per-tab builders live in UI/Tabs/*.lua and
+    -- register themselves into ui.tabs at file scope. Tabs that
+    -- haven't been extracted yet fall back to the legacy local
+    -- builders below; each extraction commit removes its fallback.
+    for i = 1, TAB_COUNT do
+        local entry = ui.tabs[i]
+        if entry and entry.build then
+            entry.build(f.tabContents[i])
+        elseif i == TAB_ROSTER then
+            BuildRosterTab(f.tabContents[i])
+        elseif i == TAB_RAID then
+            BuildRaidTab(f.tabContents[i])
+        elseif i == TAB_LOOT then
+            BuildLootTab(f.tabContents[i])
+        elseif i == TAB_SYNC then
+            BuildSyncTab(f.tabContents[i])
+        end
+    end
 
     -- Wire back-pointers so in-tab controls (search box, dropdown, refresh btn)
     -- can trigger a re-render. These point to the actual sub-view, not the tab frame.
@@ -1474,7 +1328,10 @@ local function CreateMainFrame()
         if self._tick < 2 then return end
         self._tick = 0
         if self:IsShown() and self.selectedTab == TAB_DASHBOARD then
-            RefreshDashboard(self.tabContents[TAB_DASHBOARD])
+            local entry = ui.tabs[TAB_DASHBOARD]
+            if entry and entry.refresh then
+                entry.refresh(self.tabContents[TAB_DASHBOARD])
+            end
         end
         if self.statusText then
             if WGS:IsTrackingAttendance() then
