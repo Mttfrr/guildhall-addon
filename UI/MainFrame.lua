@@ -37,10 +37,16 @@ local function RefreshCurrentTab(frame)
     end
 
     if frame.statusText then
+        -- Only show the bar when there's something meaningful to say.
+        -- The idle "Ready" text was misleading — it read like a raid-
+        -- readiness signal, but actually meant "addon is loaded". The
+        -- addon is always loaded when this frame is visible, so the
+        -- text carried no information.
         if WGS:IsTrackingAttendance() then
             frame.statusText:SetText("|cff00ff00Attendance tracking active|r")
+            frame.statusText:Show()
         else
-            frame.statusText:SetText("Ready")
+            frame.statusText:Hide()
         end
     end
 end
@@ -130,8 +136,9 @@ local function CreateMainFrame()
         if self.statusText then
             if WGS:IsTrackingAttendance() then
                 self.statusText:SetText("|cff00ff00Attendance tracking active|r")
+                self.statusText:Show()
             else
-                self.statusText:SetText("Ready")
+                self.statusText:Hide()
             end
         end
     end)
