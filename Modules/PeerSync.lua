@@ -220,14 +220,150 @@ function WGS:PeerSync_HandleIncoming(senderKey, chunkStr, isSelf)
 end
 
 ---------------------------------------------------------------------------
+-- Per-table merge functions
+--
+-- Each fn takes (row, senderKey) and returns one of "added", "updated",
+-- "skipped". The contract is intentionally narrow: a merge fn touches
+-- db.global.<table> directly (no re-firing of the capture event, which
+-- would loop) and returns the action so WGS_PEER_SYNC_APPLIED subscribers
+-- can decide whether to re-render.
+--
+-- Dedup keys come from the natural identity of each capture surface:
+--   * loot:            (itemID, player short name) within a ±60s window,
+--                      first-wins. Two officers seeing the same drop will
+--                      record near-identical timestamps but may disagree
+--                      on the realm suffix in `player` (cross-realm raids
+--                      sometimes hand back the bare name to one client and
+--                      the full name to another); short-name match handles
+--                      that, the 60s window absorbs clock drift.
+--   * attendance:      (startedAt, startedBy), first-wins. Sessions are
+--                      immutable once endedAt is set; we don't yet deep-
+--                      merge the memberList from another officer's view.
+--   * encounters:      (encounterID, timestamp ±2s), first-wins. ENCOUNTER_END
+--                      fires on every client within a second or two of the
+--                      kill, so any two officers will agree on the same
+--                      kill via that window.
+--   * raidCompResults: (startedAt, signature), first-wins. Signature is
+--                      already a stable hash of the slots list
+--                      (Modules/Attendance.lua), so two officers capturing
+--                      the same comp produce identical signatures.
+---------------------------------------------------------------------------
+
+local LOOT_DEDUP_WINDOW = 60      -- seconds
+local ENCOUNTER_DEDUP_WINDOW = 2  -- seconds
+
+local function shortName(full)
+    if not full then return nil end
+    return full:match("^([^%-]+)") or full
+end
+
+local function mergeLoot(row)
+    if type(row) ~= "table" or not row.itemID or not row.player or not row.timestamp then
+        return "skipped"
+    end
+    local loot = WGS.db and WGS.db.global and WGS.db.global.loot
+    if not loot then return "skipped" end
+    local incomingShort = shortName(row.player)
+    for _, existing in ipairs(loot) do
+        if existing.itemID == row.itemID
+           and shortName(existing.player) == incomingShort
+           and math.abs((existing.timestamp or 0) - row.timestamp) <= LOOT_DEDUP_WINDOW then
+            return "skipped"
+        end
+    end
+    loot[#loot + 1] = row
+    return "added"
+end
+
+local function mergeAttendance(row)
+    if type(row) ~= "table" or not row.startedAt then return "skipped" end
+    local attendance = WGS.db and WGS.db.global and WGS.db.global.attendance
+    if not attendance then return "skipped" end
+    for _, existing in ipairs(attendance) do
+        if existing.startedAt == row.startedAt
+           and (existing.startedBy or "") == (row.startedBy or "") then
+            return "skipped"
+        end
+    end
+    attendance[#attendance + 1] = row
+    return "added"
+end
+
+local function mergeEncounters(row)
+    if type(row) ~= "table" or not row.encounterID or not row.timestamp then
+        return "skipped"
+    end
+    local encs = WGS.db and WGS.db.global and WGS.db.global.encounters
+    if not encs then return "skipped" end
+    for _, existing in ipairs(encs) do
+        if existing.encounterID == row.encounterID
+           and math.abs((existing.timestamp or 0) - row.timestamp) <= ENCOUNTER_DEDUP_WINDOW then
+            return "skipped"
+        end
+    end
+    encs[#encs + 1] = row
+    return "added"
+end
+
+local function mergeRaidCompResults(row)
+    if type(row) ~= "table" or not row.startedAt or not row.signature then
+        return "skipped"
+    end
+    local results = WGS.db and WGS.db.global and WGS.db.global.raidCompResults
+    if not results then return "skipped" end
+    for _, existing in ipairs(results) do
+        if existing.startedAt == row.startedAt
+           and existing.signature == row.signature then
+            return "skipped"
+        end
+    end
+    results[#results + 1] = row
+    return "added"
+end
+
+-- Exposed for tests to invoke directly without the full encode/decode trip.
+WGS._PeerSync_MergeLoot            = mergeLoot
+WGS._PeerSync_MergeAttendance      = mergeAttendance
+WGS._PeerSync_MergeEncounters      = mergeEncounters
+WGS._PeerSync_MergeRaidCompResults = mergeRaidCompResults
+
+---------------------------------------------------------------------------
 -- Lifecycle
 ---------------------------------------------------------------------------
+
+-- Register the standard four-table merge surface + subscribe to capture
+-- events so locally-captured rows are broadcast to peers. Split out
+-- from OnEnable so tests can wire the subscriptions without an
+-- AceModule lifecycle.
+function WGS:_PeerSync_InstallStandardWiring()
+    self:PeerSync_RegisterMerge("loot",            mergeLoot)
+    self:PeerSync_RegisterMerge("attendance",      mergeAttendance)
+    self:PeerSync_RegisterMerge("encounters",      mergeEncounters)
+    self:PeerSync_RegisterMerge("raidCompResults", mergeRaidCompResults)
+
+    -- Each broadcast checks officer rank + channel availability
+    -- internally — failure is a silent no-op so capture sites don't
+    -- need to know whether sync is reachable right now.
+    GuildHall.RegisterCallback(self, "WGS_LOOT_RECORDED", function(_, row)
+        WGS:PeerSync_Broadcast("loot", row)
+    end)
+    GuildHall.RegisterCallback(self, "WGS_SESSION_ENDED", function(_, row)
+        WGS:PeerSync_Broadcast("attendance", row)
+    end)
+    GuildHall.RegisterCallback(self, "WGS_ENCOUNTER_RECORDED", function(_, row)
+        WGS:PeerSync_Broadcast("encounters", row)
+    end)
+    GuildHall.RegisterCallback(self, "WGS_RAID_COMP_SNAPSHOT", function(_, row)
+        WGS:PeerSync_Broadcast("raidCompResults", row)
+    end)
+end
 
 function module:OnEnable()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
         C_ChatInfo.RegisterAddonMessagePrefix(PEER_FRAME_PREFIX)
     end
     self:RegisterEvent("CHAT_MSG_ADDON", "OnAddonMessage")
+    WGS:_PeerSync_InstallStandardWiring()
 end
 
 function module:OnAddonMessage(_, prefix, msg, _channel, sender)

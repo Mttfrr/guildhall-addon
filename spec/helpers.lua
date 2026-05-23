@@ -143,12 +143,27 @@ function M.setup()
     -- in tests. Modules use WGS:FireEvent which already nil-guards
     -- on `self.callbacks`, so unit tests would silently drop emissions
     -- without this shim. Tests that care can read GuildHall._fired.
+    --
+    -- The shim also implements GuildHall.RegisterCallback as a real
+    -- dispatcher (CallbackHandler-1.0 surface) so peer-sync subscribers
+    -- that broadcast on capture events can be exercised end to end.
     GuildHall._fired = {}
+    local listeners = {}
     GuildHall.callbacks = {
         Fire = function(_, event, ...)
             table.insert(GuildHall._fired, { event = event, args = { ... } })
+            for _, fn in ipairs(listeners[event] or {}) do fn(event, ...) end
         end,
     }
+    function GuildHall.RegisterCallback(_handler, event, fnOrMethodName)
+        listeners[event] = listeners[event] or {}
+        if type(fnOrMethodName) == "function" then
+            table.insert(listeners[event], fnOrMethodName)
+        end
+    end
+    function GuildHall.UnregisterCallback(_handler, event)
+        listeners[event] = nil
+    end
 
     return GuildHall
 end

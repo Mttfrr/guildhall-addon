@@ -246,3 +246,182 @@ describe("WGS:PeerSync_HandleIncoming dispatch", function()
         assert.is_true(sawErr)
     end)
 end)
+
+describe("WGS:PeerSync per-table merge fns", function()
+    local WGS
+    before_each(function() WGS = setup() end)
+
+    describe("loot", function()
+        it("inserts a new row", function()
+            assert.are.equal("added", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000,
+            }))
+            assert.are.equal(1, #WGS.db.global.loot)
+        end)
+
+        it("skips a duplicate within the ±60s window", function()
+            WGS.db.global.loot[1] = { itemID = 1, player = "X-Realm", timestamp = 1000 }
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1030,
+            }))
+            assert.are.equal(1, #WGS.db.global.loot)
+        end)
+
+        it("treats bare name and Name-Realm as the same player", function()
+            WGS.db.global.loot[1] = { itemID = 1, player = "X", timestamp = 1000 }
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-OtherRealm", timestamp = 1001,
+            }))
+        end)
+
+        it("admits a separate drop outside the dedup window", function()
+            WGS.db.global.loot[1] = { itemID = 1, player = "X-Realm", timestamp = 1000 }
+            assert.are.equal("added", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1100,
+            }))
+            assert.are.equal(2, #WGS.db.global.loot)
+        end)
+
+        it("skips garbage payloads", function()
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot(nil))
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({}))
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({ itemID = 1 }))
+        end)
+    end)
+
+    describe("attendance", function()
+        it("inserts a new session", function()
+            assert.are.equal("added", WGS._PeerSync_MergeAttendance({
+                startedAt = 1, startedBy = "GM-Realm", endedAt = 100,
+            }))
+            assert.are.equal(1, #WGS.db.global.attendance)
+        end)
+
+        it("first-wins on (startedAt, startedBy)", function()
+            WGS.db.global.attendance[1] = { startedAt = 1, startedBy = "GM-Realm", endedAt = 100 }
+            assert.are.equal("skipped", WGS._PeerSync_MergeAttendance({
+                startedAt = 1, startedBy = "GM-Realm", endedAt = 200,
+            }))
+        end)
+
+        it("different startedBy is a different session", function()
+            WGS.db.global.attendance[1] = { startedAt = 1, startedBy = "GM-Realm" }
+            assert.are.equal("added", WGS._PeerSync_MergeAttendance({
+                startedAt = 1, startedBy = "Other-Realm",
+            }))
+        end)
+    end)
+
+    describe("encounters", function()
+        it("inserts a new kill", function()
+            assert.are.equal("added", WGS._PeerSync_MergeEncounters({
+                encounterID = 2902, timestamp = 1000,
+            }))
+        end)
+
+        it("dedupes within ±2s of the same encounterID", function()
+            WGS.db.global.encounters[1] = { encounterID = 2902, timestamp = 1000 }
+            assert.are.equal("skipped", WGS._PeerSync_MergeEncounters({
+                encounterID = 2902, timestamp = 1001,
+            }))
+        end)
+
+        it("admits a re-kill outside the window", function()
+            WGS.db.global.encounters[1] = { encounterID = 2902, timestamp = 1000 }
+            assert.are.equal("added", WGS._PeerSync_MergeEncounters({
+                encounterID = 2902, timestamp = 1100,
+            }))
+        end)
+    end)
+
+    describe("raidCompResults", function()
+        it("inserts a new snapshot", function()
+            assert.are.equal("added", WGS._PeerSync_MergeRaidCompResults({
+                startedAt = 1, signature = "abc", slots = {},
+            }))
+        end)
+
+        it("skips an identical signature for the same session", function()
+            WGS.db.global.raidCompResults[1] = { startedAt = 1, signature = "abc" }
+            assert.are.equal("skipped", WGS._PeerSync_MergeRaidCompResults({
+                startedAt = 1, signature = "abc",
+            }))
+        end)
+
+        it("admits a new comp signature for the same session", function()
+            WGS.db.global.raidCompResults[1] = { startedAt = 1, signature = "abc" }
+            assert.are.equal("added", WGS._PeerSync_MergeRaidCompResults({
+                startedAt = 1, signature = "def",
+            }))
+        end)
+    end)
+end)
+
+describe("WGS:PeerSync standard wiring", function()
+    local WGS, sent
+    before_each(function()
+        WGS = setup()
+        sent = fakeChat()
+        fakeGuild({ ["Tester-TestRealm"] = 1 })
+        _G.IsInRaid = function() return true end
+        _G.GetGuildInfo = function(unit)
+            if unit == "player" then return "TestGuild", "Officer", 1 end
+            return nil
+        end
+        WGS:_PeerSync_InstallStandardWiring()
+    end)
+
+    it("broadcasts on WGS_LOOT_RECORDED", function()
+        WGS:FireEvent("WGS_LOOT_RECORDED", { itemID = 42, player = "X-TestRealm", timestamp = 1000 })
+        assert.is_true(#sent >= 1)
+        assert.are.equal("RAID", sent[1].channel)
+    end)
+
+    it("broadcasts on WGS_SESSION_ENDED", function()
+        WGS:FireEvent("WGS_SESSION_ENDED", { startedAt = 1, startedBy = "X-TestRealm" })
+        assert.is_true(#sent >= 1)
+    end)
+
+    it("broadcasts on WGS_ENCOUNTER_RECORDED", function()
+        WGS:FireEvent("WGS_ENCOUNTER_RECORDED", { encounterID = 2902, timestamp = 1000 })
+        assert.is_true(#sent >= 1)
+    end)
+
+    it("broadcasts on WGS_RAID_COMP_SNAPSHOT", function()
+        WGS:FireEvent("WGS_RAID_COMP_SNAPSHOT", { startedAt = 1, signature = "abc", slots = {} })
+        assert.is_true(#sent >= 1)
+    end)
+
+    it("doesn't broadcast when we aren't an officer", function()
+        _G.GetGuildInfo = function() return "TestGuild", "Member", 5 end
+        WGS:FireEvent("WGS_LOOT_RECORDED", { itemID = 1, player = "X", timestamp = 1 })
+        assert.are.equal(0, #sent)
+    end)
+
+    it("end-to-end: officer A broadcasts → officer B's merge fn applies it", function()
+        -- A broadcasts a loot drop
+        WGS:FireEvent("WGS_LOOT_RECORDED", {
+            itemID = 999, player = "Y-TestRealm", timestamp = 5000,
+        })
+        assert.is_true(#sent >= 1)
+
+        -- B receives every chunk we just sent. (Same WGS instance plays
+        -- both roles — what matters is that the bytes round-trip and
+        -- the merge fn fires.)
+        WGS.db.global.loot = {}   -- pretend B starts empty
+        for _, s in ipairs(sent) do
+            WGS:PeerSync_HandleIncoming("Tester-TestRealm", s.msg, false)
+        end
+
+        -- Self-loopback drop fires for sender == self; flip isSelf off
+        -- to simulate B as a different officer. Reset and replay through
+        -- the real trust gate.
+        WGS.db.global.loot = {}
+        fakeGuild({ ["Tester-TestRealm"] = 1, ["Sender-TestRealm"] = 1 })
+        for _, s in ipairs(sent) do
+            WGS:PeerSync_HandleIncoming("Sender-TestRealm", s.msg, false)
+        end
+        assert.are.equal(1, #WGS.db.global.loot)
+        assert.are.equal(999, WGS.db.global.loot[1].itemID)
+    end)
+end)

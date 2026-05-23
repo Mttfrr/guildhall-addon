@@ -96,6 +96,42 @@ Use this if you're caching anything derived from imported data (e.g. a
 nickname push to NSRT) — the registries you care about are guaranteed
 to be in their post-import state by the time this fires.
 
+### `WGS_ENCOUNTER_RECORDED`
+
+Fires for each kill recorded into `db.global.encounters` from
+`ENCOUNTER_END`. Payload: the encounter row itself —
+
+| Field | Type | Notes |
+|---|---|---|
+| `encounterID` | integer | WoW encounter ID |
+| `encounterName` | string | localized |
+| `difficultyID` | integer | |
+| `difficultyName` | string | |
+| `groupSize` | integer | |
+| `instance` | string | from `GetInstanceInfo()` |
+| `timestamp` | integer | |
+| `recordedBy` | string | full character key of the local player |
+
+PeerSync subscribes to this to fan kills out to other officers; the
+matching merge fn dedupes by `(encounterID, timestamp ±2s)`.
+
+### `WGS_RAID_COMP_SNAPSHOT`
+
+Fires when a raid-comp snapshot is inserted into
+`db.global.raidCompResults`. Same payload as the row itself —
+
+| Field | Type | Notes |
+|---|---|---|
+| `startedAt` | integer | session start, used as the snapshot's group key |
+| `signature` | string | stable hash of the slots array; identical comps share a signature |
+| `slots` | array | `{ { name, playerId, class, role, group }, ... }` |
+| `boss` | string or nil | name of the kill that triggered the snapshot, if any |
+| `encounterID` | integer or nil | |
+| `recordedBy` | string | |
+
+Useful for any subscriber that wants to react to a real comp change
+(as opposed to listening to every session-end event).
+
 ### `WGS_PEER_SYNC_APPLIED`
 
 Fires after the PeerSync module receives a delta from another officer,

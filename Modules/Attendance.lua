@@ -350,6 +350,7 @@ function WGS:SnapshotRaidComp(bossInfo)
     end
 
     results[#results + 1] = snapshot
+    self:FireEvent("WGS_RAID_COMP_SNAPSHOT", snapshot)
     return true
 end
 

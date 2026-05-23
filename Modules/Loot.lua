@@ -88,7 +88,7 @@ function module:OnEncounterEnd(_, encounterID, encounterName, difficultyID, grou
         local difficultyName = GetDifficultyInfo and GetDifficultyInfo(difficultyID) or nil
 
         -- Record the encounter kill for export to web platform
-        table.insert(WGS.db.global.encounters, {
+        local encounterEntry = {
             encounterID = encounterID,
             encounterName = encounterName or "",
             difficultyID = difficultyID or 0,
@@ -97,7 +97,9 @@ function module:OnEncounterEnd(_, encounterID, encounterName, difficultyID, grou
             instance = GetInstanceInfo() or "Unknown",
             timestamp = WGS:GetTimestamp(),
             recordedBy = WGS:GetPlayerKey(),
-        })
+        }
+        table.insert(WGS.db.global.encounters, encounterEntry)
+        WGS:FireEvent("WGS_ENCOUNTER_RECORDED", encounterEntry)
 
         -- Snapshot raid comp at kill time (deduped against last snapshot)
         WGS:SnapshotRaidComp({
