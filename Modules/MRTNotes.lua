@@ -40,6 +40,8 @@ function WGS:GetMRTNote(raw)
             local ok, text = pcall(mrt.F.GetNote, true, true) -- (removeColors, removeExtraSpaces)
             if ok and type(text) == "string" and text ~= "" then
                 return text
+            elseif not ok then
+                self:FireEvent("WGS_INTERNAL_ERROR", { source = "MRTNotes.MRT.F.GetNote", error = text })
             end
         end
         local gmrt = _G.GMRT
@@ -47,6 +49,8 @@ function WGS:GetMRTNote(raw)
             local ok, text = pcall(gmrt.F.GetNote, gmrt.F, true, true)
             if ok and type(text) == "string" and text ~= "" then
                 return text
+            elseif not ok then
+                self:FireEvent("WGS_INTERNAL_ERROR", { source = "MRTNotes.GMRT.F.GetNote", error = text })
             end
         end
     end

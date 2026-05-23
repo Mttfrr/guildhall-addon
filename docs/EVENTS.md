@@ -96,6 +96,23 @@ Use this if you're caching anything derived from imported data (e.g. a
 nickname push to NSRT) — the registries you care about are guaranteed
 to be in their post-import state by the time this fires.
 
+### `WGS_INTERNAL_ERROR`
+
+Fires when a `pcall`-guarded internal operation throws. The addon
+catches and continues so the user-visible flow doesn't break, but
+subscribers (e.g. a future `/gh diag` UI, a Discord error reporter)
+can surface or aggregate these for debugging. Payload:
+
+| Field | Type | Notes |
+|---|---|---|
+| `source` | string | Stable identifier of the failing call site, e.g. `"Attendance.OnGroupRosterUpdate"`, `"MRTNotes.MRT.F.GetNote"`, `"JSON.FromJson"` |
+| `error` | string | The `pcall` error message — may include file/line info from the underlying throw |
+
+Sites that fire today: `Modules/Attendance.lua` (roster-walk
+exception during a session), `Modules/MRTNotes.lua` (MRT's note
+accessor throwing), `Util/JSON.lua` (parse failure on import). Stable
+contract — adding new sites is additive.
+
 ### `WGS_LOOT_RECORDED`
 
 Fires for each loot row inserted into `db.global.loot` (one event per

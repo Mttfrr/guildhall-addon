@@ -142,5 +142,13 @@ function WGS:FromJson(str)
     end
 
     local ok, result = pcall(parseValue)
-    return ok and result or nil
+    if ok then return result end
+    -- Malformed JSON. The caller already handles nil-return; we surface
+    -- the parse error on the event bus so future `/gh diag` consumers
+    -- can show "import string failed to parse at character N" instead
+    -- of just "import failed".
+    if WGS.FireEvent then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "JSON.FromJson", error = result })
+    end
+    return nil
 end

@@ -49,7 +49,11 @@ function module:OnGroupRosterUpdate()
     if not isTracking or not currentSession then return end
 
     local ok, members = pcall(WGS.GetRaidMembers, WGS)
-    if not ok or not members then return end
+    if not ok then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "Attendance.OnGroupRosterUpdate", error = members })
+        return
+    end
+    if not members then return end
     local timestamp = WGS:GetTimestamp()
 
     local pullTime = currentSession.pullTime
