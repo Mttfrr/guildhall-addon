@@ -142,6 +142,19 @@ local function importGearAudit(self, data)
     return #data.gearAudit
 end
 
+-- characterDetails: per-character map of { class, spec, ilvl,
+-- missingEnchants, missingGems } keyed by character name. Includes
+-- every level-80 character (mains AND alts, clean AND with-issues) —
+-- broader than gearAudit which is issues-only for the Readiness panel.
+-- Drives the Teams tab's per-character gear pill.
+local function importCharacterDetails(self, data)
+    if not data.characterDetails then return 0 end
+    self.db.global.characterDetails = data.characterDetails
+    local n = 0
+    for _ in pairs(data.characterDetails) do n = n + 1 end
+    return n
+end
+
 local function importSignups(self, data)
     if not data.signups then return 0 end
     self.db.global.signups = data.signups
@@ -201,6 +214,7 @@ local IMPORTERS = {
     importRaidComps,
     importEvents,
     importGearAudit,
+    importCharacterDetails,
     importSignups,
     importTargetIlvl,
     importMinAddonVersion,

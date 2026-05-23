@@ -36,47 +36,152 @@ local BuildWishlistsSubView
 local PopulateWishlists
 
 ---------------------------------------------------------------------------
--- Gear-issue lookup (for the Teams sub-view per-member row)
+-- Per-character gear pill
+--
+-- Uses data.characterDetails (every level-80 character, mains AND alts,
+-- clean AND with-issues). Returns a colored string ready for SetText:
+--   "|cff00ff00i620|r"           — clean, just ilvl in green
+--   "|cffff8800i605 2E 1G|r"     — yellow: 1–3 issues
+--   "|cffff4444i590 4E 3G|r"     — red: 4+ issues
+--   "|cffff8800i590/615|r"       — below target ilvl, with target shown
+--   nil                          — no data for this character
 ---------------------------------------------------------------------------
 
--- Returns a compact gear-issue label for a character, or nil if the
--- gearAudit data has nothing for them. Format:
---   "|cff00ff00clean|r"                       — no issues, green
---   "|cffff8800 2E 1G  i612/620|r"           — yellow: some issues
---   "|cffff4444 4E 3G|r"                      — red: many issues
--- Caller decorates with class color on the name; this is a side-pill.
-local function GearIssueLabel(shortName)
-    local audit = WGS.db.global.gearAudit
-    if not audit or #audit == 0 then return nil end
+local function GearPillForCharacter(shortName)
+    local details = WGS.db.global.characterDetails
+    if not details then return nil end
+    -- characterDetails is keyed by bare character name (no realm).
+    local key = shortName:match("^([^%-]+)") or shortName
+    local info = details[key]
+    if not info then return nil end
 
-    local lowerShort = shortName:lower()
-    local match = nil
-    for _, entry in ipairs(audit) do
-        local n = entry.characterName or entry.playerName or ""
-        if n:lower():match("^([^%-]+)") == lowerShort then
-            match = entry
-            break
-        end
-    end
-    if not match then return nil end
-
-    local me = match.missingEnchants or 0
-    local mg = match.missingGems or 0
-    local ilvl = match.ilvl or 0
+    local me = info.missingEnchants or 0
+    local mg = info.missingGems or 0
+    local ilvl = info.ilvl or 0
     local target = WGS.db.global.targetIlvl or 0
     local belowTarget = target > 0 and ilvl > 0 and ilvl < target
 
-    if me == 0 and mg == 0 and not belowTarget then
-        return "|cff00ff00clean|r"
-    end
-
     local parts = {}
+    if ilvl > 0 then
+        if belowTarget then
+            parts[#parts + 1] = string.format("i%d/%d", ilvl, target)
+        else
+            parts[#parts + 1] = "i" .. ilvl
+        end
+    end
     if me > 0 then parts[#parts + 1] = me .. "E" end
     if mg > 0 then parts[#parts + 1] = mg .. "G" end
-    if belowTarget then parts[#parts + 1] = string.format("i%d/%d", ilvl, target) end
-    local total = me + mg + (belowTarget and 1 or 0)
-    local color = total >= 4 and "ffff4444" or "ffff8800"
+
+    if #parts == 0 then return nil end
+
+    local issueCount = me + mg + (belowTarget and 1 or 0)
+    local color
+    if issueCount == 0 then color = "ff00ff00"
+    elseif issueCount >= 4 then color = "ffff4444"
+    else color = "ffff8800" end
+
     return "|c" .. color .. table.concat(parts, " ") .. "|r"
+end
+
+---------------------------------------------------------------------------
+-- Class icon helper
+--
+-- WoW ships a 64×64 sprite sheet of all class icons at
+-- Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes, indexed
+-- via the CLASS_ICON_TCOORDS global. Falls back to a class-coloured
+-- square if the class is unknown (defensive — adding a new class
+-- mid-expansion would otherwise show a broken texture).
+---------------------------------------------------------------------------
+
+local CLASS_ICON_PATH = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+
+local function ApplyClassIcon(texture, classFile, color)
+    classFile = (classFile or ""):upper()
+    local tc = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
+    if tc then
+        texture:SetTexture(CLASS_ICON_PATH)
+        texture:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+        texture:SetVertexColor(1, 1, 1, 1)
+    elseif color then
+        -- Class color extracted from "AABBGGRR" hex; class-coloured tile.
+        local r = tonumber(color:sub(3, 4), 16) / 255
+        local g = tonumber(color:sub(5, 6), 16) / 255
+        local b = tonumber(color:sub(7, 8), 16) / 255
+        texture:SetColorTexture(r, g, b, 1)
+    else
+        texture:SetColorTexture(0.4, 0.4, 0.4, 1)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Per-character card builder (used for both main + each alt)
+---------------------------------------------------------------------------
+
+-- Resolves the canonical class for a character, falling back through:
+--   characterDetails (most authoritative — server-supplied)
+--   GetGuildRosterInfo lookup
+--   nil (caller renders without a class color)
+local function ResolveClass(charName, roster)
+    local details = WGS.db.global.characterDetails
+    local d = details and details[charName]
+    if d and d.class and d.class ~= "" then return d.class end
+    local short = charName:match("^([^%-]+)") or charName
+    local gi = roster[short]
+    if gi and gi.class then return gi.class end
+    return nil
+end
+
+-- Build a compact horizontal card: [icon] [name] [pill]. Returns the
+-- frame so the caller can position it. width = the card's reserved
+-- horizontal slot (icon + spacing + name + pill all flow within it).
+--
+-- isMain: when true, name uses a slightly larger font + an inline
+-- online-status dot at the leading edge. Alts get a tighter look.
+local function BuildCharacterCard(parent, charName, roster, isMain)
+    local card = CreateFrame("Frame", nil, parent)
+
+    local class = ResolveClass(charName, roster)
+    local classFile = (class or ""):upper()
+    -- WoW's CLASS_COLORS is keyed in upper case ("WARRIOR"), our
+    -- imported data sometimes carries title case ("Warrior") — handle both.
+    local colorHex = WGS.CLASS_COLORS[classFile] or WGS.CLASS_COLORS[class] or "ffffffff"
+
+    -- Class icon (small square)
+    local iconSize = isMain and 18 or 14
+    local icon = card:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(iconSize, iconSize)
+    icon:SetPoint("LEFT", card, "LEFT", 0, 0)
+    ApplyClassIcon(icon, classFile, colorHex)
+
+    -- Name (class-coloured)
+    local nameText = card:CreateFontString(nil, "OVERLAY",
+        isMain and "GameFontHighlight" or "GameFontHighlightSmall")
+    nameText:SetPoint("LEFT", icon, "RIGHT", 4, 0)
+    nameText:SetText("|c" .. colorHex .. (charName:match("^([^%-]+)") or charName) .. "|r")
+
+    -- Online indicator (mains only — keeps the alt strip tighter)
+    if isMain then
+        local short = charName:match("^([^%-]+)") or charName
+        local gi = roster[short]
+        local online = gi and gi.online
+        local dot = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        dot:SetPoint("RIGHT", nameText, "LEFT", -2, 0)
+        if gi then
+            dot:SetText(online and "|cff00ff00\194\183|r" or "|cff555555\194\183|r")
+        else
+            dot:SetText("|cffff4444\194\183|r")
+        end
+    end
+
+    -- Gear pill (right-aligned within card)
+    local pill = GearPillForCharacter(charName)
+    if pill then
+        local pillText = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        pillText:SetPoint("RIGHT", card, "RIGHT", 0, 0)
+        pillText:SetText(pill)
+    end
+
+    return card
 end
 
 ---------------------------------------------------------------------------
@@ -92,6 +197,18 @@ local function BuildTeamsSubView(sv)
     sv.content = content
 end
 
+-- Row layout constants. Mains start at LEFT_X; alts strip starts at
+-- ALT_STRIP_X and tiles right at ALT_BLOCK_W per block. MAX_ALTS_INLINE
+-- alts render inline; remaining are summarised as "+N more" with an
+-- OnEnter tooltip listing the full set.
+local CONTENT_W       = 660
+local ROW_H           = 22
+local MAIN_LEFT_X     = 10
+local MAIN_BLOCK_W    = 180
+local ALT_STRIP_X     = 200
+local ALT_BLOCK_W     = 140
+local MAX_ALTS_INLINE = 3
+
 local function PopulateTeams(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
@@ -105,141 +222,113 @@ local function PopulateTeams(tab)
         return
     end
 
-    local roster = WGS:GetGuildRosterLookup()
+    local roster     = WGS:GetGuildRosterLookup()
     local characters = WGS.db.global.characters or {}
     local yOff = 0
-    local cw = 660
 
     for _, team in ipairs(teams) do
-        local row = CreateFrame("Frame", nil, tab.content)
-        row:SetSize(cw, 20)
-        row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
-        local tn = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        tn:SetPoint("LEFT", row, "LEFT", 5, 0)
-        local mc = team.playerMembers and #team.playerMembers or (team.members and #team.members or 0)
+        -- Team header
+        local header = CreateFrame("Frame", nil, tab.content)
+        header:SetSize(CONTENT_W, 20)
+        header:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+        local tn = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        tn:SetPoint("LEFT", header, "LEFT", 5, 0)
+        -- team.members is the canonical full list. Use it for the
+        -- count too; team.playerMembers is the LINKED subset only and
+        -- understates the team size when some members lack user_ids.
+        local memberNames = team.members or {}
         tn:SetText("|cffffd100" .. (team.name or "?") .. "|r  |cff888888("
-            .. (team.type or "Team") .. " \226\128\148 " .. mc .. " members)|r")
+            .. (team.type or "Team") .. " \226\128\148 " .. #memberNames .. " members)|r")
         yOff = yOff - 22
 
-        if team.playerMembers and #team.playerMembers > 0 then
-            for _, pm in ipairs(team.playerMembers) do
-                local pi = characters[pm.playerId]
-                local mainName = pm.main or (pi and pi.main) or "Unknown"
-                local short = mainName:match("^([^%-]+)") or mainName
-                local gi = roster[short]
-
-                local anyOnline = gi and gi.online
-                if not anyOnline and pi and pi.alts then
-                    for _, alt in ipairs(pi.alts) do
-                        local ag = roster[alt:match("^([^%-]+)")]
-                        if ag and ag.online then anyOnline = true; break end
-                    end
-                end
-
-                local mr = CreateFrame("Frame", nil, tab.content)
-                mr:SetSize(cw, 16)
-                mr:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
-
-                local dot = mr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                dot:SetPoint("LEFT", mr, "LEFT", 12, 0)
-                dot:SetText(gi and (anyOnline and "|cff00ff00\194\183|r" or "|cff555555\194\183|r") or "|cffff4444\194\183|r")
-
-                local nt = mr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                nt:SetPoint("LEFT", dot, "RIGHT", 4, 0)
-                if gi then
-                    nt:SetText("|c" .. (WGS.CLASS_COLORS[gi.class] or "ffffffff") .. short .. "|r")
-                else
-                    nt:SetText("|cff666666" .. short .. "|r")
-                end
-
-                local nAlts = pi and pi.alts and #pi.alts or 0
-                local altsText
-                if nAlts > 0 then
-                    altsText = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    altsText:SetPoint("LEFT", nt, "RIGHT", 6, 0)
-                    altsText:SetText("|cff888888+" .. nAlts .. " alt" .. (nAlts > 1 and "s" or "") .. "|r")
-                end
-
-                -- Gear-issues badge: sits left of the level/rank tag.
-                -- Compact "2E 1G i612/620" with severity coloring; absent
-                -- entirely if we have no gearAudit data for this player.
-                local gearLabel = GearIssueLabel(short)
-                if gearLabel then
-                    local gt = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    gt:SetPoint("RIGHT", mr, "RIGHT", -110, 0)
-                    gt:SetText(gearLabel)
-                end
-
-                if gi then
-                    local it = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    it:SetPoint("RIGHT", mr, "RIGHT", -4, 0)
-                    it:SetText("|cff555555Lv" .. gi.level .. " " .. gi.rank .. "|r")
-                end
-
-                if nAlts > 0 then
-                    mr:EnableMouse(true)
-                    mr._alts = pi.alts
-                    mr._main = mainName
-                    mr._short = short
-                    mr:SetScript("OnEnter", function(self)
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:AddLine(self._short .. "'s Characters")
-                        GameTooltip:AddLine("Main: " .. self._main, 1, 1, 1)
-                        for _, alt in ipairs(self._alts) do
-                            local as = alt:match("^([^%-]+)")
-                            local ag = roster[as]
-                            if ag then
-                                GameTooltip:AddLine("|c" .. (WGS.CLASS_COLORS[ag.class] or "ffffffff") .. as .. "|r  "
-                                    .. (ag.online and "|cff00ff00online|r" or "|cff555555offline|r"))
-                            else
-                                GameTooltip:AddLine("|cff666666" .. as .. "|r  (not in guild)")
-                            end
-                        end
-                        GameTooltip:Show()
-                    end)
-                    mr:SetScript("OnLeave", function() GameTooltip:Hide() end)
-                end
-                yOff = yOff - 16
-            end
-        elseif team.members and #team.members > 0 then
-            for _, mn in ipairs(team.members) do
-                local short = mn:match("^([^%-]+)")
-                local gi = roster[short]
-                local mr = CreateFrame("Frame", nil, tab.content)
-                mr:SetSize(cw, 16)
-                mr:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
-                local dot = mr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                dot:SetPoint("LEFT", mr, "LEFT", 12, 0)
-                dot:SetText(gi and (gi.online and "|cff00ff00\194\183|r" or "|cff555555\194\183|r") or "|cffff4444\194\183|r")
-                local nt = mr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                nt:SetPoint("LEFT", dot, "RIGHT", 4, 0)
-                if gi then
-                    nt:SetText("|c" .. (WGS.CLASS_COLORS[gi.class] or "ffffffff") .. short .. "|r")
-                else
-                    nt:SetText("|cff666666" .. short .. "|r")
-                end
-
-                local gearLabel = GearIssueLabel(short or mn)
-                if gearLabel then
-                    local gt = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    gt:SetPoint("RIGHT", mr, "RIGHT", -110, 0)
-                    gt:SetText(gearLabel)
-                end
-
-                if gi then
-                    local it = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    it:SetPoint("RIGHT", mr, "RIGHT", -4, 0)
-                    it:SetText("|cff555555Lv" .. gi.level .. " " .. gi.rank .. "|r")
-                end
-                yOff = yOff - 16
-            end
-        else
+        -- No members? Emit a placeholder row and move on.
+        if #memberNames == 0 then
             local noM = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
             noM:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 16, yOff)
             noM:SetText("(no members)")
             yOff = yOff - 16
+            yOff = yOff - 6
+            goto continue
         end
-        yOff = yOff - 6
+
+        -- Build a name → playerId lookup from team.playerMembers so we
+        -- can decorate each row with its alt strip. Linked members
+        -- show alts; unlinked members render with just their main info.
+        -- This is the bug fix for "members not showing up in addon":
+        -- the old code took an elseif branch when playerMembers existed,
+        -- silently dropping anyone in team.members that wasn't linked.
+        local linkInfo = {}  -- [shortName] = { playerId, main }
+        for _, pm in ipairs(team.playerMembers or {}) do
+            local shortMain = (pm.main or ""):match("^([^%-]+)") or pm.main or ""
+            if shortMain ~= "" then
+                linkInfo[shortMain:lower()] = pm
+            end
+        end
+
+        for _, memberName in ipairs(memberNames) do
+            local short = memberName:match("^([^%-]+)") or memberName
+            local pm = linkInfo[short:lower()]
+
+            -- Row container
+            local row = CreateFrame("Frame", nil, tab.content)
+            row:SetSize(CONTENT_W, ROW_H)
+            row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+            -- Main card (left)
+            local mainCard = BuildCharacterCard(row, memberName, roster, true)
+            mainCard:SetSize(MAIN_BLOCK_W, ROW_H)
+            mainCard:SetPoint("LEFT", row, "LEFT", MAIN_LEFT_X, 0)
+
+            -- Alts strip (right). Only present for linked members.
+            local altList = pm and characters[pm.playerId] and characters[pm.playerId].alts or nil
+            if altList and #altList > 0 then
+                local x = ALT_STRIP_X
+                local visibleCount = math.min(#altList, MAX_ALTS_INLINE)
+                for i = 1, visibleCount do
+                    local altCard = BuildCharacterCard(row, altList[i], roster, false)
+                    altCard:SetSize(ALT_BLOCK_W, ROW_H)
+                    altCard:SetPoint("LEFT", row, "LEFT", x, 0)
+                    x = x + ALT_BLOCK_W
+                end
+                if #altList > MAX_ALTS_INLINE then
+                    local extraCount = #altList - MAX_ALTS_INLINE
+                    local more = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    more:SetPoint("LEFT", row, "LEFT", x, 0)
+                    more:SetText("|cff888888+" .. extraCount .. " more|r")
+                end
+
+                -- Tooltip with the full alt list — hover anywhere on the row
+                row:EnableMouse(true)
+                row._alts = altList
+                row._mainShort = short
+                row:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(self._mainShort .. "'s Characters")
+                    for _, alt in ipairs(self._alts) do
+                        local as = alt:match("^([^%-]+)") or alt
+                        local ag = roster[as]
+                        local cls = ResolveClass(alt, roster) or ""
+                        local col = WGS.CLASS_COLORS[(cls or ""):upper()]
+                            or WGS.CLASS_COLORS[cls] or "ffffffff"
+                        local statusText
+                        if ag then
+                            statusText = ag.online and "|cff00ff00online|r" or "|cff555555offline|r"
+                        else
+                            statusText = "|cff666666(not in guild)|r"
+                        end
+                        local pill = GearPillForCharacter(alt)
+                        GameTooltip:AddLine("|c" .. col .. as .. "|r  " .. statusText
+                            .. (pill and ("  " .. pill) or ""))
+                    end
+                    GameTooltip:Show()
+                end)
+                row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
+
+            yOff = yOff - ROW_H
+        end
+        yOff = yOff - 6  -- inter-team gap
+        ::continue::
     end
     tab.content:SetHeight(math.abs(yOff) + 10)
 end
@@ -309,25 +398,31 @@ local function BuildRosterCheckData()
     local expected = {}
     local expectedOrder = {}
 
-    if team.playerMembers then
-        local chars = WGS.db.global.characters or {}
-        for _, pm in ipairs(team.playerMembers) do
-            local info = chars[pm.playerId]
-            local main = pm.main or (info and info.main) or nil
-            if main then
-                expected[main] = { playerId = pm.playerId, isMain = true, mainName = main }
-                expectedOrder[#expectedOrder + 1] = main
-                if info and info.alts then
-                    for _, alt in ipairs(info.alts) do
-                        expected[alt] = { playerId = pm.playerId, isMain = false, mainName = main }
-                    end
-                end
+    -- Build a name → playerMember lookup so we can decorate linked
+    -- members with their alts, while still iterating team.members
+    -- (the canonical full list) — same bug pattern as PopulateTeams:
+    -- if a team mixes linked + unlinked members, an `elseif` branch
+    -- silently drops the unlinked ones.
+    local linkByMain = {}
+    for _, pm in ipairs(team.playerMembers or {}) do
+        if pm.main then linkByMain[pm.main] = pm end
+    end
+
+    local chars = WGS.db.global.characters or {}
+    for _, memberName in ipairs(team.members or {}) do
+        local pm = linkByMain[memberName]
+        local main = memberName
+        expected[main] = {
+            playerId = pm and pm.playerId or nil,
+            isMain = true,
+            mainName = main,
+        }
+        expectedOrder[#expectedOrder + 1] = main
+        -- Linked? Pull in alts too so "matched on alt: X" can fire.
+        if pm and chars[pm.playerId] and chars[pm.playerId].alts then
+            for _, alt in ipairs(chars[pm.playerId].alts) do
+                expected[alt] = { playerId = pm.playerId, isMain = false, mainName = main }
             end
-        end
-    elseif team.members then
-        for _, m in ipairs(team.members) do
-            expected[m] = { isMain = true, mainName = m }
-            expectedOrder[#expectedOrder + 1] = m
         end
     end
 
