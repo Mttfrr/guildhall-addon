@@ -119,7 +119,7 @@ local function PopulateReadiness(frame)
 end
 
 function WGS:ToggleReadinessFrame()
-    self:SelectMainFrameTab(3, 2)
+    self:SelectMainFrameTab(self._ui.TAB_RAIDS, self._ui.RAIDS_SUB_READINESS)
 end
 
 --- Populate readiness into any container with .content, .scrollFrame, .summary, .announceBtn.

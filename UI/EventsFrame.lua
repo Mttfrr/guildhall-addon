@@ -89,7 +89,7 @@ local function PopulateEvents(frame)
 end
 
 function WGS:ToggleEventsFrame()
-    self:SelectMainFrameTab(3, 3)
+    self:SelectMainFrameTab(self._ui.TAB_EVENTS)
 end
 
 --- Populate events into any container with .content and .scrollFrame fields.

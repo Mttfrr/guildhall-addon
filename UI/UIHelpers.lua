@@ -11,30 +11,35 @@ local ui = WGS._ui
 -- Tab + sub-view constants
 ---------------------------------------------------------------------------
 
-ui.TAB_DASHBOARD = 1
-ui.TAB_ROSTER    = 2
-ui.TAB_RAID      = 3
-ui.TAB_LOOT      = 4
-ui.TAB_SYNC      = 5
-ui.TAB_COUNT     = 5
-ui.TAB_NAMES     = { "Dashboard", "Roster", "Raid", "Loot", "Import/Export" }
+-- Tab order mirrors the platform layout: roster → bank → calendar →
+-- raid tooling → sync settings. Dashboard tab was removed (its
+-- summary tiles weren't pulling their weight) and Loot folded into
+-- Bank (loot history is capture-log data, same as transactions)
+-- and Teams (wishlists are per-player data).
+ui.TAB_TEAMS  = 1
+ui.TAB_BANK   = 2
+ui.TAB_EVENTS = 3
+ui.TAB_RAIDS  = 4
+ui.TAB_SYNC   = 5
+ui.TAB_COUNT  = 5
+ui.TAB_NAMES  = { "Teams", "Bank", "Events", "Raids", "Import/Export" }
 
-ui.RAID_SUB_COMP      = 1
-ui.RAID_SUB_READINESS = 2
-ui.RAID_SUB_EVENTS    = 3
-ui.RAID_SUB_BOSSNOTES = 4
-ui.RAID_SUB_COUNT     = 4
-ui.RAID_SUB_NAMES     = { "Raid Comp", "Readiness", "Events", "Boss Notes" }
+ui.TEAMS_SUB_TEAMS     = 1
+ui.TEAMS_SUB_CHECK     = 2
+ui.TEAMS_SUB_WISHLISTS = 3
+ui.TEAMS_SUB_COUNT     = 3
+ui.TEAMS_SUB_NAMES     = { "Teams", "Roster Check", "Wishlists" }
 
-ui.ROSTER_SUB_TEAMS = 1
-ui.ROSTER_SUB_CHECK = 2
-ui.ROSTER_SUB_COUNT = 2
-ui.ROSTER_SUB_NAMES = { "Teams", "Roster Check" }
+ui.BANK_SUB_LEDGER = 1
+ui.BANK_SUB_LOOT   = 2
+ui.BANK_SUB_COUNT  = 2
+ui.BANK_SUB_NAMES  = { "Ledger", "Loot History" }
 
-ui.LOOT_SUB_HISTORY   = 1
-ui.LOOT_SUB_WISHLISTS = 2
-ui.LOOT_SUB_COUNT     = 2
-ui.LOOT_SUB_NAMES     = { "History", "Wishlists" }
+ui.RAIDS_SUB_COMP      = 1
+ui.RAIDS_SUB_READINESS = 2
+ui.RAIDS_SUB_BOSSNOTES = 3
+ui.RAIDS_SUB_COUNT     = 3
+ui.RAIDS_SUB_NAMES     = { "Raid Comp", "Readiness", "Boss Notes" }
 
 ---------------------------------------------------------------------------
 -- Shared frame helpers

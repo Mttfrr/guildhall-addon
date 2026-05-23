@@ -1,10 +1,10 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
     <Script file="MinimapButton.lua"/>
     <Script file="UIHelpers.lua"/>
-    <Script file="Tabs\Dashboard.lua"/>
-    <Script file="Tabs\Roster.lua"/>
-    <Script file="Tabs\Raid.lua"/>
-    <Script file="Tabs\Loot.lua"/>
+    <Script file="Tabs\Teams.lua"/>
+    <Script file="Tabs\Bank.lua"/>
+    <Script file="Tabs\Events.lua"/>
+    <Script file="Tabs\Raids.lua"/>
     <Script file="Tabs\Sync.lua"/>
     <Script file="MainFrame.lua"/>
     <Script file="LootFrame.lua"/>

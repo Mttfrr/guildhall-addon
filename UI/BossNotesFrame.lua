@@ -2,7 +2,7 @@
 local WGS = GuildHall
 
 function WGS:ShowBossNotes(encounterName)
-    self:SelectMainFrameTab(3, 4)
+    self:SelectMainFrameTab(self._ui.TAB_RAIDS, self._ui.RAIDS_SUB_BOSSNOTES)
     if encounterName then
         C_Timer.After(0.05, function() self:SelectBossInTab(encounterName) end)
     end

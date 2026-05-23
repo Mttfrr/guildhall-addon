@@ -120,7 +120,7 @@ local function PopulateRaidComp(frame)
 end
 
 function WGS:ToggleRaidCompFrame()
-    self:SelectMainFrameTab(3, 1)
+    self:SelectMainFrameTab(self._ui.TAB_RAIDS, self._ui.RAIDS_SUB_COMP)
 end
 
 --- Populate raid comp into any container with .content and .scrollFrame fields.

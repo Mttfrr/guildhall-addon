@@ -88,12 +88,11 @@ function WGS:SlashCommand(input)
     local cmd = self:GetArgs(input, 1)
     cmd = (cmd or ""):lower()
 
+    local ui = self._ui
     if cmd == "show" or cmd == "" then
         self:ToggleMainFrame()
-    elseif cmd == "export" then
-        self:SelectMainFrameTab(5)
-    elseif cmd == "import" then
-        self:SelectMainFrameTab(5)
+    elseif cmd == "export" or cmd == "import" then
+        self:SelectMainFrameTab(ui.TAB_SYNC)
     elseif cmd == "attendance" then
         -- Capture is auto-started on raid entry now; /gh attendance is
         -- a status read-out only.
@@ -101,7 +100,7 @@ function WGS:SlashCommand(input)
     elseif cmd == "config" or cmd == "options" then
         self:OpenConfig()
     elseif cmd == "teams" then
-        self:SelectMainFrameTab(2, 1)
+        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_TEAMS)
     elseif cmd == "bossnotes" or cmd == "bn" then
         local _, bossName = self:GetArgs(input, 2)
         if bossName and bossName ~= "" then
@@ -110,19 +109,21 @@ function WGS:SlashCommand(input)
             self:Print("Usage: /gh bossnotes <boss name>")
         end
     elseif cmd == "events" then
-        self:SelectMainFrameTab(3, 3)
+        self:SelectMainFrameTab(ui.TAB_EVENTS)
     elseif cmd == "readiness" or cmd == "ready" then
-        self:SelectMainFrameTab(3, 2)
+        self:SelectMainFrameTab(ui.TAB_RAIDS, ui.RAIDS_SUB_READINESS)
     elseif cmd == "invite" or cmd == "autoinvite" then
         self:AutoInvite()
     elseif cmd == "sortgroups" or cmd == "sort" then
         self:SortRaidGroups()
     elseif cmd == "loot" then
-        self:SelectMainFrameTab(4, 1)
+        self:SelectMainFrameTab(ui.TAB_BANK, ui.BANK_SUB_LOOT)
     elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
-        self:SelectMainFrameTab(4, 2)
+        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_WISHLISTS)
     elseif cmd == "rostercheck" or cmd == "check" then
-        self:SelectMainFrameTab(2, 2)
+        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_CHECK)
+    elseif cmd == "bank" then
+        self:SelectMainFrameTab(ui.TAB_BANK, ui.BANK_SUB_LEDGER)
     elseif cmd == "restore" then
         self:RestoreClearedData()
     else

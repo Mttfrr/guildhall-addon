@@ -2,30 +2,82 @@
 local WGS = GuildHall
 local ui = WGS._ui
 
--- Roster tab: two sub-views.
---   Teams       — flat listing of imported teams with main/alt rollup
---                 and per-character online status from the guild roster.
---   Roster Check — for today's event, compares the team's expected
---                 roster against who's actually in the raid (or last
---                 session), surfacing Present/Missing/Extra plus an
---                 "Announce" + "Invite" action row.
+-- Teams tab (was "Roster"): three sub-views, all per-player data.
+--   Teams         — flat listing of imported teams with main/alt rollup
+--                   PLUS a gear-issues column sourced from gearAudit
+--                   (missing enchants/gems, ilvl-vs-target).
+--   Roster Check  — for today's event, compares the team's expected
+--                   roster against who's actually in the raid (or last
+--                   session), surfacing Present/Missing/Extra plus an
+--                   "Announce" + "Invite" action row.
+--   Wishlists     — boss-filtered view of which characters wishlisted
+--                   which items, sorted by wisher count. Moved here
+--                   from the old standalone Loot tab — wishlists are
+--                   per-player data, fits with the roster.
 
-local TAB_INDEX            = ui.TAB_ROSTER
-local ROSTER_SUB_TEAMS     = ui.ROSTER_SUB_TEAMS
-local ROSTER_SUB_CHECK     = ui.ROSTER_SUB_CHECK
-local ROSTER_SUB_COUNT     = ui.ROSTER_SUB_COUNT
-local ROSTER_SUB_NAMES     = ui.ROSTER_SUB_NAMES
+local TAB_INDEX            = ui.TAB_TEAMS
+local TEAMS_SUB_TEAMS      = ui.TEAMS_SUB_TEAMS
+local TEAMS_SUB_CHECK      = ui.TEAMS_SUB_CHECK
+local TEAMS_SUB_WISHLISTS  = ui.TEAMS_SUB_WISHLISTS
+local TEAMS_SUB_COUNT      = ui.TEAMS_SUB_COUNT
+local TEAMS_SUB_NAMES      = ui.TEAMS_SUB_NAMES
 local ClearContainer       = ui.ClearContainer
 local CreateScrollContent  = ui.CreateScrollContent
 local SelectSubView        = ui.SelectSubView
 local BuildSubNav          = ui.BuildSubNav
 
 -- Forward declarations: BuildRosterCheckSubView + PopulateRosterCheck
--- are referenced by BuildRosterTab before they're defined further down
--- in this file. Without the local-first declaration, the closures
--- would capture nil globals.
+-- are referenced by BuildTeamsTab's sub-nav callback before they're
+-- defined further down. Without the local-first declaration, those
+-- closures would capture nil globals.
 local BuildRosterCheckSubView
 local PopulateRosterCheck
+local BuildWishlistsSubView
+local PopulateWishlists
+
+---------------------------------------------------------------------------
+-- Gear-issue lookup (for the Teams sub-view per-member row)
+---------------------------------------------------------------------------
+
+-- Returns a compact gear-issue label for a character, or nil if the
+-- gearAudit data has nothing for them. Format:
+--   "|cff00ff00clean|r"                       — no issues, green
+--   "|cffff8800 2E 1G  i612/620|r"           — yellow: some issues
+--   "|cffff4444 4E 3G|r"                      — red: many issues
+-- Caller decorates with class color on the name; this is a side-pill.
+local function GearIssueLabel(shortName)
+    local audit = WGS.db.global.gearAudit
+    if not audit or #audit == 0 then return nil end
+
+    local lowerShort = shortName:lower()
+    local match = nil
+    for _, entry in ipairs(audit) do
+        local n = entry.characterName or entry.playerName or ""
+        if n:lower():match("^([^%-]+)") == lowerShort then
+            match = entry
+            break
+        end
+    end
+    if not match then return nil end
+
+    local me = match.missingEnchants or 0
+    local mg = match.missingGems or 0
+    local ilvl = match.ilvl or 0
+    local target = WGS.db.global.targetIlvl or 0
+    local belowTarget = target > 0 and ilvl > 0 and ilvl < target
+
+    if me == 0 and mg == 0 and not belowTarget then
+        return "|cff00ff00clean|r"
+    end
+
+    local parts = {}
+    if me > 0 then parts[#parts + 1] = me .. "E" end
+    if mg > 0 then parts[#parts + 1] = mg .. "G" end
+    if belowTarget then parts[#parts + 1] = string.format("i%d/%d", ilvl, target) end
+    local total = me + mg + (belowTarget and 1 or 0)
+    local color = total >= 4 and "ffff4444" or "ffff8800"
+    return "|c" .. color .. table.concat(parts, " ") .. "|r"
+end
 
 ---------------------------------------------------------------------------
 -- Teams sub-view
@@ -48,7 +100,7 @@ local function PopulateTeams(tab)
     if not teams or #teams == 0 then
         local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noData:SetText("No teams imported yet. Use the Sync tab to import data.")
+        noData:SetText("No teams imported yet. Use the Import/Export tab to import data.")
         tab.content:SetHeight(30)
         return
     end
@@ -101,11 +153,23 @@ local function PopulateTeams(tab)
                 end
 
                 local nAlts = pi and pi.alts and #pi.alts or 0
+                local altsText
                 if nAlts > 0 then
-                    local ab = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    ab:SetPoint("LEFT", nt, "RIGHT", 6, 0)
-                    ab:SetText("|cff888888+" .. nAlts .. " alt" .. (nAlts > 1 and "s" or "") .. "|r")
+                    altsText = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    altsText:SetPoint("LEFT", nt, "RIGHT", 6, 0)
+                    altsText:SetText("|cff888888+" .. nAlts .. " alt" .. (nAlts > 1 and "s" or "") .. "|r")
                 end
+
+                -- Gear-issues badge: sits left of the level/rank tag.
+                -- Compact "2E 1G i612/620" with severity coloring; absent
+                -- entirely if we have no gearAudit data for this player.
+                local gearLabel = GearIssueLabel(short)
+                if gearLabel then
+                    local gt = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    gt:SetPoint("RIGHT", mr, "RIGHT", -110, 0)
+                    gt:SetText(gearLabel)
+                end
+
                 if gi then
                     local it = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
                     it:SetPoint("RIGHT", mr, "RIGHT", -4, 0)
@@ -154,9 +218,17 @@ local function PopulateTeams(tab)
                 else
                     nt:SetText("|cff666666" .. short .. "|r")
                 end
+
+                local gearLabel = GearIssueLabel(short or mn)
+                if gearLabel then
+                    local gt = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                    gt:SetPoint("RIGHT", mr, "RIGHT", -110, 0)
+                    gt:SetText(gearLabel)
+                end
+
                 if gi then
                     local it = mr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-                    it:SetPoint("LEFT", nt, "RIGHT", 6, 0)
+                    it:SetPoint("RIGHT", mr, "RIGHT", -4, 0)
                     it:SetText("|cff555555Lv" .. gi.level .. " " .. gi.rank .. "|r")
                 end
                 yOff = yOff - 16
@@ -234,9 +306,8 @@ local function BuildRosterCheckData()
         return nil, "Today's event has no linked team."
     end
 
-    -- Expected: set of character names (main + alts for each player)
-    local expected = {}       -- [charName-realm] = { playerId, isMain, mainName }
-    local expectedOrder = {}  -- ordered list of main names
+    local expected = {}
+    local expectedOrder = {}
 
     if team.playerMembers then
         local chars = WGS.db.global.characters or {}
@@ -260,8 +331,7 @@ local function BuildRosterCheckData()
         end
     end
 
-    -- Actual: characters in current raid (or last session)
-    local actual = {}  -- [charName-realm] = true
+    local actual = {}
     local actualSource = nil
     if WGS:IsInAnyGroup() then
         local members = WGS:GetRaidMembers()
@@ -314,20 +384,17 @@ function PopulateRosterCheck(tab)
     local yOff = 0
     local cw = 660
 
-    -- Classify each expected player: present (any of their chars in actual) or missing
     local present = {}
     local missing = {}
-    local presentChars = {}  -- track which actual characters matched (for extra detection)
+    local presentChars = {}
 
     for _, main in ipairs(data.expectedOrder) do
         local playerId = data.expected[main].playerId
         local matched = nil
-        -- Check main first
         if data.actual[main] then
             matched = main
             presentChars[main] = true
         else
-            -- Check alts by playerId (reverse-resolve through expected map)
             for altName, info in pairs(data.expected) do
                 if info.playerId == playerId and not info.isMain and data.actual[altName] then
                     matched = altName
@@ -343,11 +410,9 @@ function PopulateRosterCheck(tab)
         end
     end
 
-    -- Extra: actual raid members not in expected (pugs, alts of team members annotated)
     local extra = {}
     for actualName in pairs(data.actual) do
         if not presentChars[actualName] and not data.expected[actualName] then
-            -- Maybe an alt of someone on the team (resolve via character map)
             local pid = WGS:ResolvePlayerForCharacter(actualName)
             local altOfMain = nil
             if pid then
@@ -432,7 +497,6 @@ function PopulateRosterCheck(tab)
 
     tab.content:SetHeight(math.abs(yOff) + 10)
 
-    -- Show/hide action buttons based on whether there's anything missing
     if #missing > 0 then
         tab.inviteBtn:Show()
         if WGS:IsInAnyGroup() then
@@ -444,7 +508,6 @@ function PopulateRosterCheck(tab)
                 for _, m in ipairs(missing) do
                     names[#names + 1] = m:match("^([^%-]+)") or m
                 end
-                -- Batch names into chunks to avoid message length limit
                 local chunk = ""
                 for _, n in ipairs(names) do
                     if #chunk + #n + 2 > 200 then
@@ -468,37 +531,266 @@ function PopulateRosterCheck(tab)
 end
 
 ---------------------------------------------------------------------------
+-- Wishlists sub-view (moved here from the deleted Loot tab — per-player
+-- data fits with the rest of Teams).
+---------------------------------------------------------------------------
+
+local PRIORITY_ORDER = { BiS = 1, High = 2, Medium = 3, Low = 4 }
+local PRIORITY_COLORS = {
+    BiS    = "ffff8000",
+    High   = "ffa335ee",
+    Medium = "ff0070dd",
+    Low    = "ff1eff00",
+}
+
+function BuildWishlistsSubView(sv)
+    local lbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
+    lbl:SetText("Boss:")
+
+    sv.dropBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.dropBtn:SetSize(280, 22)
+    sv.dropBtn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
+    sv.dropBtn:SetText("(All items)")
+    sv.selectedBoss = nil
+
+    sv.dropMenu = CreateFrame("Frame", nil, sv, "BackdropTemplate")
+    sv.dropMenu:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    sv.dropMenu:SetBackdropColor(0, 0, 0, 0.95)
+    sv.dropMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+    sv.dropMenu:Hide()
+    sv.dropMenuButtons = {}
+
+    sv.dropBtn:SetScript("OnClick", function()
+        if sv.dropMenu:IsShown() then sv.dropMenu:Hide(); return end
+        for _, btn in ipairs(sv.dropMenuButtons) do btn:Hide() end
+
+        local bossSet = {}
+        for _, entry in ipairs(WGS.db.global.loot or {}) do
+            if entry.boss and entry.boss ~= "" then bossSet[entry.boss] = true end
+        end
+        local bosses = { "(All items)" }
+        for name in pairs(bossSet) do bosses[#bosses + 1] = name end
+        table.sort(bosses, function(a, b)
+            if a == "(All items)" then return true end
+            if b == "(All items)" then return false end
+            return a < b
+        end)
+
+        local bh = 22
+        sv.dropMenu:SetSize(280, #bosses * bh + 8)
+        sv.dropMenu:ClearAllPoints()
+        sv.dropMenu:SetPoint("TOPLEFT", sv.dropBtn, "BOTTOMLEFT", 0, -2)
+
+        for i, name in ipairs(bosses) do
+            local btn = sv.dropMenuButtons[i]
+            if not btn then
+                btn = CreateFrame("Button", nil, sv.dropMenu)
+                btn:SetSize(272, bh)
+                btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                btn.text:SetAllPoints()
+                btn.text:SetJustifyH("LEFT")
+                sv.dropMenuButtons[i] = btn
+            end
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", sv.dropMenu, "TOPLEFT", 4, -(i - 1) * bh - 4)
+            btn.text:SetText("  " .. name)
+            btn:SetScript("OnClick", function()
+                sv.selectedBoss = (name == "(All items)") and nil or name
+                sv.dropBtn:SetText(name)
+                sv.dropMenu:Hide()
+                if sv._refreshFn then sv._refreshFn() end
+            end)
+            btn:Show()
+        end
+        sv.dropMenu:Show()
+    end)
+
+    local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
+    sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetWidth(660)
+    content:SetHeight(1)
+    sf:SetScrollChild(content)
+
+    sv.scrollFrame = sf
+    sv.content = content
+end
+
+function PopulateWishlists(tab)
+    if not tab or not tab:IsVisible() then return end
+    ClearContainer(tab.content)
+
+    local wishlists = WGS.db.global.wishlists or {}
+    if #wishlists == 0 then
+        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+        noData:SetText("No wishlists imported. Import from web app first.")
+        tab.content:SetHeight(30)
+        return
+    end
+
+    local itemWishers = {}
+    local itemNames = {}
+    for _, entry in ipairs(wishlists) do
+        if entry.items then
+            for _, item in ipairs(entry.items) do
+                if item.itemID then
+                    itemWishers[item.itemID] = itemWishers[item.itemID] or {}
+                    table.insert(itemWishers[item.itemID], {
+                        playerName = entry.playerName,
+                        priority = item.priority,
+                        note = item.note,
+                    })
+                end
+            end
+        end
+    end
+
+    for _, lootEntry in ipairs(WGS.db.global.loot or {}) do
+        if lootEntry.itemID and lootEntry.itemName and not itemNames[lootEntry.itemID] then
+            itemNames[lootEntry.itemID] = lootEntry.itemName
+        end
+    end
+    for itemID in pairs(itemWishers) do
+        if not itemNames[itemID] then
+            local name = C_Item.GetItemInfo(itemID)
+            if name then itemNames[itemID] = name end
+        end
+    end
+
+    local allowedIds = nil
+    if tab.selectedBoss then
+        allowedIds = {}
+        for _, lootEntry in ipairs(WGS.db.global.loot or {}) do
+            if lootEntry.boss == tab.selectedBoss and lootEntry.itemID then
+                allowedIds[lootEntry.itemID] = true
+            end
+        end
+    end
+
+    local itemsToShow = {}
+    for itemID, wishers in pairs(itemWishers) do
+        if not allowedIds or allowedIds[itemID] then
+            itemsToShow[#itemsToShow + 1] = { itemID = itemID, wishers = wishers }
+        end
+    end
+    table.sort(itemsToShow, function(a, b)
+        if #a.wishers ~= #b.wishers then return #a.wishers > #b.wishers end
+        return a.itemID < b.itemID
+    end)
+
+    if #itemsToShow == 0 then
+        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+        if tab.selectedBoss then
+            noData:SetText("No wishlisted items from " .. tab.selectedBoss .. " in loot history yet.")
+        else
+            noData:SetText("No wishlisted items found.")
+        end
+        tab.content:SetHeight(30)
+        return
+    end
+
+    local roster = WGS:GetGuildRosterLookup()
+    local yOff = 0
+
+    for _, item in ipairs(itemsToShow) do
+        local header = CreateFrame("Frame", nil, tab.content)
+        header:SetSize(660, 20)
+        header:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+        local headerText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        headerText:SetPoint("LEFT", header, "LEFT", 5, 0)
+        local name = itemNames[item.itemID] or ("Item " .. item.itemID)
+        headerText:SetText(string.format("|cffa335ee%s|r  |cff888888(%d wisher%s)|r",
+            name, #item.wishers, #item.wishers == 1 and "" or "s"))
+        yOff = yOff - 20
+
+        table.sort(item.wishers, function(a, b)
+            return (PRIORITY_ORDER[a.priority] or 99) < (PRIORITY_ORDER[b.priority] or 99)
+        end)
+
+        for _, w in ipairs(item.wishers) do
+            local row = CreateFrame("Frame", nil, tab.content)
+            row:SetSize(660, 16)
+            row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, yOff)
+
+            local short = (w.playerName or ""):match("^([^%-]+)") or w.playerName or "?"
+            local gi = roster[short]
+            local pColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
+            local pText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            pText:SetPoint("LEFT", row, "LEFT", 25, 0)
+            pText:SetText("|c" .. pColor .. short .. "|r")
+
+            local prColor = PRIORITY_COLORS[w.priority] or "ffffffff"
+            local prText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            prText:SetPoint("LEFT", pText, "RIGHT", 10, 0)
+            prText:SetText("|c" .. prColor .. (w.priority or "?") .. "|r")
+
+            if w.note and w.note ~= "" then
+                local nText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                nText:SetPoint("LEFT", prText, "RIGHT", 8, 0)
+                nText:SetText("|cff888888(" .. w.note .. ")|r")
+            end
+
+            yOff = yOff - 16
+        end
+
+        yOff = yOff - 4
+    end
+
+    tab.content:SetHeight(math.abs(yOff) + 10)
+end
+
+---------------------------------------------------------------------------
 -- Tab wiring
 ---------------------------------------------------------------------------
 
-local function BuildRosterTab(parent)
-    BuildSubNav(parent, ROSTER_SUB_NAMES, function(p, i)
-        SelectSubView(p, i, ROSTER_SUB_COUNT)
-        if i == ROSTER_SUB_TEAMS then
+local function BuildTeamsTab(parent)
+    BuildSubNav(parent, TEAMS_SUB_NAMES, function(p, i)
+        SelectSubView(p, i, TEAMS_SUB_COUNT)
+        if i == TEAMS_SUB_TEAMS then
             PopulateTeams(p.subViews[i])
-        elseif i == ROSTER_SUB_CHECK then
+        elseif i == TEAMS_SUB_CHECK then
             PopulateRosterCheck(p.subViews[i])
+        elseif i == TEAMS_SUB_WISHLISTS then
+            PopulateWishlists(p.subViews[i])
         end
     end)
-    BuildTeamsSubView(parent.subViews[ROSTER_SUB_TEAMS])
-    BuildRosterCheckSubView(parent.subViews[ROSTER_SUB_CHECK])
-    -- Back-pointer used by the Refresh button inside BuildRosterCheckSubView.
-    -- Used to live in MainFrame's CreateMainFrame; moved here so the tab
-    -- owns its own wiring.
-    parent.subViews[ROSTER_SUB_CHECK]._refreshFn = function()
-        PopulateRosterCheck(parent.subViews[ROSTER_SUB_CHECK])
+    BuildTeamsSubView(parent.subViews[TEAMS_SUB_TEAMS])
+    BuildRosterCheckSubView(parent.subViews[TEAMS_SUB_CHECK])
+    BuildWishlistsSubView(parent.subViews[TEAMS_SUB_WISHLISTS])
+
+    -- Back-pointer used by the Refresh button inside RosterCheck and
+    -- the boss-dropdown inside Wishlists. Sub-view-owned re-renders.
+    parent.subViews[TEAMS_SUB_CHECK]._refreshFn = function()
+        PopulateRosterCheck(parent.subViews[TEAMS_SUB_CHECK])
     end
-    SelectSubView(parent, ROSTER_SUB_TEAMS, ROSTER_SUB_COUNT)
+    parent.subViews[TEAMS_SUB_WISHLISTS]._refreshFn = function()
+        PopulateWishlists(parent.subViews[TEAMS_SUB_WISHLISTS])
+    end
+
+    SelectSubView(parent, TEAMS_SUB_TEAMS, TEAMS_SUB_COUNT)
 end
 
-local function RefreshRosterSubView(tab)
+local function RefreshTeamsSubView(tab)
     if not tab or not tab:IsVisible() then return end
-    local sub = tab.selectedSub or ROSTER_SUB_TEAMS
-    if sub == ROSTER_SUB_TEAMS then
+    local sub = tab.selectedSub or TEAMS_SUB_TEAMS
+    if sub == TEAMS_SUB_TEAMS then
         PopulateTeams(tab.subViews[sub])
-    elseif sub == ROSTER_SUB_CHECK then
+    elseif sub == TEAMS_SUB_CHECK then
         PopulateRosterCheck(tab.subViews[sub])
+    elseif sub == TEAMS_SUB_WISHLISTS then
+        PopulateWishlists(tab.subViews[sub])
     end
 end
 
-ui.tabs[TAB_INDEX] = { build = BuildRosterTab, refresh = RefreshRosterSubView }
+ui.tabs[TAB_INDEX] = { build = BuildTeamsTab, refresh = RefreshTeamsSubView }

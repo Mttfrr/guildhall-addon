@@ -2,22 +2,21 @@
 local WGS = GuildHall
 
 -- Tab/sub-view constants and shared frame helpers live in UI/UIHelpers.lua
--- under the private WGS._ui namespace. Aliased here so the per-tab
--- builder code reads the same as before the extraction.
+-- under the private WGS._ui namespace. Per-tab Build/Refresh functions
+-- register themselves into ui.tabs at file scope (UI/Tabs/*.lua);
+-- this shell just walks the registry to build + dispatch.
 local ui = WGS._ui
 
-local TAB_DASHBOARD = ui.TAB_DASHBOARD
-local TAB_ROSTER    = ui.TAB_ROSTER
-local TAB_RAID      = ui.TAB_RAID
-local TAB_LOOT      = ui.TAB_LOOT
-local TAB_SYNC      = ui.TAB_SYNC
-local TAB_COUNT     = ui.TAB_COUNT
-local TAB_NAMES     = ui.TAB_NAMES
+-- Tab indices used by the shell. Other tab IDs come through
+-- ui.TAB_* directly at their lone call sites in SelectMainFrameTab.
+local TAB_TEAMS  = ui.TAB_TEAMS
+local TAB_BANK   = ui.TAB_BANK
+local TAB_RAIDS  = ui.TAB_RAIDS
+local TAB_SYNC   = ui.TAB_SYNC
+local TAB_COUNT  = ui.TAB_COUNT
+local TAB_NAMES  = ui.TAB_NAMES
 
--- RAID_SUB_*, ROSTER_SUB_*, and LOOT_SUB_* constants moved to their
--- respective UI/Tabs/*.lua files along with the tabs themselves.
-
-local SelectSubView      = ui.SelectSubView
+local SelectSubView = ui.SelectSubView
 
 local mainFrame = nil
 
@@ -33,16 +32,12 @@ local function SelectTab(frame, tabIndex)
 end
 
 local function RefreshCurrentTab(frame)
-    local tab = frame.selectedTab or TAB_DASHBOARD
-    -- Dispatch to the registered refresher. Tabs without a refresh
-    -- function (e.g. Sync) are no-ops here — their content updates on
-    -- explicit events instead.
+    local tab = frame.selectedTab or TAB_TEAMS
     local entry = ui.tabs[tab]
     if entry and entry.refresh then
         entry.refresh(frame.tabContents[tab])
     end
 
-    -- Status bar
     if frame.statusText then
         if WGS:IsTrackingAttendance() then
             frame.statusText:SetText("|cff00ff00Attendance tracking active|r")
@@ -109,10 +104,9 @@ local function CreateMainFrame()
 
     PanelTemplates_SetNumTabs(f, TAB_COUNT)
 
-    -- Build tab content. Each tab file in UI/Tabs/*.lua registers
-    -- itself into ui.tabs at file scope; the shell here just walks
-    -- that registry. New tab = new file + new entry in UI.xml + a
-    -- bump to ui.TAB_COUNT — no edits to this loop.
+    -- Build tab content. Each UI/Tabs/*.lua registers into ui.tabs at
+    -- file scope; the shell here just walks the registry. Adding a new
+    -- tab = new file + new entry in UI.xml + bump ui.TAB_COUNT.
     for i = 1, TAB_COUNT do
         local entry = ui.tabs[i]
         if entry and entry.build then
@@ -120,24 +114,21 @@ local function CreateMainFrame()
         end
     end
 
-    -- Show first tab
-    SelectTab(f, TAB_DASHBOARD)
-    f.tabContents[TAB_DASHBOARD]:Show()
+    -- Show the Teams tab by default — it's the first thing officers /
+    -- raiders care about (who's online, what's the comp).
+    SelectTab(f, TAB_TEAMS)
+    f.tabContents[TAB_TEAMS]:Show()
 
-    -- Refresh on show + periodic ticker while visible
     f:SetScript("OnShow", function(self)
         RefreshCurrentTab(self)
     end)
+
+    -- 2s status-bar ticker. Used to also re-render the Dashboard tab
+    -- here (when one existed); now it only refreshes the status text.
     f:SetScript("OnUpdate", function(self, elapsed)
         self._tick = (self._tick or 0) + elapsed
         if self._tick < 2 then return end
         self._tick = 0
-        if self:IsShown() and self.selectedTab == TAB_DASHBOARD then
-            local entry = ui.tabs[TAB_DASHBOARD]
-            if entry and entry.refresh then
-                entry.refresh(self.tabContents[TAB_DASHBOARD])
-            end
-        end
         if self.statusText then
             if WGS:IsTrackingAttendance() then
                 self.statusText:SetText("|cff00ff00Attendance tracking active|r")
@@ -165,12 +156,12 @@ function WGS:SelectMainFrameTab(tabIndex, subIndex)
     if not mainFrame:IsShown() then mainFrame:Show() end
     SelectTab(mainFrame, tabIndex)
     if subIndex then
-        if tabIndex == TAB_RAID then
-            SelectSubView(mainFrame.tabContents[TAB_RAID], subIndex, ui.RAID_SUB_COUNT)
-        elseif tabIndex == TAB_ROSTER then
-            SelectSubView(mainFrame.tabContents[TAB_ROSTER], subIndex, ui.ROSTER_SUB_COUNT)
-        elseif tabIndex == TAB_LOOT then
-            SelectSubView(mainFrame.tabContents[TAB_LOOT], subIndex, ui.LOOT_SUB_COUNT)
+        if tabIndex == TAB_RAIDS then
+            SelectSubView(mainFrame.tabContents[TAB_RAIDS], subIndex, ui.RAIDS_SUB_COUNT)
+        elseif tabIndex == TAB_TEAMS then
+            SelectSubView(mainFrame.tabContents[TAB_TEAMS], subIndex, ui.TEAMS_SUB_COUNT)
+        elseif tabIndex == TAB_BANK then
+            SelectSubView(mainFrame.tabContents[TAB_BANK], subIndex, ui.BANK_SUB_COUNT)
         end
     end
     RefreshCurrentTab(mainFrame)
@@ -178,9 +169,9 @@ end
 
 function WGS:SelectBossInTab(encounterName)
     if not mainFrame then return end
-    local raidTab = mainFrame.tabContents[TAB_RAID]
-    if not raidTab then return end
-    local sv = raidTab.subViews[ui.RAID_SUB_BOSSNOTES]
+    local raidsTab = mainFrame.tabContents[TAB_RAIDS]
+    if not raidsTab then return end
+    local sv = raidsTab.subViews[ui.RAIDS_SUB_BOSSNOTES]
     if not sv then return end
     sv.selectedBoss = encounterName
     sv.dropBtn:SetText(encounterName)
