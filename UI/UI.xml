@@ -4,6 +4,7 @@
     <Script file="Tabs\Dashboard.lua"/>
     <Script file="Tabs\Roster.lua"/>
     <Script file="Tabs\Raid.lua"/>
+    <Script file="Tabs\Loot.lua"/>
     <Script file="MainFrame.lua"/>
     <Script file="LootFrame.lua"/>
     <Script file="AttendanceFrame.lua"/>
