@@ -4,6 +4,9 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Changed
+- **Events rail respects the global team picker.** When the picker is set to a specific team, the rail (and the detail panel it drives) hides events from other teams. "All Teams" shows everything as before. If the currently-selected event is filtered out (e.g. switching from All Teams to a single team), the selection falls back to the first event in the filtered list.
+
 ### Added
 - **Global current-team picker.** A dropdown in the main frame's title bar (left of the close X) lets you scope the addon to one team — Events rail, Teams tab, and the team-aware Logs sub-views all read it. Default state is "All Teams" (no filter); per-character profile so different officers keep their own default view across `/reload`. New `WGS:GetCurrentTeamId()` + `WGS:SetCurrentTeamId(teamId)` public API on the addon namespace; Set fires a new `WGS_CURRENT_TEAM_CHANGED { teamId }` event (documented in `docs/EVENTS.md`) so UI surfaces re-render. New `/gh team <name>` slash command (case-insensitive substring match against team names) sets the picker; `/gh team all` clears it; `/gh team` with no argument prints the current state. Get coerces orphan ids (set to a team that's since been removed from `db.global.teams` via re-import) back to nil so the filter doesn't silently hide every row. This commit ships the API + the widget; tab readers wire up in the follow-ups. 6 new specs; 195 specs green, luacheck clean.
 

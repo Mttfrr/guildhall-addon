@@ -675,6 +675,20 @@ local function PopulateEvents(frame)
 
     local events = WGS.db.global.events or {}
 
+    -- Apply the global current-team filter (if set). nil = "All Teams".
+    -- We filter the source list before decoration so the counts/sort
+    -- arrays don't carry rows we won't render anyway.
+    local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
+    if currentTeamId then
+        local filtered = {}
+        for _, ev in ipairs(events) do
+            if ev.team_id == currentTeamId then
+                filtered[#filtered + 1] = ev
+            end
+        end
+        events = filtered
+    end
+
     -- Decorate each event with derived fields so the rail + detail
     -- don't have to compute them twice.
     local counts = BuildSignupCounts()
