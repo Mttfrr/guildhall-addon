@@ -121,6 +121,13 @@ function WGS:ProcessImport(data)
         count = count + #data.gearAudit
     end
 
+    -- Import event signups — used by /gh invite as the primary invite
+    -- source (filtered to committed statuses by GetEventSignups).
+    if data.signups then
+        self.db.global.signups = data.signups
+        count = count + #data.signups
+    end
+
     -- Import target ilvl
     if data.targetIlvl then
         self.db.global.targetIlvl = data.targetIlvl

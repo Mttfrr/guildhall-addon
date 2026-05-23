@@ -5,6 +5,8 @@ All notable changes to GuildHall will be documented in this file.
 ## [0.7.0-beta] — Unreleased
 
 ### Added
+- **/gh invite uses event signups** — `WGS:GetEventInviteList` now picks the invite source in this order: (1) event signups from the web (committed statuses only — P/L/B/LT), (2) raid comp assignments, (3) team roster. Before, signups were ignored and the addon always went straight to comp/roster, which meant officers who used the web sign-up flow were inviting everyone on the team instead of just the people who said they were coming. The web now ships `data.signups` in the export response.
+- **Instant invites** — the 3-second-per-invite stagger in `WGS:AutoInvite` is removed. A 25-person raid used to take 75 seconds to fully invite; now it fires in one tick. The post-invite sort-groups still waits 5s for accepts to land.
 - **Export envelope v3 with checksum** — addon now emits `WGS3<8-hex-djb2>:<base64>` and the web emits the same format. The decoder validates the djb2 checksum on the base64 string and rejects truncated paste with a clear error ("Export string appears truncated — please re-copy the full string."). The legacy `WGS<base64>` (v2) envelope is still accepted on import for backwards compatibility.
 - **Outdated-addon banner** — Dashboard tab now shows a banner when the running addon is older than the server's `MIN_ADDON_VERSION` (read from the web's export response on import). No more raw error strings on next sync.
 - **Auto-populated export on Sync tab open** — the post-raid reminder's "Export Now" button now lands on the Sync tab with the export string already generated, selected and ready for Ctrl+C.

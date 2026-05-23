@@ -60,6 +60,17 @@ function M.setup()
     -- that log status messages don't blow up during tests.
     function GuildHall:Print(_) end
 
+    -- Ace3's AceAddon module system: in WoW, `WGS:NewModule(name, mixins...)`
+    -- returns a sub-addon table. Tests don't care about that machinery
+    -- beyond "doesn't NPE when modules register their handlers", so a
+    -- stub that returns a plain table with no-op event registration
+    -- is enough.
+    function GuildHall:NewModule(_, ...)
+        return setmetatable({}, {
+            __index = function() return function() end end,
+        })
+    end
+
     -- AceDB normally builds this; we provide a hand-rolled equivalent so
     -- methods that touch self.db.* don't NPE.
     GuildHall.db = {
@@ -69,7 +80,7 @@ function M.setup()
             guildBankMoneyChanges = {}, guildBankTransactions = {},
             characters = {}, characterLookup = {}, teams = {},
             wishlists = {}, bossNotes = {}, raidComps = {}, events = {},
-            gearAudit = {}, targetIlvl = 0, webMOTD = "",
+            gearAudit = {}, signups = {}, targetIlvl = 0, webMOTD = "",
             lastExport = 0, lastImport = 0, lastKnownGold = 0,
             exportHistory = {},
             lastClearSnapshot = { t = 0 },
@@ -77,6 +88,12 @@ function M.setup()
         },
     }
     GuildHall.version = "test"
+
+    -- EventScheduler + Import register `WGS:GetEventInviteList`,
+    -- `WGS:GetEventSignups`, `WGS:ProcessImport`, `WGS:GetRaidComp` etc.
+    -- Load after the stubs above so `WGS:NewModule(...)` succeeds.
+    dofile("Modules/Import.lua")
+    dofile("Modules/EventScheduler.lua")
 
     return GuildHall
 end

@@ -37,6 +37,7 @@ local dbDefaults = {
         characters = {},        -- { [playerId] = { displayName, main, alts } }
         characterLookup = {},   -- reverse: { [charName-realm] = playerId }
         gearAudit = {},
+        signups = {},           -- imported event signups: [{eventId, characterName, class, status}]
         targetIlvl = 0,
         webMOTD = "",
         lastExport = 0,

@@ -4,7 +4,18 @@ local WGS = GuildHall
 ---@class WGSEventSchedulerModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("EventScheduler", "AceEvent-3.0")
 
-local INVITE_COOLDOWN = 3
+-- Statuses we treat as "this player committed to attending". Matches the
+-- server's COMMITTED_SIGNUPS set (server/routes/addonSync.js):
+--   P = Present, L = Late, B = Bench, LT = Late-tentative.
+-- Tentative (T) is intentionally excluded — they said "maybe", don't
+-- pull them into the raid by default.
+local COMMITTED_SIGNUP_STATUSES = { P = true, L = true, B = true, LT = true }
+
+-- How long to wait after firing invites before auto-sorting raid groups.
+-- Gives people a moment to accept; sorting only acts on members already
+-- in the raid so calling it too early is a no-op.
+local SORT_AFTER_INVITE_DELAY = 5
+
 local invitedThisSession = {}
 
 function module:OnEnable()
@@ -56,16 +67,46 @@ function WGS:FindTodayEventForTeam(teamId)
     return best
 end
 
---- Get the invite list for an event. Prefers raid comp assignments,
---- falls back to team roster.
+--- Return the character names that committed to attending an event.
+--- Status filter matches COMMITTED_SIGNUP_STATUSES (P/L/B/LT).
+function WGS:GetEventSignups(eventId)
+    local names = {}
+    if not eventId then return names end
+    local signups = self.db.global.signups
+    if not signups then return names end
+    for _, s in ipairs(signups) do
+        if s.eventId == eventId
+           and s.characterName
+           and COMMITTED_SIGNUP_STATUSES[s.status]
+        then
+            names[#names + 1] = s.characterName
+        end
+    end
+    return names
+end
+
+--- Get the invite list for an event. Source preference:
+---   1. Event signups (web platform's source of truth — who said "I'm in")
+---   2. Raid comp assignments (planned roster for this event)
+---   3. Team roster (everyone on the team — broadest net)
 function WGS:GetEventInviteList(event)
     local eventId = event.id or event.eventId
-    local names = {}
 
-    -- Try raid comp first (exact assignments for this event)
+    -- 1. Event signups — primary source. If the web has signups for this
+    -- event, that's what officers actually committed to. Comp slots may
+    -- be stale or speculative; team roster pulls in benched players.
+    if eventId then
+        local signupNames = self:GetEventSignups(eventId)
+        if #signupNames > 0 then
+            return signupNames, "signups"
+        end
+    end
+
+    -- 2. Raid comp — fall back to the planned comp's character list.
     if eventId then
         local comp = self:GetRaidComp(eventId)
         if comp and comp.assignments and #comp.assignments > 0 then
+            local names = {}
             for _, a in ipairs(comp.assignments) do
                 if a.name then names[#names + 1] = a.name end
             end
@@ -73,13 +114,15 @@ function WGS:GetEventInviteList(event)
         end
     end
 
-    -- Fall back to team roster
+    -- 3. Team roster — broadest net, used when neither signups nor comp
+    -- are available (e.g. ad-hoc weekly raid without sign-ups recorded).
     local teamId = event.team_id or event.teamId
     if teamId then
         local teams = self.db.global.teams
         if teams then
             for _, t in ipairs(teams) do
                 if t.id == teamId then
+                    local names = {}
                     if t.playerMembers then
                         local chars = self.db.global.characters or {}
                         for _, pm in ipairs(t.playerMembers) do
@@ -100,7 +143,7 @@ function WGS:GetEventInviteList(event)
         end
     end
 
-    return names, nil
+    return {}, nil
 end
 
 ---------------------------------------------------------------------------
@@ -148,8 +191,11 @@ function WGS:AutoInvite()
 
     local roster = self:GetGuildRosterLookup()
     local myKey = self:GetPlayerKey()
-    local queued = 0
+    local invited = 0
 
+    -- Fire invites in a single tick. The previous 3s-per-invite stagger
+    -- meant a 25-person raid took 75 seconds to start; WoW handles a
+    -- burst of InviteUnit calls fine in practice.
     for _, name in ipairs(names) do
         local short = name:match("^([^%-]+)")
         if short and not invitedThisSession[short] then
@@ -158,20 +204,19 @@ function WGS:AutoInvite()
                 -- Skip if already in group
                 if not module:IsInCurrentGroup(gi.fullName) then
                     invitedThisSession[short] = true
-                    queued = queued + 1
-                    C_Timer.After(queued * INVITE_COOLDOWN, function()
-                        C_PartyInfo.InviteUnit(gi.fullName)
-                    end)
+                    invited = invited + 1
+                    C_PartyInfo.InviteUnit(gi.fullName)
                 end
             end
         end
     end
 
-    if queued > 0 then
-        self:Print(string.format("|cffffd100Inviting %d member(s) for %s (from %s)|r", queued, event.title or "?", source or "roster"))
-        -- Auto-sort groups after invites land (give time for accepts)
+    if invited > 0 then
+        self:Print(string.format("|cffffd100Inviting %d member(s) for %s (from %s)|r", invited, event.title or "?", source or "roster"))
+        -- Auto-sort raid groups once invites have had time to land. Only
+        -- meaningful when we know the planned groups (raid comp source).
         if source == "raid comp" then
-            C_Timer.After(queued * INVITE_COOLDOWN + 5, function()
+            C_Timer.After(SORT_AFTER_INVITE_DELAY, function()
                 if IsInRaid() then self:SortRaidGroups() end
             end)
         end
