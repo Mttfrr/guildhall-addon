@@ -98,6 +98,18 @@ function M.setup()
     dofile("Modules/EventScheduler.lua")
     dofile("Modules/Attendance.lua")
 
+    -- Test shim for the public event bus. The real registry is wired
+    -- in WGS:OnInitialize via CallbackHandler-1.0, which isn't loaded
+    -- in tests. Modules use WGS:FireEvent which already nil-guards
+    -- on `self.callbacks`, so unit tests would silently drop emissions
+    -- without this shim. Tests that care can read GuildHall._fired.
+    GuildHall._fired = {}
+    GuildHall.callbacks = {
+        Fire = function(_, event, ...)
+            table.insert(GuildHall._fired, { event = event, args = { ... } })
+        end,
+    }
+
     return GuildHall
 end
 

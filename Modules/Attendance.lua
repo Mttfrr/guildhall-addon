@@ -135,6 +135,8 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
             present = true,
         }
     end
+
+    self:FireEvent("WGS_SESSION_STARTED", currentSession)
 end
 
 function WGS:StopAttendance()
@@ -162,7 +164,10 @@ function WGS:StopAttendance()
 
     table.insert(self.db.global.attendance, currentSession)
 
+    local endedSession = currentSession
     currentSession = nil
+
+    self:FireEvent("WGS_SESSION_ENDED", endedSession)
 
     -- Show export reminder after a short delay (let chat settle)
     C_Timer.After(2, function()

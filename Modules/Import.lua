@@ -169,6 +169,8 @@ function WGS:ProcessImport(data)
 
     self.db.global.lastImport = self:GetTimestamp()
     self:Print(string.format(L["IMPORT_SUCCESS"], count))
+
+    self:FireEvent("WGS_IMPORT_APPLIED", { count = count, importedAt = self.db.global.lastImport })
     return true
 end
 

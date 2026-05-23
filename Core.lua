@@ -50,6 +50,13 @@ local dbDefaults = {
 
 function WGS:OnInitialize()
     self.db = LibStub("AceDB-3.0"):New("GuildHallDB", dbDefaults, true)
+    -- Public event bus. Other addons (or our own future MRT/NSRT bridge
+    -- modules) subscribe via `GuildHall.RegisterCallback(handlerSelf,
+    -- eventName, methodOrFn)`. New(self) installs Register/Unregister
+    -- methods on us and returns the registry whose :Fire(event, ...)
+    -- dispatches to subscribers. The set of events we emit is documented
+    -- in docs/EVENTS.md — keep this list and that file in sync.
+    self.callbacks = LibStub("CallbackHandler-1.0"):New(self)
     self:RegisterChatCommand("gh", "SlashCommand")
     self:RegisterChatCommand("guildhall", "SlashCommand")
     self:SetupConfig()
@@ -60,6 +67,17 @@ end
 function WGS:OnEnable()
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:SetupTooltipHooks()
+end
+
+--- Internal: fire a public event on the callback registry. Tolerant of
+--- being called before OnInitialize has wired callbacks up (load-order
+--- corner cases during early bootstrap). Modules use this instead of
+--- poking self.callbacks directly so the registry can be swapped or
+--- profiled in one place later.
+function WGS:FireEvent(event, ...)
+    if self.callbacks and self.callbacks.Fire then
+        self.callbacks:Fire(event, ...)
+    end
 end
 
 function WGS:OnDisable() end

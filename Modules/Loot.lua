@@ -180,6 +180,8 @@ function module:OnLootMessage(_, msg, ...)
 
     table.insert(WGS.db.global.loot, entry)
     WGS:Print(string.format(L["LOOT_RECORDED"], itemLink, player))
+
+    WGS:FireEvent("WGS_LOOT_RECORDED", entry)
 end
 
 function module:ParseLootMessage(msg)
