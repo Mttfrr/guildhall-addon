@@ -8,6 +8,7 @@
 ## AddonCompartmentFunc: GuildHall_OnAddonCompartmentClick
 ## Category: Guild
 ## X-Wago-ID: BKpg1Z6E
+## X-Curse-Project-ID: 1526369
 
 # Libraries
 Libs\Libs.xml
