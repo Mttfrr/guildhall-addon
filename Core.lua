@@ -143,6 +143,17 @@ function WGS:SlashCommand(input)
         self:PeerSync_ManualCatchup()
     elseif cmd == "restore" then
         self:RestoreClearedData()
+    elseif cmd == "bankdebug" then
+        -- Temporary diagnostic toggle for the bank-auto-capture
+        -- investigation. Flips db.profile.bankDebug so the event
+        -- handlers in Modules/GuildBank.lua print a trace line each
+        -- time GUILDBANK_UPDATE_MONEY / GUILDBANKLOG_UPDATE /
+        -- GUILDBANKFRAME_OPENED / PLAYER_INTERACTION_MANAGER_FRAME_SHOW
+        -- fires, so we can see which (if any) actually arrive on the
+        -- user's client. Remove once the auto-flow is proven end-to-end.
+        self.db.profile.bankDebug = not self.db.profile.bankDebug
+        self:Print("Bank debug prints: " ..
+            (self.db.profile.bankDebug and "|cff00ff00on|r" or "|cff888888off|r"))
     elseif cmd == "team" then
         -- /gh team <name>   → set current-team picker by name (case-
         --                     insensitive substring match)

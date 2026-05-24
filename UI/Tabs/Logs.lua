@@ -179,6 +179,12 @@ end
 -- Bank sub-view (lifted from the deleted UI/Tabs/Bank.lua)
 ---------------------------------------------------------------------------
 
+-- Forward decl so the WGS_BANK_CAPTURED callback registered inside
+-- BuildBankSubView can resolve PopulateBank — `local function` decls
+-- only create the slot at their own line, so the callback closure
+-- would otherwise capture nil.
+local PopulateBank
+
 local function BuildBankSubView(sv)
     sv.balance = sv:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     sv.balance:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -4)
@@ -225,9 +231,20 @@ local function BuildBankSubView(sv)
 
     sv.scrollFrame = sf
     sv.content = content
+
+    -- Live refresh when new bank data lands. Without this the user
+    -- has to switch tabs to see anything they just captured (manual
+    -- button click, or the auto-flow firing while the Bank sub-view
+    -- is already on screen). WGS_BANK_CAPTURED fires from
+    -- CaptureNewTransactions (when added > 0) and from CaptureGold
+    -- (when the balance changed). PopulateBank guards on
+    -- sv:IsVisible() so subscriptions on hidden sub-views no-op.
+    GuildHall.RegisterCallback(sv, "WGS_BANK_CAPTURED", function()
+        PopulateBank(sv)
+    end)
 end
 
-local function PopulateBank(sv)
+function PopulateBank(sv)
     if not sv or not sv:IsVisible() then return end
     ClearContainer(sv.content)
 

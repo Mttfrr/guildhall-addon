@@ -9,6 +9,17 @@ local pendingBankOpen = nil
 -- Fingerprints of already-captured transactions to prevent duplicates
 local capturedFingerprints = {}
 
+-- Toggle visible event-trace prints so we can confirm which events fire
+-- (or don't) on the user's client. Flip via /gh bankdebug; remove once
+-- the auto-capture path is verified end-to-end. Prefixed so it's easy
+-- to spot and complain about.
+local function bankDebugPrint(msg)
+    if WGS.db and WGS.db.profile and WGS.db.profile.bankDebug then
+        WGS:Print("|cff888888[bank-debug]|r " .. msg)
+    end
+end
+WGS._BankDebugPrint = bankDebugPrint   -- exposed for the slash command
+
 function module:OnEnable()
     -- GUILDBANK_UPDATE_MONEY: fires when the gold balance changes
     -- (deposits, withdrawals, repairs). Drives the gold-snapshot diff
@@ -25,12 +36,20 @@ function module:OnEnable()
     -- of log updates (mass-repair sessions trigger several) collapses
     -- to one capture.
     self:RegisterEvent("GUILDBANKLOG_UPDATE", "OnLogUpdate")
-    -- Auto-capture on bank open: kicks the money-log query and
-    -- schedules a deferred capture for the round trip.
+    -- GUILDBANKFRAME_OPENED is the historical event; in modern retail
+    -- some bank-replacement addons swallow GuildBankFrame's OnShow and
+    -- the event never fires. PLAYER_INTERACTION_MANAGER_FRAME_SHOW is
+    -- the engine-level "an NPC interaction frame opened" event,
+    -- filtered to the guild-banker type — fires regardless of which
+    -- frame implementation actually renders. We subscribe to both and
+    -- let _HandleBankOpened be idempotent against double-fire (the
+    -- pendingBankOpen timer cancels its predecessor).
     self:RegisterEvent("GUILDBANKFRAME_OPENED", "OnBankOpened")
+    self:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "OnInteractionFrameShow")
 end
 
 function module:OnMoneyUpdate()
+    bankDebugPrint("GUILDBANK_UPDATE_MONEY fired")
     -- Debounce: multiple events can fire rapidly (e.g. mass repairs)
     if pendingMoneyUpdate then pendingMoneyUpdate:Cancel() end
     pendingMoneyUpdate = C_Timer.NewTimer(0.5, function()
@@ -39,7 +58,23 @@ function module:OnMoneyUpdate()
     end)
 end
 
+-- PLAYER_INTERACTION_MANAGER_FRAME_SHOW carries an interaction-type
+-- enum as its first arg. We only want the guild-banker type; the same
+-- event fires for vendors, mailboxes, void storage, etc., and
+-- triggering bank capture on every NPC frame would be obviously wrong.
+-- Enum.PlayerInteractionType.GuildBanker = 10 in retail TWW; if the
+-- enum table isn't available (older client flavors), fall back to the
+-- numeric constant so the subscription doesn't no-op.
+function module:OnInteractionFrameShow(_, interactionType)
+    local guildBankerType = (Enum and Enum.PlayerInteractionType
+                                  and Enum.PlayerInteractionType.GuildBanker) or 10
+    if interactionType ~= guildBankerType then return end
+    bankDebugPrint("PLAYER_INTERACTION_MANAGER_FRAME_SHOW (GuildBanker) fired")
+    WGS:_HandleBankOpened()
+end
+
 function module:OnLogUpdate()
+    bankDebugPrint("GUILDBANKLOG_UPDATE fired")
     -- Log updates skip the OnGoldChanged guard (which bails if
     -- GetGuildBankMoney returns 0 — useful for cold-load races on
     -- money events, useless and harmful here since the log can
@@ -105,6 +140,7 @@ function WGS:_HandleBankOpened()
 end
 
 function module:OnBankOpened()
+    bankDebugPrint("GUILDBANKFRAME_OPENED fired")
     WGS:_HandleBankOpened()
 end
 
@@ -244,6 +280,14 @@ function WGS:CaptureNewTransactions()
     -- Returns the count of rows added so OnBankOpened can surface a
     -- single summary line. Per-transaction chatter during a raid is
     -- noise; the summary is the only user-visible signal.
+    --
+    -- Fire WGS_BANK_CAPTURED so any open Bank sub-view can re-populate
+    -- without the user having to switch tabs. Only fire when something
+    -- actually changed — avoids storming the UI with re-renders during
+    -- a no-op repeat scan.
+    if added > 0 then
+        self:FireEvent("WGS_BANK_CAPTURED", { added = added, total = #db.guildBankTransactions })
+    end
     return added
 end
 
@@ -279,6 +323,9 @@ function WGS:CaptureGold()
         previousMoney = previousMoney,
     })
 
+    -- Notify UI subscribers so the Bank sub-view balance updates
+    -- without the user having to switch tabs.
+    self:FireEvent("WGS_BANK_CAPTURED", { goldChanged = true, money = guildMoney })
     return true
 end
 

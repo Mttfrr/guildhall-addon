@@ -95,4 +95,33 @@ describe("WGS:_HandleBankOpened", function()
         assert.is_true(sawSummary, "expected 'Bank captured: ..., 1 new transaction(s).'")
         assert.are.equal(1, #WGS.db.global.guildBankTransactions)
     end)
+
+    -- WGS_BANK_CAPTURED is what the Bank sub-view subscribes to for
+    -- live refresh. It must fire when new transactions land so a user
+    -- staring at the Bank tab sees the update without switching tabs.
+    -- Conversely, a no-op rescan (same rows, nothing added) must NOT
+    -- fire — otherwise the UI re-renders on every bank reopen.
+    it("fires WGS_BANK_CAPTURED when new transactions land, not on no-op rescans", function()
+        local WGS = setup()
+        _G.GetGuildBankMoney = function() return 12345600 end
+        _G.GetNumGuildBankMoneyTransactions = function() return 1 end
+        _G.GetGuildBankMoneyTransaction = function(_)
+            return "deposit", "Tester-Realm", 100, 0, 0, 0, 1
+        end
+
+        WGS:CaptureNewTransactions()
+        local firstFires = 0
+        for _, f in ipairs(GuildHall._fired) do
+            if f.event == "WGS_BANK_CAPTURED" then firstFires = firstFires + 1 end
+        end
+        assert.are.equal(1, firstFires, "expected one WGS_BANK_CAPTURED on the first capture")
+
+        -- Second call: same log, dedup → added == 0 → no event fire.
+        WGS:CaptureNewTransactions()
+        local secondFires = 0
+        for _, f in ipairs(GuildHall._fired) do
+            if f.event == "WGS_BANK_CAPTURED" then secondFires = secondFires + 1 end
+        end
+        assert.are.equal(1, secondFires, "no-op rescan should not re-fire WGS_BANK_CAPTURED")
+    end)
 end)
