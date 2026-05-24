@@ -443,6 +443,85 @@ end
 -- in the addon routes through it so a new role bucket on the platform
 -- only needs to update one file.
 
+-- Confirmation popup for session delete. Registered once at file
+-- scope so multiple Logs sub-views (or addon reloads) don't double-
+-- register. Pending sessionIdx is passed via popup.data (set right
+-- before StaticPopup_Show) — StaticPopup OnAccept reads it back.
+StaticPopupDialogs["GUILDHALL_CONFIRM_SESSION_DELETE"] = {
+    text         = "Delete the attendance session from %s?\n" ..
+                   "This removes %d member(s) and %d raid-comp snapshot(s).\n" ..
+                   "Cannot be undone.",
+    button1      = "Delete",
+    button2      = "Cancel",
+    timeout      = 0,
+    whileDead    = true,
+    hideOnEscape = true,
+    OnAccept     = function(self, data)
+        if data and data.idx then
+            WGS:DeleteAttendanceSession(data.idx)
+        end
+    end,
+}
+
+-- Right-click-equivalent event picker for an attendance session.
+-- Same shape as OpenLootRowMenu but with a single-level menu (no
+-- submenu — we always want a flat list here since the use case is
+-- "fix this session's binding" rather than "browse"). ±4h of the
+-- session's startedAt, matching the wider reconcile window.
+local function OpenSessionEventMenu(sessionIdx)
+    local session = WGS.db.global.attendance and WGS.db.global.attendance[sessionIdx]
+    if not session then return end
+
+    local sessTs = tonumber(session.startedAt) or 0
+    local WINDOW = 4 * 60 * 60
+
+    local candidates = {}
+    for _, ev in ipairs(WGS.db.global.events or {}) do
+        local startTs = WGS:GetEventPullTime(ev)
+        if startTs and math.abs(startTs - sessTs) <= WINDOW then
+            candidates[#candidates + 1] = {
+                ev      = ev,
+                startTs = startTs,
+                delta   = math.abs(startTs - sessTs),
+            }
+        end
+    end
+    table.sort(candidates, function(a, b) return a.delta < b.delta end)
+
+    local menu = {
+        { text = "Bind to event", isTitle = true, notCheckable = true },
+    }
+    for _, c in ipairs(candidates) do
+        local teamName = WGS.GetTeamName and WGS:GetTeamName(c.ev.team_id) or "?"
+        menu[#menu + 1] = {
+            text = string.format("%s \194\183 %s \194\183 %s",
+                date("%m/%d %H:%M", c.startTs), teamName, c.ev.title or "?"),
+            notCheckable = true,
+            func = function()
+                WGS:RebindAttendanceSession(sessionIdx, c.ev.id, c.ev.title)
+            end,
+        }
+    end
+    if #candidates == 0 then
+        menu[#menu + 1] = {
+            text = "(no events within \194\1774h of this session)",
+            disabled = true, notCheckable = true,
+        }
+    end
+    menu[#menu + 1] = { text = "", isTitle = true, notCheckable = true }
+    menu[#menu + 1] = {
+        text = "Clear binding",
+        notCheckable = true,
+        func = function() WGS:RebindAttendanceSession(sessionIdx, nil, nil) end,
+    }
+
+    if not _G.GuildHallSessionEventDropdown then
+        _G.GuildHallSessionEventDropdown = CreateFrame("Frame",
+            "GuildHallSessionEventDropdown", UIParent, "UIDropDownMenuTemplate")
+    end
+    EasyMenu(menu, _G.GuildHallSessionEventDropdown, "cursor", 0, 0, "MENU")
+end
+
 local function BuildAttendanceSubView(sv)
     -- Pure read surface — sessions list only. The manual Start / Stop
     -- toggle moved to the Events detail panel's actions footer where
@@ -462,6 +541,13 @@ local function BuildAttendanceSubView(sv)
     -- member list expanded. Per-session-index rather than per-session-
     -- object so a re-render survives a re-sort.
     sv._expanded = {}
+
+    -- Live refresh when an officer rebinds / edits / deletes a
+    -- session. Same pattern as the loot sub-view's WGS_LOOT_EDITED
+    -- callback; resolved via _refreshFn wired in BuildLogsTab.
+    GuildHall.RegisterCallback(sv, "WGS_ATTENDANCE_EDITED", function()
+        if sv._refreshFn then sv._refreshFn() end
+    end)
 end
 
 local function PopulateAttendance(sv)
@@ -573,9 +659,43 @@ local function PopulateAttendance(sv)
 
         yOff = yOff - ROW_H
 
-        -- Expanded body: role tally + member list. Rendered when the
-        -- row was last toggled open.
+        -- Expanded body: actions row + role tally + member list.
+        -- Rendered when the row was last toggled open.
         if expanded then
+            -- Actions row. Two side-by-side buttons above the tally.
+            -- Indented to align with the disclosure triangle's right
+            -- edge so the visual hierarchy reads "this session > its
+            -- actions > its members."
+            local actionsBar = CreateFrame("Frame", nil, sv.content)
+            actionsBar:SetSize(cw, 22)
+            actionsBar:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 0, yOff)
+
+            local bindBtn = CreateFrame("Button", nil, actionsBar, "UIPanelButtonTemplate")
+            bindBtn:SetSize(120, 20)
+            bindBtn:SetPoint("LEFT", actionsBar, "LEFT", 26, 0)
+            bindBtn:SetText("Bind to event…")
+            bindBtn:SetScript("OnClick", function() OpenSessionEventMenu(sessionIdx) end)
+
+            local deleteBtn = CreateFrame("Button", nil, actionsBar, "UIPanelButtonTemplate")
+            deleteBtn:SetSize(110, 20)
+            deleteBtn:SetPoint("LEFT", bindBtn, "RIGHT", 6, 0)
+            deleteBtn:SetText("Delete session")
+            deleteBtn:SetScript("OnClick", function()
+                -- Count snapshots for the popup message so the user
+                -- knows what they're about to lose.
+                local snapCount = 0
+                for _, snap in ipairs(WGS.db.global.raidCompResults or {}) do
+                    if snap.startedAt == s.startedAt then snapCount = snapCount + 1 end
+                end
+                local popup = StaticPopup_Show("GUILDHALL_CONFIRM_SESSION_DELETE",
+                    date("%m/%d %H:%M", s.startedAt or 0),
+                    #(s.memberList or {}),
+                    snapCount)
+                if popup then popup.data = { idx = sessionIdx } end
+            end)
+
+            yOff = yOff - 22
+
             -- Role tally
             local tally = { TANK = 0, HEALER = 0, DPS = 0 }
             for _, m in ipairs(members) do
@@ -608,7 +728,11 @@ local function PopulateAttendance(sv)
                 return ((a.name or ""):lower()) < ((b.name or ""):lower())
             end)
 
-            -- 3-column grid
+            -- 3-column grid. Each cell hosts: the class-coloured name
+            -- on the left + a tiny "x" remove button on the right.
+            -- Click → WGS:RemoveMemberFromSession (cascades into the
+            -- session's raidCompResults snapshots). Cell layout:
+            --   [ name text (COL_W - 22 wide) ] [ x (16x16) ]
             local COLS = 3
             local COL_W = math.floor(cw / COLS)
             local memberRowH = 16
@@ -619,15 +743,37 @@ local function PopulateAttendance(sv)
                 local classFile = WGS:NormalizeClassFile(m.class or "")
                 local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
 
-                local fs = sv.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 local col = i % COLS
                 local rowIdx = math.floor(i / COLS)
                 if rowIdx > maxRow then maxRow = rowIdx end
+
+                local fs = sv.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 fs:SetPoint("TOPLEFT", sv.content, "TOPLEFT",
                     26 + col * COL_W, yOff - rowIdx * memberRowH)
-                fs:SetWidth(COL_W - 8)
+                fs:SetWidth(COL_W - 22)   -- leave room for the x
                 fs:SetJustifyH("LEFT")
                 fs:SetText("|c" .. colorHex .. short .. "|r")
+
+                local memberName = m.name   -- capture for the closure
+                local xBtn = CreateFrame("Button", nil, sv.content)
+                xBtn:SetSize(14, 14)
+                xBtn:SetPoint("TOPLEFT", sv.content, "TOPLEFT",
+                    26 + col * COL_W + (COL_W - 20),
+                    yOff - rowIdx * memberRowH - 1)
+                local xText = xBtn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                xText:SetAllPoints(xBtn)
+                xText:SetText("|cff888888x|r")
+                xText:SetJustifyH("CENTER")
+                xBtn:SetScript("OnEnter", function()
+                    xText:SetText("|cffff5555x|r")
+                end)
+                xBtn:SetScript("OnLeave", function()
+                    xText:SetText("|cff888888x|r")
+                end)
+                xBtn:SetScript("OnClick", function()
+                    WGS:RemoveMemberFromSession(sessionIdx, memberName)
+                end)
+
                 i = i + 1
             end
 
@@ -663,6 +809,9 @@ local function BuildLogsTab(parent)
     -- without poking the parent.
     parent.subViews[LOGS_SUB_LOOT]._refreshFn = function()
         PopulateLoot(parent.subViews[LOGS_SUB_LOOT])
+    end
+    parent.subViews[LOGS_SUB_ATTENDANCE]._refreshFn = function()
+        PopulateAttendance(parent.subViews[LOGS_SUB_ATTENDANCE])
     end
 
     SelectSubView(parent, LOGS_SUB_LOOT, LOGS_SUB_COUNT)
