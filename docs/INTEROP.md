@@ -31,6 +31,10 @@ Per-encounter roster snapshots. One row per pull (kill or wipe).
 
 ```lua
 VMRT.Attendance = {
+    -- Top-level siblings we don't read but worth listing for completeness:
+    enabled       = true,
+    specialEdit   = "boss;diff;...",   -- semicolon-delimited per-encounter rules
+    OptionsSortPD = "...",
     data = {
         {
             t   = 1716480000,         -- unix timestamp
@@ -49,7 +53,8 @@ VMRT.Attendance = {
         -- more pulls
     },
     alts = {
-        -- shape not yet inspected; not used today
+        -- Array of { altName, mainName } pairs. Read-only; not used today.
+        { "AltOne", "MainOne" },
     },
 }
 ```
@@ -90,6 +95,7 @@ VMRT.LootHistory = {
     },
     bossNames     = { },  -- localized encounter names
     instanceNames = { },  -- localized instance names
+    disable       = false, -- user can disable the history capture; respect it
 }
 ```
 
@@ -144,11 +150,17 @@ NSRT.NickNames = {
 }
 ```
 
-**Public write API** (use this — direct table writes bypass UI refresh):
+**Public read/write API** (use these — direct table writes bypass UI refresh):
 
 ```lua
+-- Write:
 NSAPI:ImportNickNames("Name-Realm:nick;Name-Realm:nick;...")
 NSI:GlobalNickNameUpdate()  -- refresh raid frames (Grid2/ElvUI/Cell/VuhDo/Blizzard)
+
+-- Read (prefer over poking NSRT.NickNames directly):
+local map = NSAPI:GetAllCharacters()        -- copy of the full nick map
+local nick = NSAPI:GetName(name, addon)     -- resolve, honoring per-addon settings
+local hits = NSAPI:GetCharacters(query)     -- everyone matching a nick OR name
 ```
 
 **Semantic note (important):** NSRT nicknames are *display labels*
@@ -164,7 +176,9 @@ distinct user-facing field.
 
 ```lua
 NSRT.InviteList = {
-    [someKey] = { ... },   -- shape not stable; populated by Viserio "Copy All" paste
+    -- Keyed by list name; each value is an array of name strings.
+    -- Populated from Viserio "Copy All" paste or the in-game UI.
+    [listName] = { "PlayerName", "Player-Realm", ... },
 }
 ```
 
@@ -191,5 +205,31 @@ These contracts were extracted from:
   - `NickNames.lua` — nickname store + public API
   - `SetupManager.lua` — invite-list consumer
 
-Last verification: 2026-05-23. If MRT/NSRT release a major version,
-re-verify these files and bump this date.
+Last verification: 2026-05-24. No breaking drift from the prior pass;
+tightened four sibling-field/shape gaps (Attendance siblings + `alts`,
+LootHistory `disable`, InviteList shape, `NSAPI:GetAllCharacters` read
+path). If MRT/NSRT release a major version, re-verify these files and
+bump this date.
+
+### Known new surfaces we don't read yet (not contracts — feature notes)
+
+- **MRT `VMRT.Marks.list[1..8]`** — raid-target → unit-name with public
+  `SetName/GetName/ClearNames/Enable/Disable`. Plausible bridge: a
+  GuildHall "tank/kick assignment export" surface.
+- **MRT `VMRT.ExCD2.*`** — raid cooldown DB keyed by `playerName+spellID`.
+  Plausible bridge: cross-reference with GuildHall fight-plan CDs.
+- **MRT `VMRT.RaidCheck.*`** — consumables/flask/food/durability state
+  with module accessors. Plausible bridge: pre-pull readiness panel.
+- **MRT `VMRT.WhoPulled`** — last-pull attribution. Plausible bridge:
+  post-wipe "who pulled" line in GuildHall pull logs.
+- **NSRT `NSRT.CooldownList[specID]`** — spec → spell-id cooldowns with
+  `NSI:CheckCooldowns / AddTrackedCooldown / RemoveTrackedCooldown`.
+- **NSRT `ReadyCheck.lua`** — `NSI:GearCheck / BuffCheck /
+  SoulstoneCheck / SourceOfMagicCheck / BlisteringScalesCheck /
+  SymbioticRelationshipCheck / GatewayControlCheck` against
+  `NSRT.ReadyCheckSettings`. Plausible bridge: borrow NSRT's existing
+  gear/enchant/gem/ilvl/tier checks instead of GuildHall's own
+  Readiness panel.
+
+Neither addon exposes a master-loot / loot-council surface — confirmed
+in this pass.

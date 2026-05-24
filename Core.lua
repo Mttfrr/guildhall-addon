@@ -150,6 +150,14 @@ function WGS:SlashCommand(input)
         self:PeerSync_ManualCatchup()
     elseif cmd == "restore" then
         self:RestoreClearedData()
+    elseif cmd == "interop" then
+        -- Print MRT/NSRT integration status: which addons are loaded,
+        -- whether VMRT/NSRT globals are populated, how many loot rows
+        -- came from the MRT gap-fill, how many sessions have
+        -- bossAttendance attached, and the MRT note size + which
+        -- public API surface fetched it. Read-only diagnostic; safe
+        -- to run anywhere.
+        self:PrintInteropStatus()
     elseif cmd == "bankdebug" then
         -- Temporary diagnostic toggle for the bank-auto-capture
         -- investigation. Flips db.profile.bankDebug so the event
