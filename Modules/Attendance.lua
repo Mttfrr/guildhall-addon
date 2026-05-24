@@ -549,3 +549,116 @@ function WGS:GetRaidMembers()
 
     return members
 end
+
+---------------------------------------------------------------------------
+-- Officer corrections — in-addon edits for captured sessions
+---------------------------------------------------------------------------
+--
+-- Used by Logs → Attendance expand-on-click edit affordances. Each
+-- mutator owns the data change + the FireEvent + the cascade into
+-- raidCompResults rows that share the session's startedAt (so the
+-- per-pull comp snapshots stay consistent with the session-level
+-- roster — otherwise a removed member would still appear "present"
+-- in the comp).
+--
+-- Cross-officer propagation: same v1 limitation as the loot mutators
+-- (PeerSync.lua's mergeAttendance is first-wins on (startedAt,
+-- startedBy); edits don't propagate). The Print hint flags this each
+-- time so officers don't assume remote sync.
+
+local ATTENDANCE_LOCAL_HINT =
+    "Local change saved. Other officers will need to apply the same " ..
+    "correction or re-import from the platform."
+
+--- Rebind a session to a different scheduled event. Backfills any
+--- raidCompResults rows sharing the session's startedAt so the
+--- exported snapshots link to the new event too. Pass nil eventId to
+--- clear the binding (rare; mostly useful if a wrong auto-resolution
+--- got picked up). Returns true on success, false on out-of-range.
+function WGS:RebindAttendanceSession(sessionIndex, eventId, eventTitle)
+    local sessions = self.db and self.db.global and self.db.global.attendance
+    if type(sessions) ~= "table" then return false end
+    local session = sessions[sessionIndex]
+    if not session then return false end
+
+    session.eventId    = eventId or nil
+    session.eventTitle = eventTitle or nil
+
+    local comps = self.db.global.raidCompResults or {}
+    for _, snap in ipairs(comps) do
+        if snap.startedAt == session.startedAt then
+            snap.eventId    = eventId or nil
+            snap.eventTitle = eventTitle or nil
+        end
+    end
+
+    self:FireEvent("WGS_ATTENDANCE_EDITED",
+        { index = sessionIndex, session = session, kind = "rebind" })
+    self:Print(ATTENDANCE_LOCAL_HINT)
+    return true
+end
+
+--- Remove a member from a session's roster. Also splices them out of
+--- every raidCompResults.slots[] sharing the session's startedAt — if
+--- we leave the slots untouched the per-pull comp would still show
+--- the member as present, contradicting the corrected session. Returns
+--- true on success, false if the session or member doesn't exist.
+function WGS:RemoveMemberFromSession(sessionIndex, memberName)
+    local sessions = self.db and self.db.global and self.db.global.attendance
+    if type(sessions) ~= "table" then return false end
+    local session = sessions[sessionIndex]
+    if not session or type(session.memberList) ~= "table" then return false end
+
+    local found = false
+    for i = #session.memberList, 1, -1 do
+        if session.memberList[i].name == memberName then
+            table.remove(session.memberList, i)
+            found = true
+        end
+    end
+    if not found then return false end
+
+    local comps = self.db.global.raidCompResults or {}
+    for _, snap in ipairs(comps) do
+        if snap.startedAt == session.startedAt and type(snap.slots) == "table" then
+            for i = #snap.slots, 1, -1 do
+                if snap.slots[i].name == memberName then
+                    table.remove(snap.slots, i)
+                end
+            end
+        end
+    end
+
+    self:FireEvent("WGS_ATTENDANCE_EDITED",
+        { index = sessionIndex, session = session, kind = "remove_member",
+          memberName = memberName })
+    self:Print(ATTENDANCE_LOCAL_HINT)
+    return true
+end
+
+--- Delete a session entirely. Also removes every raidCompResults row
+--- sharing its startedAt so we don't leave orphan snapshots pointing
+--- to a session that no longer exists. Returns true on success,
+--- false on out-of-range.
+function WGS:DeleteAttendanceSession(sessionIndex)
+    local sessions = self.db and self.db.global and self.db.global.attendance
+    if type(sessions) ~= "table" then return false end
+    local session = sessions[sessionIndex]
+    if not session then return false end
+
+    local removed = table.remove(sessions, sessionIndex)
+
+    local comps = self.db.global.raidCompResults
+    if type(comps) == "table" then
+        for i = #comps, 1, -1 do
+            if comps[i].startedAt == removed.startedAt then
+                table.remove(comps, i)
+            end
+        end
+    end
+
+    self:FireEvent("WGS_ATTENDANCE_EDITED",
+        { index = sessionIndex, session = removed, kind = "delete" })
+    self:Print(ATTENDANCE_LOCAL_HINT)
+    return true
+end

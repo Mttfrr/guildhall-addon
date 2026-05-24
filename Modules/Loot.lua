@@ -371,3 +371,53 @@ function WGS:ReconcileLootFromMRT(endedEncounterID)
     end
     return added
 end
+
+---------------------------------------------------------------------------
+-- Officer corrections — in-addon edits for captured rows
+---------------------------------------------------------------------------
+--
+-- Used by the right-click menu on Logs → Loot rows. Each mutator owns
+-- the data change + the per-edit FireEvent so the UI can re-render
+-- without re-querying. Index-based so the UI doesn't have to track row
+-- identity across re-sorts — it looks up the index from its sorted
+-- view on each call.
+--
+-- Cross-officer propagation: NOT supported in v1. PeerSync's per-row
+-- merge is first-wins on (itemID, shortName(player), timestamp ±60s),
+-- so an edit to a row another officer already has gets dropped as a
+-- dupe. Each editing officer prints a hint after every edit so they
+-- know the change is local. A future commit can introduce a per-row
+-- rev counter + WGS_LOOT_EDITED broadcast + LWW merge.
+
+local CORRECTION_LOCAL_HINT =
+    "Local change saved. Other officers will need to apply the same " ..
+    "correction or re-import from the platform."
+
+--- Re-tag a loot row's eventId / teamId. Pass nil for both to clear
+--- the binding (Untag). Returns true on success, false if the index
+--- is out of range.
+function WGS:RetagLootRow(rowIndex, eventId, teamId)
+    local loot = self.db and self.db.global and self.db.global.loot
+    if type(loot) ~= "table" then return false end
+    local row = loot[rowIndex]
+    if not row then return false end
+    row.eventId = eventId or nil   -- nil collapses 0 / false too
+    row.teamId  = teamId  or nil
+    self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = row, kind = "retag" })
+    self:Print(CORRECTION_LOCAL_HINT)
+    return true
+end
+
+--- Remove a loot row entirely. Returns true on success, false if the
+--- index is out of range. Re-importable from MRT (if MRT/NSRT is
+--- loaded and the row was within ENCOUNTER_RECENT_WINDOW), so no
+--- confirmation popup at the UI layer.
+function WGS:DeleteLootRow(rowIndex)
+    local loot = self.db and self.db.global and self.db.global.loot
+    if type(loot) ~= "table" then return false end
+    if not loot[rowIndex] then return false end
+    local removed = table.remove(loot, rowIndex)
+    self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = removed, kind = "delete" })
+    self:Print(CORRECTION_LOCAL_HINT)
+    return true
+end
