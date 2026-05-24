@@ -64,12 +64,23 @@ describe("WGS:ReconcileLootFromMRT", function()
         _G.GetNormalizedRealmName    = origGetNormalizedRealmName
     end)
 
-    it("returns 0 and no-ops when MRT is not loaded", function()
+    it("returns 0 and no-ops when no VMRT data is available", function()
         pretendMRTLoaded(false)
-        _G.VMRT = { LootHistory = { list = { mrtRow{ encounterID = 100 } } } }
+        _G.VMRT = nil
         local added = WGS:ReconcileLootFromMRT(100)
         assert.are.equal(0, added)
         assert.are.equal(0, #WGS.db.global.loot)
+    end)
+
+    -- NSRT compat: VMRT populated, MRT addon name not loaded — gap-fill
+    -- should still run. Locks in HasMRTData's "VMRT presence is the
+    -- real signal" contract.
+    it("reconciles from VMRT.LootHistory even when only NSRT is loaded", function()
+        pretendMRTLoaded(false)
+        _G.VMRT = { LootHistory = { list = { mrtRow{ encounterID = 100 } } } }
+        local added = WGS:ReconcileLootFromMRT(100)
+        assert.are.equal(1, added)
+        assert.are.equal(1, #WGS.db.global.loot)
     end)
 
     it("returns 0 when MRT is loaded but the list is empty / missing", function()

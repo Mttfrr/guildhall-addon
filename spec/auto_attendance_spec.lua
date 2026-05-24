@@ -174,3 +174,189 @@ describe("WGS:GetTeamName", function()
         assert.is_nil(WGS:GetTeamName(7))
     end)
 end)
+
+-- Raid comp capture guarantees. The platform import errors with
+-- "raid comp for event #n is missing" when an event has no matching
+-- raidCompResults row. Two ways this used to happen:
+--   (B) Session had no boss kills AND raid emptied before StopAttendance,
+--       so the only snapshot attempts (kill + end-of-session) both
+--       produced empty slot lists and recorded nothing.
+--   (A) Session was started outside the auto-resolve window
+--       [start-30min, start+1h] — eventId stayed nil, snapshots had
+--       no event tag, platform couldn't link them.
+-- These specs lock down the fixes for both.
+describe("WGS:StartAttendanceForTeam raid-comp guarantee (Bug B)", function()
+    local WGS
+    before_each(function()
+        WGS = helpers.setup()
+        _G.IsInRaid        = function() return true end
+        _G.IsInGroup       = function() return true end
+        _G.GetInstanceInfo = function() return "Test Raid", "raid", 16, "Mythic" end
+        WGS.GetTimestamp   = function() return 1700000000 end
+        WGS.GetPlayerKey   = function() return "Tester-TestRealm" end
+        WGS.ResolvePlayerForCharacter = function() return nil end
+    end)
+
+    it("records a snapshot at session start so a kill-less raid still has one", function()
+        WGS.GetRaidMembers = function()
+            return {
+                ["Alpha-Realm"] = { class = "WARRIOR", role = "TANK",   subgroup = 1 },
+                ["Beta-Realm"]  = { class = "PRIEST",  role = "HEALER", subgroup = 1 },
+            }
+        end
+        assert.are.equal(0, #WGS.db.global.raidCompResults)
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", { id = 7, title = "Tuesday" })
+        assert.are.equal(1, #WGS.db.global.raidCompResults,
+            "expected one snapshot recorded at session start")
+        local snap = WGS.db.global.raidCompResults[1]
+        assert.are.equal(7, snap.eventId)
+        assert.are.equal(2, #snap.slots)
+    end)
+
+    it("doesn't record a snapshot if the raid roster is empty at start", function()
+        WGS.GetRaidMembers = function() return {} end
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", { id = 7, title = "Tuesday" })
+        -- Empty roster → CaptureRaidComposition returns nil → no row.
+        -- The platform will still flag this event as missing, but
+        -- there's genuinely nothing to record — the user shouldn't be
+        -- in a 0-person "raid" to begin with.
+        assert.are.equal(0, #WGS.db.global.raidCompResults)
+    end)
+end)
+
+describe("WGS:StopAttendance event back-resolution (Bug A)", function()
+    local WGS
+    before_each(function()
+        WGS = helpers.setup()
+        _G.IsInRaid        = function() return true end
+        _G.IsInGroup       = function() return true end
+        _G.GetInstanceInfo = function() return "Test Raid", "raid", 16, "Mythic" end
+        WGS.GetPlayerKey   = function() return "Tester-TestRealm" end
+        WGS.ResolvePlayerForCharacter = function() return nil end
+        WGS.BuildBossAttendanceFromMRT = function() return {} end
+        WGS.ShowExportReminder = function() end
+    end)
+
+    it("back-resolves eventId at session end via the wider window", function()
+        local sessionStart = 1700000000
+        -- Event scheduled 90 minutes before the session started — outside
+        -- the strict [start-30m, start+1h] window the auto-flow uses,
+        -- but inside the [start-2h, start+4h] wider window the back-
+        -- resolution uses.
+        local eventTs = sessionStart - 90 * 60
+        WGS.db.global.events = {
+            {
+                id    = 99, title = "Reset Night",
+                date  = os.date("%Y-%m-%d", eventTs),
+                time  = os.date("%H:%M",    eventTs),
+            },
+        }
+
+        WGS.GetTimestamp   = function() return sessionStart end
+        WGS.GetRaidMembers = function()
+            return { ["Alpha-Realm"] = { class = "WARRIOR", role = "TANK", subgroup = 1 } }
+        end
+        -- No event passed → auto-flow would have left eventId nil.
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", nil)
+        assert.is_nil(WGS:GetCurrentAttendanceContext().eventId,
+            "precondition: session should start untagged")
+
+        WGS.GetTimestamp = function() return sessionStart + 60 end
+        WGS:StopAttendance()
+
+        local sessions = WGS.db.global.attendance
+        assert.are.equal(1, #sessions)
+        assert.are.equal(99, sessions[1].eventId,
+            "session should be back-resolved to the wider-window match")
+        -- The startup snapshot must have its eventId backfilled too —
+        -- that's what the platform import is going to use to link.
+        for _, snap in ipairs(WGS.db.global.raidCompResults) do
+            if snap.startedAt == sessionStart then
+                assert.are.equal(99, snap.eventId,
+                    "snapshots for this session must inherit the resolved eventId")
+            end
+        end
+    end)
+
+    it("leaves the session untagged when the wider window has no match", function()
+        WGS.db.global.events = {}    -- nothing to match
+        WGS.GetTimestamp   = function() return 1700000000 end
+        WGS.GetRaidMembers = function()
+            return { ["Alpha-Realm"] = { class = "WARRIOR", role = "TANK", subgroup = 1 } }
+        end
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", nil)
+        WGS.GetTimestamp = function() return 1700000060 end
+        WGS:StopAttendance()
+        assert.is_nil(WGS.db.global.attendance[1].eventId)
+    end)
+end)
+
+describe("WGS:ReconcileAttendanceEventBindings (retro fix)", function()
+    local WGS
+    before_each(function()
+        WGS = helpers.setup()
+    end)
+
+    it("backfills orphan sessions + their raidCompResults rows", function()
+        local sessionStart = 1700000000
+        local eventTs = sessionStart - 30 * 60
+        WGS.db.global.events = {
+            {
+                id    = 55, title = "Reset Night",
+                date  = os.date("%Y-%m-%d", eventTs),
+                time  = os.date("%H:%M",    eventTs),
+            },
+        }
+        WGS.db.global.attendance = {
+            { startedAt = sessionStart, eventId = nil,
+              memberList = { { name = "Alpha", subgroup = 1, present = true } } },
+        }
+        WGS.db.global.raidCompResults = {
+            { startedAt = sessionStart, eventId = nil, slots = { { name = "Alpha", group = 1 } } },
+        }
+
+        local bound, ambiguous, unmatched = WGS:ReconcileAttendanceEventBindings()
+        assert.are.equal(1, bound)
+        assert.are.equal(0, ambiguous)
+        assert.are.equal(0, unmatched)
+        assert.are.equal(55, WGS.db.global.attendance[1].eventId)
+        assert.are.equal(55, WGS.db.global.raidCompResults[1].eventId)
+    end)
+
+    it("counts ambiguous separately when multiple events match a session's window", function()
+        local sessionStart = 1700000000
+        WGS.db.global.events = {
+            { id = 1, title = "A",
+              date = os.date("%Y-%m-%d", sessionStart - 60 * 60),
+              time = os.date("%H:%M",    sessionStart - 60 * 60) },
+            { id = 2, title = "B",
+              date = os.date("%Y-%m-%d", sessionStart),
+              time = os.date("%H:%M",    sessionStart) },
+        }
+        WGS.db.global.attendance = {
+            { startedAt = sessionStart, eventId = nil, memberList = {} },
+        }
+
+        local bound, ambiguous, unmatched = WGS:ReconcileAttendanceEventBindings()
+        assert.are.equal(0, bound)
+        assert.are.equal(1, ambiguous,
+            "two events inside the wider window → ambiguous, not bound")
+        assert.are.equal(0, unmatched)
+        assert.is_nil(WGS.db.global.attendance[1].eventId,
+            "ambiguous matches must not silently bind")
+    end)
+
+    it("leaves already-bound sessions alone", function()
+        WGS.db.global.events = {
+            { id = 1, title = "X",
+              date = os.date("%Y-%m-%d"), time = os.date("%H:%M") },
+        }
+        WGS.db.global.attendance = {
+            { startedAt = 1700000000, eventId = 999, memberList = {} },
+        }
+        local bound = WGS:ReconcileAttendanceEventBindings()
+        assert.are.equal(0, bound)
+        assert.are.equal(999, WGS.db.global.attendance[1].eventId,
+            "existing bindings must not be overwritten")
+    end)
+end)

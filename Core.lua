@@ -101,6 +101,13 @@ function WGS:SlashCommand(input)
     elseif cmd == "export" or cmd == "import" then
         self:SelectMainFrameTab(ui.TAB_SYNC)
     elseif cmd == "attendance" then
+        -- /gh attendance              → status + open log
+        -- /gh attendance reconcile    → retro-fill missing eventIds
+        local _, sub = self:GetArgs(input, 2)
+        if sub == "reconcile" then
+            self:ReconcileAttendanceEventBindings()
+            return
+        end
         -- Capture is auto-started on raid entry now. `/gh attendance`
         -- prints the live status (whether we're recording, which
         -- team/event) AND opens the Logs → Attendance log so the

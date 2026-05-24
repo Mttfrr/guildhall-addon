@@ -112,8 +112,9 @@ function module:OnEncounterEnd(_, encounterID, encounterName, difficultyID, grou
         -- MRT loot reconciliation: 5s after ENCOUNTER_END (gives the
         -- last CHAT_MSG_LOOT messages time to land in laggy raids) we
         -- walk VMRT.LootHistory.list and gap-fill any drops we missed.
-        -- Skips silently when MRT isn't loaded.
-        if WGS:HasAddon("MRT") then
+        -- Skips silently when no MRT-family addon is loaded (MRT,
+        -- NSRT, or anything else exposing VMRT.LootHistory).
+        if WGS:HasMRTData() then
             C_Timer.After(5, function()
                 WGS:ReconcileLootFromMRT(encounterID)
             end)
@@ -318,7 +319,7 @@ end
 --- the same encounter is a no-op because HasExistingMatch will now
 --- find the rows we just inserted.
 function WGS:ReconcileLootFromMRT(endedEncounterID)
-    if not self:HasAddon("MRT") then return 0 end
+    if not self:HasMRTData() then return 0 end
     local vmrt = _G.VMRT
     local hist = vmrt and vmrt.LootHistory and vmrt.LootHistory.list
     if type(hist) ~= "table" then return 0 end

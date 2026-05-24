@@ -330,15 +330,17 @@ end
 local AUTO_WINDOW_LEAD  = 30 * 60      -- 30 minutes before scheduled start
 local AUTO_WINDOW_TRAIL = 60 * 60      -- 1 hour after scheduled start
 
-function WGS:FindActiveScheduledEvent(now)
+function WGS:FindActiveScheduledEvent(now, leadOverride, trailOverride)
     local events = self.db.global.events
     if not events or #events == 0 then return nil end
     now = now or time()
+    local lead  = leadOverride  or AUTO_WINDOW_LEAD
+    local trail = trailOverride or AUTO_WINDOW_TRAIL
 
     local matched = nil
     for _, ev in ipairs(events) do
         local start = ParseEventTime(ev)
-        if start and now >= (start - AUTO_WINDOW_LEAD) and now <= (start + AUTO_WINDOW_TRAIL) then
+        if start and now >= (start - lead) and now <= (start + trail) then
             if matched then
                 -- Ambiguous — multiple events overlap this instant. Bail out
                 -- to untagged rather than guess which one this raid is for.

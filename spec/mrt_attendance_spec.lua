@@ -30,11 +30,24 @@ describe("WGS:BuildBossAttendanceFromMRT", function()
         _G.VMRT     = origVMRT
     end)
 
-    it("returns an empty list when MRT is not loaded", function()
+    it("returns an empty list when no VMRT data is available", function()
         pretendMRTLoaded(false)
-        _G.VMRT = { Attendance = { data = { { t = 100, eI = 1, eN = "x", [1] = "AFoo" } } } }
+        _G.VMRT = nil
         local rows = WGS:BuildBossAttendanceFromMRT(0, 1000)
         assert.same({}, rows)
+    end)
+
+    -- NSRT compat: VMRT populated, MRT addon name not loaded — we should
+    -- read it. Locks in HasMRTData's "VMRT presence is the real signal"
+    -- contract against accidental regressions to a strict addon-name gate.
+    it("reads VMRT.Attendance.data even when only NSRT is loaded", function()
+        pretendMRTLoaded(false)
+        _G.VMRT = { Attendance = { data = {
+            { t = 100, eI = 1, eN = "TestBoss", [1] = "AFoo" }
+        } } }
+        local rows = WGS:BuildBossAttendanceFromMRT(0, 1000)
+        assert.are.equal(1, #rows)
+        assert.are.equal("TestBoss", rows[1].encounterName)
     end)
 
     it("returns an empty list when MRT is loaded but data is missing", function()

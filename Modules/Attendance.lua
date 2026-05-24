@@ -145,6 +145,19 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
     end
 
     self:FireEvent("WGS_SESSION_STARTED", currentSession)
+
+    -- Take an immediate raid-comp snapshot now, while the roster is
+    -- fresh from GetRaidMembers and every member has present=true. This
+    -- guarantees at least one raidCompResults row per session — even
+    -- for raids that have no boss kills AND empty out before
+    -- StopAttendance fires (everyone leaves to log off). Without this,
+    -- the only other snapshot opportunities are on ENCOUNTER_END
+    -- (none if nothing died) and at session end (filtered to
+    -- present + subgroup>0, so empty if the raid disbanded first).
+    -- The result: a session with no recorded comp, and the platform
+    -- import reports "raid comp for event #n is missing" because
+    -- there's no row to link.
+    self:SnapshotRaidComp(nil)
 end
 
 -- MRT (VMRT.Attendance.data[]) stores rosters with a one-character class
@@ -178,7 +191,7 @@ end
 --- Contract reference: docs/INTEROP.md → MRT → Attendance.
 function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
     local out = {}
-    if not self:HasAddon("MRT") then return out end
+    if not self:HasMRTData() then return out end
     local vmrt = _G.VMRT
     local data = vmrt and vmrt.Attendance and vmrt.Attendance.data
     if type(data) ~= "table" then return out end
@@ -241,6 +254,44 @@ function WGS:StopAttendance()
         currentSession.startedAt, currentSession.endedAt)
     if #mrtBossAttendance > 0 then
         currentSession.bossAttendance = mrtBossAttendance
+    end
+
+    -- Back-resolve event binding for sessions that started without one.
+    -- The auto-flow uses a tight [start-30m, start+1h] window so it
+    -- never silently mis-tags raids; this widens to [start-2h, start+4h]
+    -- on the back-resolution pass, which covers the common case where
+    -- the event was created on the platform AFTER the raid started
+    -- (and only just landed via import or snapshot sync). Still requires
+    -- exactly one event in the wider window — ambiguous matches stay
+    -- untagged so we don't silently bind to the wrong raid.
+    --
+    -- If we find a match, backfill not just the session fields but
+    -- also any raidCompResults rows already recorded for this session,
+    -- so the platform import can link them.
+    if not currentSession.eventId then
+        local widerLead, widerTrail = 2 * 60 * 60, 4 * 60 * 60   -- 2h / 4h
+        local ev = self:FindActiveScheduledEvent(currentSession.startedAt, widerLead, widerTrail)
+        if ev then
+            currentSession.eventId    = ev.id
+            currentSession.eventTitle = ev.title
+            currentSession.pullTime   = self:GetEventPullTime(ev)
+            for _, snap in ipairs(self.db.global.raidCompResults or {}) do
+                if snap.startedAt == currentSession.startedAt and not snap.eventId then
+                    snap.eventId    = ev.id
+                    snap.eventTitle = ev.title
+                end
+            end
+            self:Print(string.format(
+                "Bound this session to scheduled event: %s", ev.title or tostring(ev.id)))
+        else
+            -- No match even with the wider window. Surface so the
+            -- officer can either re-import (if the event hasn't landed
+            -- yet) or fix it via /gh attendance reconcile after import.
+            self:Print(
+                "Session ended without a scheduled-event binding. " ..
+                "After importing the latest platform data, run " ..
+                "|cffffd100/gh attendance reconcile|r to back-fill.")
+        end
     end
 
     -- Final raid comp snapshot (deduped against any kill snapshots from
@@ -366,6 +417,69 @@ end
 -- raid it's part of (loot rows, encounter rows, …). Returns nil when
 -- attendance isn't currently being tracked.
 --
+-- Retroactively bind orphan sessions (and their raidCompResults rows)
+-- to scheduled events. Walks every attendance row whose eventId is nil
+-- and re-runs the wider-window FindActiveScheduledEvent against the
+-- session's startedAt. The common reason for orphans: the event was
+-- created on the platform AFTER the raid started, so when the auto-flow
+-- ran at raid entry there was no event in db.global.events to match.
+-- Now that the import has landed, the events ARE there and the binding
+-- can be made — but only for sessions where exactly one event in the
+-- [start-2h, start+4h] window matches. Ambiguous matches stay
+-- untouched so an officer never has to undo a silently-wrong bind.
+--
+-- Returns (bound, ambiguous, unmatched) counts so the caller (the
+-- slash command + future UI) can report what happened.
+function WGS:ReconcileAttendanceEventBindings()
+    local sessions = self.db.global.attendance or {}
+    local comps    = self.db.global.raidCompResults or {}
+    local widerLead, widerTrail = 2 * 60 * 60, 4 * 60 * 60
+
+    local bound, ambiguous, unmatched = 0, 0, 0
+    for _, session in ipairs(sessions) do
+        if not session.eventId and session.startedAt then
+            -- Re-run with the wider window. FindActiveScheduledEvent
+            -- already returns nil for "0 OR >1 matches" — we can't
+            -- tell those apart from the return value alone. Re-walk
+            -- the events to distinguish for the user-facing count.
+            local ev = self:FindActiveScheduledEvent(session.startedAt, widerLead, widerTrail)
+            if ev then
+                session.eventId    = ev.id
+                session.eventTitle = ev.title
+                for _, snap in ipairs(comps) do
+                    if snap.startedAt == session.startedAt and not snap.eventId then
+                        snap.eventId    = ev.id
+                        snap.eventTitle = ev.title
+                    end
+                end
+                bound = bound + 1
+            else
+                -- Disambiguate: count matches inside the window
+                -- manually so the user knows whether to wait for
+                -- more import data or whether the raid genuinely
+                -- has no scheduled event.
+                local matches = 0
+                for _, candidate in ipairs(self.db.global.events or {}) do
+                    local startTs = self:GetEventPullTime(candidate)
+                    if startTs
+                       and session.startedAt >= (startTs - widerLead)
+                       and session.startedAt <= (startTs + widerTrail) then
+                        matches = matches + 1
+                    end
+                end
+                if matches > 1 then ambiguous = ambiguous + 1
+                else                unmatched = unmatched + 1 end
+            end
+        end
+    end
+
+    self:Print(string.format(
+        "Attendance reconcile: |cff00ff00%d bound|r, " ..
+        "|cffffd100%d ambiguous|r, |cff888888%d unmatched|r.",
+        bound, ambiguous, unmatched))
+    return bound, ambiguous, unmatched
+end
+
 -- Read-only view; we hand back a fresh table each call so callers can't
 -- accidentally mutate the internal session.
 function WGS:GetCurrentAttendanceContext()

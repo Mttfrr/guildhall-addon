@@ -40,10 +40,19 @@ describe("WGS:GetMRTNote", function()
         _G.VMRT           = origVMRT
     end)
 
-    it("returns nil when MRT is not loaded (regression guard)", function()
+    it("returns nil when no VMRT data is available", function()
         pretendMRTLoaded(false)
-        _G.VMRT = { Note = { Text1 = "would-be-leak" } }
+        _G.VMRT = nil   -- nothing for the bridge to read
         assert.is_nil(WGS:GetMRTNote())
+    end)
+
+    -- New contract: NSRT writes to VMRT too, so VMRT-populated-but-
+    -- MRT-not-loaded is a valid case (NSRT user, no MRT). We used to
+    -- treat that as "ignore the global"; now we treat it as "use it."
+    it("reads VMRT.Note even when the MRT addon name isn't loaded (NSRT compat)", function()
+        pretendMRTLoaded(false)
+        _G.VMRT = { Note = { Text1 = "via-NSRT" } }
+        assert.are.equal("via-NSRT", WGS:GetMRTNote())
     end)
 
     it("prefers MRT.F.GetNote when present (formatted output)", function()

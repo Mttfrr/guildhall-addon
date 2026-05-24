@@ -41,3 +41,21 @@ end
 function WGS:_ResetAddonCache()
     presenceCache = {}
 end
+
+--- True if any addon that exposes the VMRT global is available — covers
+--- classic MRT, NSRT (Method's modern fork which keeps VMRT for
+--- backwards compat), and any future addon writing to the same shared
+--- structures. The MRT bridge sites in Modules/Attendance.lua and
+--- Modules/Loot.lua use this in place of `HasAddon("MRT")` so NSRT
+--- users get the same integration without us having to enumerate every
+--- fork — we ultimately only care that VMRT.Attendance / VMRT.LootHistory
+--- are populated by *someone*.
+---
+--- The `_G.VMRT` check is the actual signal; HasAddon checks are kept
+--- as a cheap early-out so bridge sites in hot paths (e.g. inside
+--- ENCOUNTER_END handlers) don't do a table lookup when no compatible
+--- addon is loaded at all.
+function WGS:HasMRTData()
+    if self:HasAddon("MRT") or self:HasAddon("NSRT") then return true end
+    return type(_G.VMRT) == "table"
+end

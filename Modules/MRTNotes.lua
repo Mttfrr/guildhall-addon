@@ -32,7 +32,7 @@ function module:OnEnable() end
 ---   without going through MRT's formatter. Useful if a caller wants to
 ---   preserve in-note color codes for verbatim rendering.
 function WGS:GetMRTNote(raw)
-    if not self:HasAddon("MRT") then return nil end
+    if not self:HasMRTData() then return nil end
 
     if not raw then
         local mrt = _G.MRT
