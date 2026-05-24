@@ -640,3 +640,156 @@ describe("WGS:PeerSync_Catchup handshake", function()
         assert.are.equal(before, #sent)
     end)
 end)
+
+-- Whole-payload snapshot exchange. Distinct from the per-row catchup
+-- above: events/teams/signups are platform-imported as a single payload,
+-- so the sync unit is the entire import (version-stamped by
+-- db.global.lastImport). Tests cover the offer-stamp piggyback, the
+-- "newer than us" decision via the grace window, the request handler,
+-- and the inbound apply path through ProcessImport.
+describe("WGS:PeerSync snapshot exchange", function()
+    local WGS, sent
+    before_each(function()
+        WGS = setup()
+        sent = fakeChat()
+        fakeGuild({
+            ["Tester-TestRealm"]  = 1,
+            ["Officer-TestRealm"] = 1,
+        })
+        _G.IsInRaid = function() return true end
+        _G.GetGuildInfo = function(unit)
+            if unit == "player" then return "TestGuild", "Officer", 1 end
+            return nil
+        end
+        WGS:_PeerSync_InstallStandardWiring()
+    end)
+
+    it("offer carries the local lastImport as __snapshot stamp", function()
+        WGS.db.global.lastImport = 50000
+
+        local probe = assert(WGS:EncodePeerMessage({ table = "__probe", row = {} }))
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", probe[1], false)
+
+        local offer
+        for _, s in ipairs(sent) do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", s.msg)
+            if d and d.table == "__offer" then offer = d.row end
+        end
+        assert.is_table(offer)
+        assert.are.equal(50000, offer.maxes.__snapshot)
+    end)
+
+    it("processing offers sends a __snapshot __request when peer is meaningfully ahead", function()
+        WGS.db.global.lastImport = 1000
+        WGS:PeerSync_Catchup()
+        local session = WGS:_PeerSync_CatchupSession()
+        -- Peer is 60s ahead — well beyond the 30s grace window.
+        session.offers["Officer-TestRealm"] = { __snapshot = 1060 }
+
+        local before = #sent
+        WGS._PeerSync_ProcessCatchupOffers()
+
+        local snapReq
+        for i = before + 1, #sent do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", sent[i].msg)
+            if d and d.table == "__request" and d.row.table == "__snapshot" then
+                snapReq = d.row
+            end
+        end
+        assert.is_table(snapReq)
+        assert.are.equal("Officer-TestRealm", snapReq.target)
+    end)
+
+    it("processing offers does NOT request when peer is within the 30s grace window", function()
+        WGS.db.global.lastImport = 1000
+        WGS:PeerSync_Catchup()
+        local session = WGS:_PeerSync_CatchupSession()
+        -- Peer's 20s ahead — inside the grace window; treat as equivalent.
+        session.offers["Officer-TestRealm"] = { __snapshot = 1020 }
+
+        local before = #sent
+        WGS._PeerSync_ProcessCatchupOffers()
+
+        for i = before + 1, #sent do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", sent[i].msg)
+            assert.is_false(d and d.table == "__request" and d.row.table == "__snapshot",
+                "should not have sent a snapshot request inside the grace window")
+        end
+    end)
+
+    it("__snapshot __request triggers a payload broadcast", function()
+        WGS.db.global.lastImport = 12345
+        WGS.db.global.events     = { { id = 1, title = "Heroic" } }
+        WGS.db.global.teams      = { { id = 99, name = "A-Team" } }
+
+        local reqFrame = assert(WGS:EncodePeerMessage({
+            table = "__request",
+            row   = { table = "__snapshot", target = "Tester-TestRealm" },
+        }))
+        local before = #sent
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", reqFrame[1], false)
+
+        local snap
+        for i = before + 1, #sent do
+            local d = WGS:DecodePeerMessage("Tester-TestRealm", sent[i].msg)
+            if d and d.table == "__snapshot" then snap = d.row end
+        end
+        assert.is_table(snap)
+        assert.are.equal(12345, snap.stamp)
+        assert.is_table(snap.payload)
+        assert.are.equal(1, #snap.payload.events)
+        assert.are.equal("Heroic", snap.payload.events[1].title)
+        assert.are.equal(1, #snap.payload.teams)
+    end)
+
+    it("__snapshot __request from someone with nothing to share is a no-op", function()
+        WGS.db.global.lastImport = nil   -- never imported
+        local reqFrame = assert(WGS:EncodePeerMessage({
+            table = "__request",
+            row   = { table = "__snapshot", target = "Tester-TestRealm" },
+        }))
+        local before = #sent
+        WGS:PeerSync_HandleIncoming("Officer-TestRealm", reqFrame[1], false)
+        assert.are.equal(before, #sent)
+    end)
+
+    it("inbound __snapshot newer than ours runs through ProcessImport", function()
+        WGS.db.global.lastImport = 1000
+        WGS.db.global.events     = {}
+
+        -- Stub ProcessImport so we can assert it was called with our payload.
+        local called
+        WGS.ProcessImport = function(self, data)
+            called = data
+            self.db.global.lastImport = 2000
+        end
+
+        WGS._PeerSync_MergeSnapshot({
+            stamp   = 2000,
+            payload = { events = { { id = 7, title = "Mythic" } } },
+        })
+        assert.is_table(called)
+        assert.is_table(called.events)
+        assert.are.equal("Mythic", called.events[1].title)
+    end)
+
+    it("inbound __snapshot within grace window is skipped", function()
+        WGS.db.global.lastImport = 1000
+        local called = false
+        WGS.ProcessImport = function() called = true end
+
+        local result = WGS._PeerSync_MergeSnapshot({
+            stamp   = 1015,   -- 15s newer — inside grace
+            payload = { events = {} },
+        })
+        assert.are.equal("skipped", result)
+        assert.is_false(called)
+    end)
+
+    it("inbound __snapshot with malformed payload is skipped, no crash", function()
+        WGS.db.global.lastImport = 1000
+        assert.are.equal("skipped", WGS._PeerSync_MergeSnapshot(nil))
+        assert.are.equal("skipped", WGS._PeerSync_MergeSnapshot({ stamp = 2000 }))   -- no payload
+        assert.are.equal("skipped", WGS._PeerSync_MergeSnapshot({ stamp = 2000, payload = "bad" }))
+    end)
+end)

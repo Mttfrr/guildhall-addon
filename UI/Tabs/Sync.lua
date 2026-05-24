@@ -80,6 +80,12 @@ local function BuildSyncTab(parent)
                     (s.lastPeerCount == 1 and "" or "s")
             end
         end
+        -- Surface the import freshness so officers can see when
+        -- snapshot catchup has lifted them onto a newer payload (and
+        -- spot the case where the whole guild is running stale data).
+        if s.lastImportAt and s.lastImportAt > 0 then
+            parts[#parts + 1] = "import: " .. FormatAgo(s.lastImportAt)
+        end
         statusText:SetText("|cffaaaaaa" .. table.concat(parts, "  ·  ") .. "|r")
 
         if s.enabled and s.isOfficer and s.channel and not s.inFlight then

@@ -43,6 +43,33 @@ local CATCHUP_TABLES = {
     raidCompResults = "startedAt",
 }
 
+-- Whole-payload catchup surface. Distinct from CATCHUP_TABLES because
+-- events / teams / signups / etc. come from the platform as a single
+-- import payload that wholesale-replaces the matching db.global fields
+-- (see Modules/Import.lua), not as append-only row streams. We can't
+-- diff them per-row without a server-side updatedAt, so the sync unit
+-- is the entire import snapshot, version-stamped by db.global.lastImport.
+--
+-- SNAPSHOT_FIELDS is kept in lockstep with IMPORTERS in Modules/Import.lua —
+-- if you add an importer there, add the corresponding db.global key here
+-- so the snapshot exchange covers it. db.profile.guildWebId (inviteCode)
+-- is intentionally omitted: each officer joins their own guild scope.
+local SNAPSHOT_FIELDS = {
+    "characters", "teams", "wishlists", "bossNotes", "raidComps",
+    "events", "gearAudit", "characterDetails", "signups", "targetIlvl",
+    "serverMinAddonVersion",
+}
+
+-- Two officers who imported the same platform dump within this window
+-- count as equivalent — the per-officer lastImport stamps will differ by
+-- a few seconds even when the underlying data is byte-identical, and
+-- without a server-issued dump ID we can't tell apart "same dump, two
+-- imports" from "two truly different dumps." A 30s grace prevents
+-- thrashy re-imports on every catchup while still picking up genuinely
+-- newer imports promptly. Revisit if the platform starts stamping the
+-- payload with an exportId.
+local SNAPSHOT_DEDUP_GRACE = 30
+
 -- Catch-up tuning. The probe debounce keeps GROUP_ROSTER_UPDATE storms
 -- from flooding the channel; the history cap stops a peer with months
 -- of saved data from replaying everything on a fresh install.
@@ -228,11 +255,29 @@ local function maxTimestampForTable(tableName)
     return maxTs
 end
 
+-- Local snapshot stamp = the most recent successful platform import.
+-- Zero means "we have nothing to offer for the snapshot exchange" —
+-- a brand-new install with no imports yet.
+local function getLocalSnapshotStamp()
+    return (WGS.db and WGS.db.global and tonumber(WGS.db.global.lastImport)) or 0
+end
+
+-- Returns true if the peer's stamp is meaningfully newer than ours,
+-- using SNAPSHOT_DEDUP_GRACE to absorb the common case of two officers
+-- importing the same payload a few seconds apart.
+local function isPeerSnapshotNewer(peerStamp, localStamp)
+    if type(peerStamp) ~= "number" or peerStamp <= 0 then return false end
+    return peerStamp > (localStamp + SNAPSHOT_DEDUP_GRACE)
+end
+
 local function buildLocalOffer()
     local offer = {}
     for tbl in pairs(CATCHUP_TABLES) do
         offer[tbl] = maxTimestampForTable(tbl)
     end
+    -- Snapshot stamp piggybacks on the offer so the existing probe →
+    -- offer → request handshake also covers whole-payload tables.
+    offer.__snapshot = getLocalSnapshotStamp()
     return offer
 end
 
@@ -279,6 +324,22 @@ end
 local function handleRequest(_senderKey, row)
     if type(row) ~= "table" then return end
     if row.target ~= WGS:GetPlayerKey() then return end   -- not addressed to us
+    -- Whole-payload snapshot request: ship the current import payload
+    -- back to the requester (broadcast — other stale officers benefit
+    -- too). Distinct from the per-row replay path because the unit is
+    -- a single big payload, not a stream of timestamped rows.
+    if row.table == "__snapshot" then
+        if getLocalSnapshotStamp() <= 0 then return end   -- nothing to share
+        local payload = {}
+        for _, field in ipairs(SNAPSHOT_FIELDS) do
+            payload[field] = WGS.db.global[field]
+        end
+        WGS:PeerSync_Broadcast("__snapshot", {
+            stamp   = getLocalSnapshotStamp(),
+            payload = payload,
+        })
+        return
+    end
     if not CATCHUP_TABLES[row.table] then return end       -- unknown table
     replayTable(row.table, tonumber(row.since) or 0)
 end
@@ -300,6 +361,27 @@ local function processCatchupOffers()
             WGS:PeerSync_Broadcast("__request", {
                 table  = tbl,
                 since  = localMaxes[tbl] or 0,
+                target = bestPeer,
+            })
+        end
+    end
+
+    -- Snapshot exchange: pick the peer with the freshest import stamp
+    -- (if meaningfully newer than ours via the grace window) and ask
+    -- them to broadcast their payload. Single request even if multiple
+    -- peers are ahead — they'd all ship the same data.
+    do
+        local localStamp = getLocalSnapshotStamp()
+        local bestPeer, bestStamp = nil, localStamp
+        for peer, offer in pairs(catchupSession.offers) do
+            local ts = tonumber(offer.__snapshot) or 0
+            if isPeerSnapshotNewer(ts, bestStamp) then
+                bestPeer, bestStamp = peer, ts
+            end
+        end
+        if bestPeer then
+            WGS:PeerSync_Broadcast("__request", {
+                table  = "__snapshot",
                 target = bestPeer,
             })
         end
@@ -379,6 +461,11 @@ function WGS:PeerSync_Status()
         lastSyncAt    = lastSyncAt,
         lastPeerCount = lastPeerCount,
         inFlight      = catchupSession ~= nil,
+        -- Exposed so the Sync tab can show "import: 2h ago" alongside
+        -- the peer-sync status. Snapshot exchange bumps this when a
+        -- newer payload arrives from a peer, so it doubles as the
+        -- visible signal that snapshot catchup worked.
+        lastImportAt  = getLocalSnapshotStamp(),
     }
 end
 
@@ -541,11 +628,36 @@ local function mergeRaidCompResults(row)
     return "added"
 end
 
+-- Whole-payload snapshot merge. Distinct from the per-row merges above:
+-- the incoming `row` is the entire import payload, and applying it
+-- means running ProcessImport so all the normal import-side effects
+-- (BuildCharacterLookup, WGS_IMPORT_APPLIED fire, etc.) happen.
+--
+-- Guards:
+--   * Stamp check rejects payloads that aren't meaningfully newer than
+--     ours (covers the cross-talk case where multiple officers respond
+--     to one request, and the race where we just imported locally).
+--   * No re-broadcast loop: PeerSync subscribes only to record-time
+--     capture events (loot, session ended, etc.), not to
+--     WGS_IMPORT_APPLIED, so the import triggered here doesn't echo
+--     back onto the wire.
+local function mergeSnapshot(row)
+    if type(row) ~= "table" then return "skipped" end
+    local incomingStamp = tonumber(row.stamp) or 0
+    if not isPeerSnapshotNewer(incomingStamp, getLocalSnapshotStamp()) then
+        return "skipped"
+    end
+    if type(row.payload) ~= "table" then return "skipped" end
+    WGS:ProcessImport(row.payload)
+    return "updated"
+end
+
 -- Exposed for tests to invoke directly without the full encode/decode trip.
 WGS._PeerSync_MergeLoot            = mergeLoot
 WGS._PeerSync_MergeAttendance      = mergeAttendance
 WGS._PeerSync_MergeEncounters      = mergeEncounters
 WGS._PeerSync_MergeRaidCompResults = mergeRaidCompResults
+WGS._PeerSync_MergeSnapshot        = mergeSnapshot
 
 ---------------------------------------------------------------------------
 -- Lifecycle
@@ -560,6 +672,11 @@ function WGS:_PeerSync_InstallStandardWiring()
     self:PeerSync_RegisterMerge("attendance",      mergeAttendance)
     self:PeerSync_RegisterMerge("encounters",      mergeEncounters)
     self:PeerSync_RegisterMerge("raidCompResults", mergeRaidCompResults)
+    -- Snapshot is pull-only: peers ask for it when their lastImport
+    -- lags ours by more than SNAPSHOT_DEDUP_GRACE, so no broadcast
+    -- subscription needed here. The arrival path goes through the same
+    -- merge-fn lookup as the row-stream tables.
+    self:PeerSync_RegisterMerge("__snapshot",      mergeSnapshot)
 
     -- Each broadcast checks officer rank + channel availability
     -- internally — failure is a silent no-op so capture sites don't
