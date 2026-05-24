@@ -10,11 +10,23 @@ local pendingBankOpen = nil
 local capturedFingerprints = {}
 
 function module:OnEnable()
+    -- GUILDBANK_UPDATE_MONEY: fires when the gold balance changes
+    -- (deposits, withdrawals, repairs). Drives the gold-snapshot diff
+    -- recording. Does NOT fire when the money-log query response
+    -- arrives — that's a separate event, GUILDBANKLOG_UPDATE.
     self:RegisterEvent("GUILDBANK_UPDATE_MONEY", "OnMoneyUpdate")
-    -- Auto-capture on bank open. GetNumGuildBankMoneyTransactions() returns
-    -- 0 until the player has opened the bank UI in this session, so we
-    -- couldn't usefully scan transactions before this event fires.
-    -- Debounced 1s against rapid re-opens.
+    -- GUILDBANKLOG_UPDATE: fires when the server responds to a
+    -- QueryGuildBankLog call with money- or item-log data. Without
+    -- this subscription, the addon would issue the query on bank open
+    -- (or the user would click Money Log themselves) and the response
+    -- would arrive into a void — GetNumGuildBankMoneyTransactions()
+    -- would suddenly return non-zero but nothing would read it.
+    -- Routed through the same debounce as OnMoneyUpdate so a flurry
+    -- of log updates (mass-repair sessions trigger several) collapses
+    -- to one capture.
+    self:RegisterEvent("GUILDBANKLOG_UPDATE", "OnLogUpdate")
+    -- Auto-capture on bank open: kicks the money-log query and
+    -- schedules a deferred capture for the round trip.
     self:RegisterEvent("GUILDBANKFRAME_OPENED", "OnBankOpened")
 end
 
@@ -24,6 +36,21 @@ function module:OnMoneyUpdate()
     pendingMoneyUpdate = C_Timer.NewTimer(0.5, function()
         pendingMoneyUpdate = nil
         WGS:OnGoldChanged()
+    end)
+end
+
+function module:OnLogUpdate()
+    -- Log updates skip the OnGoldChanged guard (which bails if
+    -- GetGuildBankMoney returns 0 — useful for cold-load races on
+    -- money events, useless and harmful here since the log can
+    -- legitimately arrive before the gold balance does). Go straight
+    -- to CaptureNewTransactions, but reuse the same debounce so a
+    -- burst of log updates collapses to one capture.
+    if pendingMoneyUpdate then pendingMoneyUpdate:Cancel() end
+    pendingMoneyUpdate = C_Timer.NewTimer(0.5, function()
+        pendingMoneyUpdate = nil
+        WGS:CaptureGold()                  -- best-effort; no-op if 0
+        WGS:CaptureNewTransactions()       -- the actual point of the event
     end)
 end
 

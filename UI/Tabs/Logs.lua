@@ -186,10 +186,32 @@ local function BuildBankSubView(sv)
     sv.balanceSub = sv:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     sv.balanceSub:SetPoint("TOPLEFT", sv.balance, "BOTTOMLEFT", 0, -2)
 
+    -- Manual capture button. The auto-capture flow (on GUILDBANKFRAME_OPENED
+    -- + GUILDBANKLOG_UPDATE) covers the common case, but events sometimes
+    -- get missed — addons loaded after the bank UI, a /reload while the
+    -- bank is open, a server hiccup that drops the GUILDBANKLOG_UPDATE.
+    -- The button is the always-works escape hatch: it issues the
+    -- money-log query and schedules a capture, exactly as the
+    -- bank-open handler does. Bank must be open for the query to land
+    -- (Blizzard requires GuildBankFrame to be shown), so the click
+    -- prints a hint if the bank UI isn't there.
+    sv.captureBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    sv.captureBtn:SetSize(110, 22)
+    sv.captureBtn:SetPoint("TOPRIGHT", sv, "TOPRIGHT", -8, -4)
+    sv.captureBtn:SetText("Capture now")
+    sv.captureBtn:SetScript("OnClick", function()
+        if not (GuildBankFrame and GuildBankFrame.IsShown and GuildBankFrame:IsShown()) then
+            WGS:Print("Open the guild bank first, then click Capture now.")
+            return
+        end
+        WGS:_HandleBankOpened()
+    end)
+
     -- Team-filter no-op disclaimer; shown only when the picker is set.
     -- Bank is guild-wide finance; per-team scoping doesn't apply.
+    -- Anchored below the capture button so the two don't collide.
     sv.teamNote = sv:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    sv.teamNote:SetPoint("TOPRIGHT", sv, "TOPRIGHT", -5, -4)
+    sv.teamNote:SetPoint("TOPRIGHT", sv.captureBtn, "BOTTOMRIGHT", 0, -2)
     sv.teamNote:SetJustifyH("RIGHT")
     sv.teamNote:Hide()
 
