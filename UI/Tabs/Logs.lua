@@ -44,6 +44,77 @@ local ITEM_QUALITY_COLORS = {
 -- are excluded from a team-filtered view — they show up under "All
 -- Teams" as before.
 
+-- Right-click context menu for a Logs → Loot row. Builds an event
+-- candidate list from db.global.events within ±4h of the row's
+-- timestamp (matches the wider window used by
+-- WGS:ReconcileAttendanceEventBindings), each one offered as a
+-- re-tag target. Always includes "Untag" and "Delete row" entries.
+--
+-- Uses EasyMenu (broadly supported across client flavours). A single
+-- shared dropdown frame is created lazily on first use — building one
+-- per row would leak frames as the list re-renders.
+local function OpenLootRowMenu(rowIndex)
+    local row = WGS.db.global.loot and WGS.db.global.loot[rowIndex]
+    if not row then return end
+
+    local rowTs = tonumber(row.timestamp) or 0
+    local WINDOW = 4 * 60 * 60   -- ±4h
+
+    local candidates = {}
+    for _, ev in ipairs(WGS.db.global.events or {}) do
+        local startTs = WGS:GetEventPullTime(ev)
+        if startTs and math.abs(startTs - rowTs) <= WINDOW then
+            candidates[#candidates + 1] = {
+                ev      = ev,
+                startTs = startTs,
+                delta   = math.abs(startTs - rowTs),
+            }
+        end
+    end
+    table.sort(candidates, function(a, b) return a.delta < b.delta end)
+
+    local retagItems = {}
+    for _, c in ipairs(candidates) do
+        local teamName = WGS.GetTeamName and WGS:GetTeamName(c.ev.team_id) or "?"
+        retagItems[#retagItems + 1] = {
+            text = string.format("%s \194\183 %s \194\183 %s",
+                date("%m/%d %H:%M", c.startTs),
+                teamName,
+                c.ev.title or "?"),
+            notCheckable = true,
+            func = function()
+                WGS:RetagLootRow(rowIndex, c.ev.id, c.ev.team_id)
+            end,
+        }
+    end
+    if #retagItems == 0 then
+        retagItems[#retagItems + 1] = {
+            text = "(no events within \194\1774h of this row)",
+            disabled = true,
+            notCheckable = true,
+        }
+    end
+    retagItems[#retagItems + 1] = { text = "", isTitle = true, notCheckable = true }
+    retagItems[#retagItems + 1] = {
+        text = "Untag (clear event/team)",
+        notCheckable = true,
+        func = function() WGS:RetagLootRow(rowIndex, nil, nil) end,
+    }
+
+    local menu = {
+        { text = "Re-tag event", notCheckable = true, hasArrow = true, menuList = retagItems },
+        { text = "", isTitle = true, notCheckable = true },
+        { text = "Delete row", notCheckable = true,
+          func = function() WGS:DeleteLootRow(rowIndex) end },
+    }
+
+    if not _G.GuildHallLootRowDropdown then
+        _G.GuildHallLootRowDropdown = CreateFrame("Frame", "GuildHallLootRowDropdown",
+                                                  UIParent, "UIDropDownMenuTemplate")
+    end
+    EasyMenu(menu, _G.GuildHallLootRowDropdown, "cursor", 0, 0, "MENU")
+end
+
 local function BuildLootSubView(sv)
     local searchLbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     searchLbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
@@ -75,6 +146,13 @@ local function BuildLootSubView(sv)
     sv.scrollFrame = sf
     sv.content = content
     sv.filterText = ""
+
+    -- Live refresh when an officer edits a loot row (re-tag or delete).
+    -- Uses the existing _refreshFn pattern that the search box already
+    -- shares — wired in BuildLogsTab below; resolved at fire time.
+    GuildHall.RegisterCallback(sv, "WGS_LOOT_EDITED", function()
+        if sv._refreshFn then sv._refreshFn() end
+    end)
 end
 
 local function PopulateLoot(sv)
@@ -89,16 +167,23 @@ local function PopulateLoot(sv)
     -- (All Teams) shows everything.
     local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
 
+    -- Pair each sorted entry with its index in the unsorted
+    -- db.global.loot table so the right-click menu can pass it to the
+    -- mutator API (which is index-based — sorted-list position would
+    -- shift on every re-render).
     local sorted = {}
-    for i = #loot, 1, -1 do sorted[#sorted + 1] = loot[i] end
+    for i = #loot, 1, -1 do
+        sorted[#sorted + 1] = { entry = loot[i], idx = i }
+    end
 
     local yOff = 0
     local shown = 0
     local MAX_ROWS = 200
     local matchedTeam = 0
 
-    for _, entry in ipairs(sorted) do
+    for _, pair in ipairs(sorted) do
         if shown >= MAX_ROWS then break end
+        local entry, originalIndex = pair.entry, pair.idx
 
         local passesTeam = (currentTeamId == nil) or (entry.teamId == currentTeamId)
         if passesTeam then matchedTeam = matchedTeam + 1 end
@@ -114,9 +199,16 @@ local function PopulateLoot(sv)
         end
 
         if matches then
-            local row = CreateFrame("Frame", nil, sv.content)
+            -- Button (not Frame) so the row can receive right-clicks for
+            -- the correction menu. Left-click intentionally a no-op
+            -- today; reserved for a future "expand for details" view.
+            local row = CreateFrame("Button", nil, sv.content)
             row:SetSize(660, 18)
             row:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 0, yOff)
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            row:SetScript("OnClick", function(_, button)
+                if button == "RightButton" then OpenLootRowMenu(originalIndex) end
+            end)
 
             local qColor = ITEM_QUALITY_COLORS[entry.itemQuality or 4] or "ffa335ee"
             local itemText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")

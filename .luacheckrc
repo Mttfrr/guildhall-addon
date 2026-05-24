@@ -46,6 +46,7 @@ read_globals = {
     "BasicFrameTemplateWithInset", "BackdropTemplate",
     "PanelTemplates_SetNumTabs", "PanelTemplates_GetSelectedTab",
     "PanelTemplates_Tab_OnClick", "PanelTemplates_TabResize",
+    "EasyMenu", "UIDropDownMenuTemplate", "MenuUtil",
 
     -- Static popups / chat
     "StaticPopup_Show", "StaticPopup_Hide", "UISpecialFrames",
