@@ -435,6 +435,31 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         if WGS.AutoInvite then WGS:AutoInvite() end
     end)
 
+    -- Track / Stop attendance. Scoped to the currently-selected event:
+    -- starting via this button explicitly binds the session to `ev`,
+    -- bypassing the FindActiveScheduledEvent auto-resolution (which is
+    -- still what RAID_INSTANCE_WELCOME uses). Disabled when viewing a
+    -- past event so officers can't accidentally start a session for a
+    -- raid that already happened.
+    local isTracking = WGS:IsTrackingAttendance()
+    local statusText = ui.events.EventStatus and ui.events.EventStatus(ev, time()) or ""
+    local isPast = (statusText == "Past")
+    local trackBtn = actionBtn(isTracking and "Stop" or "Track", 410, 60, function()
+        if WGS:IsTrackingAttendance() then
+            WGS:StopAttendance()
+        else
+            local teamName = ev.team_id and WGS:GetTeamName(ev.team_id) or nil
+            WGS:StartAttendanceForTeam(ev.team_id, teamName, ev)
+        end
+        -- Re-render the detail panel so the button label flips and
+        -- the rest of the footer picks up the new state.
+        if WGS.PopulateEvents then WGS:PopulateEvents(footer:GetParent()) end
+    end)
+    -- Disable on past events when no session is in flight. If a session
+    -- IS running, leave the Stop button enabled so officers can always
+    -- stop a stuck capture regardless of which event they're viewing.
+    if isPast and not isTracking then trackBtn:Disable() end
+
     actionBtn("Share Roster", 78, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
@@ -464,7 +489,7 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         end
     end)
 
-    actionBtn("Share Gear Gaps", 182, 120, function()
+    actionBtn("Share Gaps", 182, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
         local lines = {}
@@ -484,7 +509,7 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         WGS:SendChatChunked(lines, channel)
     end)
 
-    actionBtn("Share Comp", 306, 100, function()
+    actionBtn("Share Comp", 286, 100, function()
         local channel = WGS:GetGroupChannel()
         if not channel then WGS:Print("Not in a group."); return end
         if not comp then

@@ -312,35 +312,13 @@ end
 -- in the addon routes through it so a new role bucket on the platform
 -- only needs to update one file.
 
--- Forward-declare so BuildAttendanceSubView's button-click closure can
--- reference the populator before its `local function ... end` line.
-local PopulateAttendance
-
 local function BuildAttendanceSubView(sv)
-    -- Top-bar Start/Stop button. Capture is normally auto-started by
-    -- RAID_INSTANCE_WELCOME and auto-stopped by GROUP_LEFT, but
-    -- officers occasionally need to override (quick clears that
-    -- didn't trigger the welcome event, raids where the auto-start
-    -- missed). One toggle button; the label flips from
-    -- WGS:IsTrackingAttendance().
-    sv.toggleBtn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
-    sv.toggleBtn:SetSize(150, 22)
-    sv.toggleBtn:SetPoint("TOPLEFT", sv, "TOPLEFT", 4, -2)
-
-    sv.toggleHint = sv:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    sv.toggleHint:SetPoint("LEFT", sv.toggleBtn, "RIGHT", 10, 0)
-
-    sv.toggleBtn:SetScript("OnClick", function()
-        if WGS:IsTrackingAttendance() then
-            WGS:StopAttendance()
-        else
-            WGS:StartAttendanceAutoTagged()
-        end
-        PopulateAttendance(sv)   -- forward-declared below; resolves at call time
-    end)
-
+    -- Pure read surface — sessions list only. The manual Start / Stop
+    -- toggle moved to the Events detail panel's actions footer where
+    -- it can scope to the selected event; the minimap shift-click is
+    -- the no-UI fast path. See UI/EventsDetail.lua PopulateActionsFooter.
     local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT",     sv, "TOPLEFT",     0, -28)
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, 0)
     sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(660)
@@ -355,28 +333,9 @@ local function BuildAttendanceSubView(sv)
     sv._expanded = {}
 end
 
-function PopulateAttendance(sv)
+local function PopulateAttendance(sv)
     if not sv or not sv:IsVisible() then return end
     ClearContainer(sv.content)
-
-    -- Refresh the Start/Stop button label + the hint text from the
-    -- current attendance state on every render.
-    if sv.toggleBtn then
-        local tracking = WGS:IsTrackingAttendance()
-        if tracking then
-            sv.toggleBtn:SetText("Stop attendance")
-            local ctx = WGS.GetCurrentAttendanceContext and WGS:GetCurrentAttendanceContext() or nil
-            if ctx and ctx.teamName then
-                sv.toggleHint:SetText(string.format(
-                    "|cff00ff00recording|r |cff888888for|r |cffffd100%s|r", ctx.teamName))
-            else
-                sv.toggleHint:SetText("|cff00ff00recording|r |cff888888(untagged)|r")
-            end
-        else
-            sv.toggleBtn:SetText("Start attendance")
-            sv.toggleHint:SetText("|cff888888not recording \226\128\148 starts automatically on raid entry|r")
-        end
-    end
 
     local sessions = WGS.db.global.attendance or {}
     local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
