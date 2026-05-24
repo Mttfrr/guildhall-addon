@@ -67,6 +67,36 @@ describe("WGS:PeerSync_PreferredChannel", function()
     end)
 end)
 
+describe("WGS:PeerSync_Status", function()
+    local WGS
+    before_each(function() WGS = setup() end)
+
+    it("reports disabled when override is false", function()
+        WGS.db.profile.peerSyncEnabled = false
+        local s = WGS:PeerSync_Status()
+        assert.is_false(s.enabled)
+        assert.is_table(s)
+    end)
+
+    it("reports enabled iff officer when no override is set", function()
+        WGS.db.profile.peerSyncEnabled = nil  -- default
+        -- Stub the officer gate two ways to cover both branches.
+        WGS.IsGuildOfficer = function() return true end
+        assert.is_true(WGS:PeerSync_Status().enabled)
+        WGS.IsGuildOfficer = function() return false end
+        assert.is_false(WGS:PeerSync_Status().enabled)
+    end)
+
+    it("includes channel + lastSyncAt fields", function()
+        _G.IsInRaid, _G.IsInGroup, _G.IsInGuild = function() return true end, function() return true end, function() return true end
+        local s = WGS:PeerSync_Status()
+        assert.are.equal("RAID", s.channel)
+        assert.is_number(s.lastSyncAt)
+        assert.is_number(s.lastPeerCount)
+        assert.is_boolean(s.inFlight)
+    end)
+end)
+
 describe("WGS:PeerSync_Broadcast", function()
     local WGS, sent
     before_each(function()

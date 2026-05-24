@@ -4,6 +4,9 @@ All notable changes to GuildHall will be documented in this file.
 
 ## [0.7.0-beta] — Unreleased
 
+### Added
+- **Manual officer sync from the Sync tab UI.** The `/gh sync` slash command (peer-sync catch-up — probes other officers for newer captures and pulls deltas) already existed but was invisible unless you knew the slash. Added a dedicated "Officer Sync" section at the top of the Sync tab with a "Sync now" button + a one-line status read-out: enabled/disabled state, current channel (RAID / PARTY / GUILD or "no channel"), last sync timestamp ("3m ago"), and peer count from the last round. The button greys out automatically when the sync can't run (not officer rank, no channel, or a probe is already in flight) and shows a "probing…" indicator while the offer-collection window is open. New public accessor `WGS:PeerSync_Status()` returns the snapshot for any future UI surface; 3 new specs cover the enabled/officer/channel branches.
+
 ### Fixed
 - **Rail scrollbar no longer bleeds into the detail panel.** The Events rail's `ScrollFrame` was sized to the full `RAIL_W` (210 px), but `UIPanelScrollFrameTemplate` anchors its scrollbar 4 px outside the frame's right edge — putting the scrollbar at x=214-231, which crossed into the detail panel's left edge (starting at x=220). Result: the first ~12 px of the detail content got overpainted by the scrollbar (the dark-square artifact near the date, and the first letter of section titles eaten on long titles). Fix: shrink the rail ScrollFrame to `RAIL_W - 22` so the scrollbar fits inside `RAIL_W` with a clean 10 px gap to the detail panel.
 - **Events tab alignment + roster reorg.** Five tweaks from screenshot review:

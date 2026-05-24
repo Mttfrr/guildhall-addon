@@ -53,6 +53,11 @@ local CATCHUP_MAX_HISTORY     = 86400 * 7 -- never replay older than 7 days
 local lastProbeAt    = 0
 local catchupSession = nil   -- { startedAt, offers = { [peerKey] = { [tableName] = ts } } }
 
+-- Per-session results, exposed via WGS:PeerSync_Status() for the UI.
+-- Updated when a catchup round completes (processCatchupOffers).
+local lastSyncAt     = 0     -- timestamp of the last completed probe round
+local lastPeerCount  = 0     -- number of peers that replied to the last probe
+
 -- Outbound queue + last-send timestamps per channel. Used by the
 -- throttle path: when called faster than the channel allows, the
 -- payload is queued and flushed on a C_Timer.After tail.
@@ -299,6 +304,13 @@ local function processCatchupOffers()
             })
         end
     end
+
+    -- Snapshot per-session results for the UI.
+    local peerCount = 0
+    for _ in pairs(catchupSession.offers) do peerCount = peerCount + 1 end
+    lastSyncAt = tonumber(time and time()) or 0
+    lastPeerCount = peerCount
+
     catchupSession = nil
 end
 WGS._PeerSync_ProcessCatchupOffers = processCatchupOffers   -- for tests
@@ -341,6 +353,33 @@ function WGS:PeerSync_ManualCatchup()
     lastProbeAt = 0   -- force-bypass debounce
     self:Print("Officer sync: probing peers on " .. channel .. "…")
     self:PeerSync_Catchup()
+end
+
+-- Status snapshot for the UI (Sync tab's Officer Sync section). Returns
+-- a single table so the caller can render every line without poking the
+-- module's file-locals. All fields are read-only — flip the user-
+-- override toggle via the existing Config UI.
+--
+--   isOfficer       — true iff IsGuildOfficer() right now
+--   channel         — string or nil (RAID / PARTY / GUILD)
+--   enabled         — effective enabled state (officer-default ∘ override)
+--   lastSyncAt      — unix ts of the last completed catchup (0 if never)
+--   lastPeerCount   — number of peers that replied to the last catchup
+--   inFlight        — true iff a probe round is still collecting offers
+function WGS:PeerSync_Status()
+    local override = self.db and self.db.profile and self.db.profile.peerSyncEnabled
+    local isOfficer = self:IsGuildOfficer()
+    local effective
+    if override == nil then effective = isOfficer
+    else                     effective = override and true or false end
+    return {
+        isOfficer     = isOfficer,
+        channel       = self:PeerSync_PreferredChannel(),
+        enabled       = effective,
+        lastSyncAt    = lastSyncAt,
+        lastPeerCount = lastPeerCount,
+        inFlight      = catchupSession ~= nil,
+    }
 end
 
 -- Trust gate + dispatch for a single received chunk. Called by the
