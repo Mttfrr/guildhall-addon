@@ -353,6 +353,23 @@ function WGS:IsTrackingAttendance()
     return isTracking
 end
 
+-- Returns the active session's tagging context — eventId, teamId,
+-- teamName — for any capture site that wants to stamp itself with the
+-- raid it's part of (loot rows, encounter rows, …). Returns nil when
+-- attendance isn't currently being tracked.
+--
+-- Read-only view; we hand back a fresh table each call so callers can't
+-- accidentally mutate the internal session.
+function WGS:GetCurrentAttendanceContext()
+    if not isTracking or not currentSession then return nil end
+    return {
+        eventId    = currentSession.eventId,
+        teamId     = currentSession.teamId,
+        teamName   = currentSession.teamName,
+        startedAt  = currentSession.startedAt,
+    }
+end
+
 function WGS:GetAttendanceStartTime()
     return currentSession and currentSession.startedAt or nil
 end

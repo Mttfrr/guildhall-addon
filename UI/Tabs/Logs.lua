@@ -36,42 +36,13 @@ local ITEM_QUALITY_COLORS = {
     [7] = "ff00ccff",
 }
 
--- Build a per-team event window list for the loot date-range filter.
--- Returns an array of { startTs, endTs } pairs covering each event of
--- the picked team (event start → +5h). Until loot capture tags rows
--- with team_id at parse time (follow-up commit), this is the best we
--- can do — show loot whose capture timestamp falls inside any of the
--- picked team's event windows. Imperfect (off-team pugs in a team
--- event will leak in; loot during off-cycle clears won't show) but
--- useful in the common case.
-local function BuildEventWindowsForTeam(teamId)
-    if not teamId then return nil end
-    local events = WGS.db.global.events or {}
-    local windows = {}
-    for _, ev in ipairs(events) do
-        if (ev.team_id == teamId or ev.teamId == teamId) and ev.date then
-            local y, mo, d = ev.date:match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
-            if y then
-                local h, mi = (ev.time or "20:00"):match("^(%d%d):(%d%d)$")
-                local startTs = time({
-                    year = tonumber(y), month = tonumber(mo), day = tonumber(d),
-                    hour = tonumber(h or 20), min = tonumber(mi or 0), sec = 0,
-                })
-                windows[#windows + 1] = { startTs, startTs + 5 * 3600 }
-            end
-        end
-    end
-    return windows
-end
-
-local function InAnyWindow(ts, windows)
-    if not windows then return true end
-    if not ts then return false end
-    for _, w in ipairs(windows) do
-        if ts >= w[1] and ts <= w[2] then return true end
-    end
-    return false
-end
+-- Loot rows captured by Modules/Loot.lua now carry teamId + eventId
+-- stamps from the active attendance session (see
+-- WGS:GetCurrentAttendanceContext). The team filter is an exact match
+-- against entry.teamId. Pre-tagging rows (captured before the stamping
+-- landed, or captured without an active session) carry nil teamId and
+-- are excluded from a team-filtered view — they show up under "All
+-- Teams" as before.
 
 local function BuildLootSubView(sv)
     local searchLbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -114,9 +85,9 @@ local function PopulateLoot(sv)
     local filter = sv.filterText or ""
     local roster = WGS:GetGuildRosterLookup()
 
-    -- Date-range pre-filter when the team picker is set. nil = "All Teams".
+    -- Exact-match team filter against entry.teamId. nil currentTeamId
+    -- (All Teams) shows everything.
     local currentTeamId = WGS.GetCurrentTeamId and WGS:GetCurrentTeamId() or nil
-    local windows = BuildEventWindowsForTeam(currentTeamId)
 
     local sorted = {}
     for i = #loot, 1, -1 do sorted[#sorted + 1] = loot[i] end
@@ -129,7 +100,7 @@ local function PopulateLoot(sv)
     for _, entry in ipairs(sorted) do
         if shown >= MAX_ROWS then break end
 
-        local passesTeam = InAnyWindow(entry.timestamp, windows)
+        local passesTeam = (currentTeamId == nil) or (entry.teamId == currentTeamId)
         if passesTeam then matchedTeam = matchedTeam + 1 end
 
         local matches = passesTeam and filter == ""
@@ -185,7 +156,7 @@ local function PopulateLoot(sv)
         local noData = sv.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         noData:SetPoint("TOPLEFT", sv.content, "TOPLEFT", 5, -5)
         if currentTeamId and matchedTeam == 0 then
-            noData:SetText("No loot captured during this team's events.")
+            noData:SetText("No loot tagged to this team yet. Older rows captured before this version aren't team-tagged.")
         elseif filter ~= "" then
             noData:SetText("No loot matching filter.")
         else
@@ -197,7 +168,7 @@ local function PopulateLoot(sv)
     end
 
     if currentTeamId then
-        sv.countText:SetText(string.format("|cff888888Showing %d of %d (team-filtered: %d)|r",
+        sv.countText:SetText(string.format("|cff888888Showing %d of %d (team-tagged: %d)|r",
             shown, #loot, matchedTeam))
     else
         sv.countText:SetText(string.format("|cff888888Showing %d of %d|r", shown, #loot))

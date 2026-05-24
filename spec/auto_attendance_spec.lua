@@ -16,6 +16,53 @@ local function timeStringOffset(seconds)
     return os.date("%H:%M", os.time() + seconds)
 end
 
+describe("WGS:GetCurrentAttendanceContext", function()
+    local WGS
+
+    before_each(function()
+        WGS = helpers.setup()
+    end)
+
+    it("returns nil when no session is active", function()
+        assert.is_nil(WGS:GetCurrentAttendanceContext())
+    end)
+
+    it("returns the team + event tagging after StartAttendanceForTeam", function()
+        -- Stub the WoW state StartAttendanceForTeam reads.
+        _G.IsInRaid          = function() return true end
+        _G.IsInGroup         = function() return true end
+        _G.GetInstanceInfo   = function() return "Test Raid", "raid", 16, "Mythic" end
+        WGS.GetRaidMembers   = function() return {} end
+        WGS.GetTimestamp     = function() return 1700000000 end
+
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders",
+            { id = 7, title = "Tuesday Pulls" })
+
+        local ctx = WGS:GetCurrentAttendanceContext()
+        assert.is_table(ctx)
+        assert.are.equal(42, ctx.teamId)
+        assert.are.equal("Mythic Raiders", ctx.teamName)
+        assert.are.equal(7, ctx.eventId)
+        assert.are.equal(1700000000, ctx.startedAt)
+    end)
+
+    it("returns nil again after StopAttendance", function()
+        _G.IsInRaid          = function() return true end
+        _G.IsInGroup         = function() return true end
+        _G.GetInstanceInfo   = function() return "Test Raid", "raid", 16, "Mythic" end
+        WGS.GetRaidMembers   = function() return {} end
+        WGS.GetTimestamp     = function() return 1700000000 end
+        WGS.SnapshotRaidComp = function() end                -- no-op for this test
+        WGS.HasAddon         = function() return false end   -- MRT not loaded
+        WGS.ShowExportReminder = function() end              -- skip popup
+        _G.C_Timer           = { After = function() end }    -- no-op scheduler
+
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", { id = 7 })
+        WGS:StopAttendance()
+        assert.is_nil(WGS:GetCurrentAttendanceContext())
+    end)
+end)
+
 describe("FindActiveScheduledEvent (auto-team resolution)", function()
     local WGS
 

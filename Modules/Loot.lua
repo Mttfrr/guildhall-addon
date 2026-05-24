@@ -147,6 +147,14 @@ function module:OnLootMessage(_, msg, ...)
     if itemQuality and itemQuality < QUALITY_THRESHOLD then return end
 
     local instanceName, _, difficultyID = GetInstanceInfo()
+
+    -- Stamp the row with the active attendance session's team + event,
+    -- if any. Lets the Logs → Loot UI filter by team without falling
+    -- back to the date-window heuristic, and gives the platform an
+    -- exact event link per loot row instead of having to reconstruct
+    -- it from the timestamp.
+    local ctx = WGS.GetCurrentAttendanceContext and WGS:GetCurrentAttendanceContext() or nil
+
     local entry = {
         timestamp = WGS:GetTimestamp(),
         player = player,
@@ -160,6 +168,8 @@ function module:OnLootMessage(_, msg, ...)
         difficulty = difficultyID or 0,
         boss = lastBossName,
         recordedBy = WGS:GetPlayerKey(),
+        eventId  = ctx and ctx.eventId or nil,
+        teamId   = ctx and ctx.teamId  or nil,
     }
 
     -- If item info wasn't cached, backfill after a short delay
@@ -316,6 +326,11 @@ function WGS:ReconcileLootFromMRT(endedEncounterID)
     local now = self:GetTimestamp()
     local windowStart = now - MRT_LOOT_WINDOW_SECONDS
 
+    -- Stamp MRT gap-fill rows with the same attendance context as
+    -- CHAT_MSG_LOOT rows so the Logs → Loot team filter applies
+    -- uniformly across both capture sources.
+    local ctx = WGS.GetCurrentAttendanceContext and WGS:GetCurrentAttendanceContext() or nil
+
     local added = 0
     for _, raw in ipairs(hist) do
         local row = ParseMRTLootRow(raw)
@@ -344,6 +359,8 @@ function WGS:ReconcileLootFromMRT(endedEncounterID)
                     boss        = lastBossName,
                     recordedBy  = WGS:GetPlayerKey(),
                     source      = "mrt",    -- distinguishes gap-fill rows from CHAT_MSG_LOOT
+                    eventId     = ctx and ctx.eventId or nil,
+                    teamId      = ctx and ctx.teamId  or nil,
                 }
                 table.insert(WGS.db.global.loot, entry)
                 WGS:FireEvent("WGS_LOOT_RECORDED", entry)
