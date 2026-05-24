@@ -271,12 +271,21 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
         byRole[role][#byRole[role] + 1] = m
     end
 
+    -- Split anchors: TOP-of-previous for vertical stacking, LEFT-of-
+    -- header for a stable x column. Without the split, each row's
+    -- TOPLEFT anchored to the previous row's BOTTOMLEFT at x = +12
+    -- accumulates the offset down the list — Teraiz at header+12,
+    -- Healers at Teraiz+0, Deconaga at Healers+12 = header+24,
+    -- and so on until DPS members render four indents deep. The
+    -- LEFT anchor pins every role heading to header.x and every
+    -- member to header.x + 12, regardless of what came before.
     local last = header
     for _, role in ipairs(ROLE_ORDER) do
         local members = byRole[role]
         if #members > 0 then
             local roleFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            roleFs:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, last == header and -6 or -4)
+            roleFs:SetPoint("TOP", last, "BOTTOM", 0, last == header and -6 or -4)
+            roleFs:SetPoint("LEFT", header, "LEFT", 0, 0)
             roleFs:SetText((ROLE_LABELS[role] or role) .. " (" .. #members .. ")")
             last = roleFs
 
@@ -286,7 +295,8 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
                 local colorHex  = WGS.CLASS_COLORS[classFile]
 
                 local row = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                row:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 12, -2)
+                row:SetPoint("TOP", last, "BOTTOM", 0, -2)
+                row:SetPoint("LEFT", header, "LEFT", 12, 0)
                 row:SetWidth(width - 12)
                 row:SetJustifyH("LEFT")
                 local text = colorHex and ("|c" .. colorHex .. nameStr .. "|r") or nameStr
