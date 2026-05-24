@@ -9,7 +9,18 @@ local dataObj = LDB:NewDataObject("GuildHall", {
     icon = "Interface\\Icons\\INV_Misc_Gear_01",
     OnClick = function(self, button)
         if button == "LeftButton" then
-            WGS:ToggleMainFrame()
+            -- Shift-left-click toggles attendance tracking. Useful
+            -- mid-raid when the addon isn't open and the officer needs
+            -- to start/stop capture without going through the Logs tab.
+            if IsShiftKeyDown() then
+                if WGS:IsTrackingAttendance() then
+                    WGS:StopAttendance()
+                else
+                    WGS:StartAttendanceAutoTagged()
+                end
+            else
+                WGS:ToggleMainFrame()
+            end
         elseif button == "RightButton" then
             WGS:OpenConfig()
         end
@@ -40,6 +51,7 @@ local dataObj = LDB:NewDataObject("GuildHall", {
 
         tooltip:AddLine(" ")
         tooltip:AddLine("|cff888888Left-click:|r Open main window")
+        tooltip:AddLine("|cff888888Shift-left-click:|r Start / stop attendance")
         tooltip:AddLine("|cff888888Right-click:|r Open settings")
     end,
 })

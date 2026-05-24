@@ -28,16 +28,24 @@ function module:OnRaidEnter()
     if isTracking then return end
     if WGS.db.profile.guildGroupsOnly and not WGS:IsGuildGroup() then return end
 
-    -- Resolve team silently: pick the scheduled event whose window
-    -- contains "now". If none (or ambiguous), start untagged. No modal,
-    -- no HUD — the addon should be invisible at this point.
-    local event = WGS:FindActiveScheduledEvent()
+    -- Silent: no modal, no HUD — the addon should be invisible at this
+    -- point. Auto-tag the session from the matching scheduled event,
+    -- or start untagged if none / ambiguous.
+    WGS:StartAttendanceAutoTagged()
+end
+
+-- Resolve the team from the currently-scheduled event and start a
+-- session. Used by the auto-start RAID_INSTANCE_WELCOME path AND by
+-- the manual button in Logs → Attendance + the minimap shift-click.
+-- Falls back to untagged when no scheduled event matches.
+function WGS:StartAttendanceAutoTagged()
+    local event = self:FindActiveScheduledEvent()
     local teamId, teamName = nil, nil
     if event then
         teamId = event.team_id or event.teamId
-        teamName = WGS:GetTeamName(teamId)
+        teamName = self:GetTeamName(teamId)
     end
-    WGS:StartAttendanceForTeam(teamId, teamName, event)
+    self:StartAttendanceForTeam(teamId, teamName, event)
 end
 
 function module:OnGroupRosterUpdate()

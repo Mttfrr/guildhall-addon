@@ -59,6 +59,7 @@ read_globals = {
     "GetNumGroupMembers", "GetNumSubgroupMembers", "GetRaidRosterInfo",
     "IsInGroup", "IsInRaid", "IsInGuild", "GetGuildInfo",
     "GetGuildRosterInfo", "GetNumGuildMembers", "GuildRoster",
+    "IsShiftKeyDown", "IsControlKeyDown", "IsAltKeyDown",
     "C_GuildInfo", "GetNormalizedRealmName", "GetRealmName",
     "InviteUnit", "C_PartyInfo", "SetRaidSubgroup", "SwapRaidSubgroup",
     "PromoteToLeader", "PromoteToAssistant",
