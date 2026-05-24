@@ -82,6 +82,7 @@ read_globals = {
     "GetGuildBankMoney", "GetCurrentGuildBankTab", "GetGuildBankTransaction",
     "GetNumGuildBankTransactions", "GetGuildBankMoneyTransaction",
     "GetNumGuildBankMoneyTransactions", "QueryGuildBankLog",
+    "MAX_GUILDBANK_TABS",
     "GuildBankFrame", "GetGuildBankItemInfo", "GetGuildBankItemLink",
 
     -- Map / instance

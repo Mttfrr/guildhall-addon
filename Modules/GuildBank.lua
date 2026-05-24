@@ -27,16 +27,35 @@ function module:OnMoneyUpdate()
     end)
 end
 
-function module:OnBankOpened()
+-- Body of the bank-opened handler, extracted to a WGS method so tests
+-- can invoke it without going through the AceModule. The AceModule
+-- wrapper below is a one-line trampoline.
+function WGS:_HandleBankOpened()
     -- Immediate "the event fired" feedback. Without this, opening the
-    -- bank looks like a no-op for 1s while the debounce runs, and on
+    -- bank looks like a no-op while the debounce runs, and on
     -- cold-open WoW hasn't populated GetGuildBankMoney yet so the
     -- post-debounce summary may also print nothing useful. This line
     -- confirms the addon noticed.
-    WGS:Print("Scanning guild bank…")
+    self:Print("Scanning guild bank…")
+
+    -- Ask the server for the money log. Without this, the client never
+    -- populates the money-transaction log on its own —
+    -- GetNumGuildBankMoneyTransactions() returns 0 until either we
+    -- query, or the user manually clicks the Money Log tab in
+    -- Blizzard's built-in bank UI. The money log is the special tab
+    -- index MAX_GUILDBANK_TABS + 1 (Blizzard's FrameXML uses the same
+    -- magic number in GuildBankFrame.lua). The server responds
+    -- asynchronously by firing GUILDBANK_UPDATE_MONEY again, which our
+    -- OnMoneyUpdate handler picks up and routes through
+    -- CaptureNewTransactions. The 2s delay below covers the
+    -- round-trip; users on bad connections may need to reopen to
+    -- catch transactions that didn't land in time.
+    if QueryGuildBankLog and MAX_GUILDBANK_TABS then
+        QueryGuildBankLog(MAX_GUILDBANK_TABS + 1)
+    end
 
     if pendingBankOpen then pendingBankOpen:Cancel() end
-    pendingBankOpen = C_Timer.NewTimer(1, function()
+    pendingBankOpen = C_Timer.NewTimer(2, function()
         pendingBankOpen = nil
         local goldOk = WGS:CaptureGold()
         local txAdded = WGS:CaptureNewTransactions() or 0
@@ -53,9 +72,13 @@ function module:OnBankOpened()
             -- GUILDBANK_UPDATE_MONEY will fire once it has and the
             -- captures will run silently then. Still, the user deserves
             -- a clear "we tried" message.
-            WGS:Print("Bank scan: no data yet. Click the Money Log tab to load transactions.")
+            WGS:Print("Bank scan: no data yet — try reopening the bank in a moment.")
         end
     end)
+end
+
+function module:OnBankOpened()
+    WGS:_HandleBankOpened()
 end
 
 --- Format a copper amount as "Ng Ms Pc". Exposed on the WGS namespace
