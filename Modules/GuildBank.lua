@@ -9,17 +9,6 @@ local pendingBankOpen = nil
 -- Fingerprints of already-captured transactions to prevent duplicates
 local capturedFingerprints = {}
 
--- Toggle visible event-trace prints so we can confirm which events fire
--- (or don't) on the user's client. Flip via /gh bankdebug; remove once
--- the auto-capture path is verified end-to-end. Prefixed so it's easy
--- to spot and complain about.
-local function bankDebugPrint(msg)
-    if WGS.db and WGS.db.profile and WGS.db.profile.bankDebug then
-        WGS:Print("|cff888888[bank-debug]|r " .. msg)
-    end
-end
-WGS._BankDebugPrint = bankDebugPrint   -- exposed for the slash command
-
 function module:OnEnable()
     -- GUILDBANK_UPDATE_MONEY: fires when the gold balance changes
     -- (deposits, withdrawals, repairs). Drives the gold-snapshot diff
@@ -49,7 +38,6 @@ function module:OnEnable()
 end
 
 function module:OnMoneyUpdate()
-    bankDebugPrint("GUILDBANK_UPDATE_MONEY fired")
     -- Debounce: multiple events can fire rapidly (e.g. mass repairs)
     if pendingMoneyUpdate then pendingMoneyUpdate:Cancel() end
     pendingMoneyUpdate = C_Timer.NewTimer(0.5, function()
@@ -69,12 +57,10 @@ function module:OnInteractionFrameShow(_, interactionType)
     local guildBankerType = (Enum and Enum.PlayerInteractionType
                                   and Enum.PlayerInteractionType.GuildBanker) or 10
     if interactionType ~= guildBankerType then return end
-    bankDebugPrint("PLAYER_INTERACTION_MANAGER_FRAME_SHOW (GuildBanker) fired")
     WGS:_HandleBankOpened()
 end
 
 function module:OnLogUpdate()
-    bankDebugPrint("GUILDBANKLOG_UPDATE fired")
     -- Log updates skip the OnGoldChanged guard (which bails if
     -- GetGuildBankMoney returns 0 — useful for cold-load races on
     -- money events, useless and harmful here since the log can
@@ -140,7 +126,6 @@ function WGS:_HandleBankOpened()
 end
 
 function module:OnBankOpened()
-    bankDebugPrint("GUILDBANKFRAME_OPENED fired")
     WGS:_HandleBankOpened()
 end
 
