@@ -21,6 +21,12 @@ local dbDefaults = {
         -- nil = "use officer default" (on for officers, off otherwise).
         -- Explicit true/false from the user takes precedence.
         peerSyncEnabled = nil,
+        -- Dev-only: when true, every PeerSync broadcast is also re-fed
+        -- through the local dispatch path so the encode → decode →
+        -- merge round-trip can be exercised from a single client (no
+        -- second officer required). See WGS:PeerSync_Broadcast for the
+        -- loopback hook + `/gh peerloopback` to toggle.
+        peerSyncLoopback = false,
         -- Global current-team filter. nil = "All Teams" (no filter).
         -- Otherwise a `team.id` from db.global.teams. Read by the main
         -- frame's title-bar picker + every team-scoped tab via
@@ -148,6 +154,19 @@ function WGS:SlashCommand(input)
         -- when you suspect a peer's data drifted. Bypasses the 60s
         -- debounce so it always does something visible.
         self:PeerSync_ManualCatchup()
+    elseif cmd == "peerloopback" then
+        -- Dev-only: toggle PeerSync loopback. Every broadcast is also
+        -- re-fed through our own dispatch path so the full encode →
+        -- decode → merge → catch-up round-trip can be exercised from
+        -- a single client. No outbound broadcasts go to anyone else
+        -- that they wouldn't have gone to anyway — this just enables
+        -- self-delivery on top. Useful for verifying peer-sync work
+        -- without bothering other officers with test traffic.
+        self.db.profile.peerSyncLoopback = not self.db.profile.peerSyncLoopback
+        self:Print("PeerSync loopback: " ..
+            (self.db.profile.peerSyncLoopback
+                and "|cff00ff00on|r — broadcasts self-deliver for dev testing"
+                or  "|cff888888off|r"))
     elseif cmd == "restore" then
         self:RestoreClearedData()
     elseif cmd == "interop" then

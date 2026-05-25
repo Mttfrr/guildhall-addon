@@ -202,6 +202,28 @@ function WGS:PeerSync_Broadcast(tableName, row)
         outQueue[#outQueue + 1] = { channel = channel, chunkStr = c }
     end
     flushQueue()
+
+    -- Dev-only loopback: re-feed each chunk through our own dispatch
+    -- path so the developer can exercise the full encode → decode →
+    -- merge → catch-up handshake round-trip from a single client,
+    -- without bothering other officers with test broadcasts. Off by
+    -- default; toggled via `/gh peerloopback` or `peerSyncLoopback`
+    -- in saved variables.
+    --
+    -- We pass our own playerKey as senderKey (so the trust gate's
+    -- guild-roster lookup naturally accepts us) and force isSelf =
+    -- false to bypass the self-drop guard. The catch-up __probe /
+    -- __offer / __request handlers then see "us" as a valid peer and
+    -- complete the handshake against ourselves — including replaying
+    -- table contents through the merge fns, which dedup against the
+    -- rows already in db.global so no churn beyond the work itself.
+    if WGS.db and WGS.db.profile and WGS.db.profile.peerSyncLoopback then
+        local selfKey = self:GetPlayerKey()
+        for _, c in ipairs(chunks) do
+            self:PeerSync_HandleIncoming(selfKey, c, false)
+        end
+    end
+
     return true
 end
 

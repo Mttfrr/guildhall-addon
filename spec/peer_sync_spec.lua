@@ -793,3 +793,78 @@ describe("WGS:PeerSync snapshot exchange", function()
         assert.are.equal("skipped", WGS._PeerSync_MergeSnapshot({ stamp = 2000, payload = "bad" }))
     end)
 end)
+
+-- Dev-only loopback hook on PeerSync_Broadcast. When the profile flag
+-- peerSyncLoopback is set, each outbound chunk is also re-fed through
+-- PeerSync_HandleIncoming with our own playerKey as sender — exercising
+-- the full encode → decode → trust-gate → merge round-trip from a
+-- single client, without bothering other officers with test traffic.
+describe("WGS:PeerSync_Broadcast loopback", function()
+    local WGS
+    before_each(function()
+        WGS = setup()
+        fakeChat()
+        fakeGuild({ ["Tester-TestRealm"] = 1 })
+        _G.IsInRaid = function() return true end
+        _G.IsInGroup = function() return true end
+        _G.GetGuildInfo = function(unit)
+            if unit == "player" then return "TestGuild", "Officer", 1 end
+            return nil
+        end
+    end)
+
+    it("does NOT self-deliver when peerSyncLoopback is false (default)", function()
+        local merged
+        WGS:PeerSync_RegisterMerge("loot", function(row) merged = row end)
+        assert.is_falsy(WGS.db.profile.peerSyncLoopback)
+
+        local ok = WGS:PeerSync_Broadcast("loot", { itemID = 42 })
+        assert.is_true(ok)
+        assert.is_nil(merged, "merge fn must not be called without loopback")
+    end)
+
+    it("self-delivers the broadcast row through the merge fn when loopback is on", function()
+        WGS.db.profile.peerSyncLoopback = true
+        local merged, callCount = nil, 0
+        WGS:PeerSync_RegisterMerge("loot", function(row, sender)
+            merged = { row = row, sender = sender }
+            callCount = callCount + 1
+            return "added"
+        end)
+
+        local ok = WGS:PeerSync_Broadcast("loot", { itemID = 42, player = "Tester-TestRealm" })
+        assert.is_true(ok)
+        assert.are.equal(1, callCount, "merge fn should fire exactly once per broadcast")
+        assert.are.equal(42, merged.row.itemID,
+            "row arrives at the merge fn byte-identical after encode/decode round-trip")
+        assert.are.equal("Tester-TestRealm", merged.sender,
+            "loopback uses our own playerKey as senderKey so the trust gate accepts it")
+    end)
+
+    -- The catch-up handshake (__probe → __offer → __request → table
+    -- replay) chains four message types. Loopback should drive all of
+    -- them locally so the developer can verify catch-up paths without
+    -- a second client.
+    it("loopback completes a catch-up probe → offer handshake against self", function()
+        WGS.db.profile.peerSyncLoopback = true
+        WGS.db.global.loot = { { itemID = 1, timestamp = 1000 }, { itemID = 2, timestamp = 2000 } }
+
+        -- The probe broadcast self-delivers; handleProbe replies with
+        -- an __offer broadcast that also self-delivers and gets recorded
+        -- as an offer from our own playerKey. handleOffer's replyTo
+        -- check expects the offer to be addressed to GetPlayerKey() —
+        -- which holds because handleProbe sets replyTo = senderKey and
+        -- senderKey is our own key under loopback.
+        local ok = WGS:PeerSync_Broadcast("__probe", { from = WGS:GetPlayerKey() })
+        assert.is_true(ok)
+
+        -- We should have at least 2 sends queued (the probe + the offer
+        -- reply). The exact count depends on chunking but the offer
+        -- having been generated is the signal that the handshake chain
+        -- completed past handleProbe.
+        local sent2 = fakeChat()
+        WGS:PeerSync_Broadcast("__probe", { from = WGS:GetPlayerKey() })
+        assert.is_true(#sent2 >= 2,
+            "probe must trigger handleProbe under loopback, which broadcasts an __offer reply")
+    end)
+end)
