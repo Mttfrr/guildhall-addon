@@ -389,10 +389,6 @@ end
 -- know the change is local. A future commit can introduce a per-row
 -- rev counter + WGS_LOOT_EDITED broadcast + LWW merge.
 
-local CORRECTION_LOCAL_HINT =
-    "Local change saved. Other officers will need to apply the same " ..
-    "correction or re-import from the platform."
-
 --- Re-tag a loot row's eventId / teamId. Pass nil for both to clear
 --- the binding (Untag). Returns true on success, false if the index
 --- is out of range.
@@ -404,7 +400,7 @@ function WGS:RetagLootRow(rowIndex, eventId, teamId)
     row.eventId = eventId or nil   -- nil collapses 0 / false too
     row.teamId  = teamId  or nil
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = row, kind = "retag" })
-    self:Print(CORRECTION_LOCAL_HINT)
+    self:PrintCorrectionHint()
     return true
 end
 
@@ -418,6 +414,6 @@ function WGS:DeleteLootRow(rowIndex)
     if not loot[rowIndex] then return false end
     local removed = table.remove(loot, rowIndex)
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = removed, kind = "delete" })
-    self:Print(CORRECTION_LOCAL_HINT)
+    self:PrintCorrectionHint()
     return true
 end

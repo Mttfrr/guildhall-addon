@@ -566,9 +566,27 @@ end
 -- startedBy); edits don't propagate). The Print hint flags this each
 -- time so officers don't assume remote sync.
 
-local ATTENDANCE_LOCAL_HINT =
-    "Local change saved. Other officers will need to apply the same " ..
-    "correction or re-import from the platform."
+-- Walk raidCompResults backwards (so fn can table.remove without
+-- skipping the next entry) and call fn for each snapshot whose
+-- startedAt matches. fn receives (snap, i, comps) so it can mutate
+-- fields, splice slots, or remove the row outright.
+--
+-- All three correction mutators below cascade into raidCompResults
+-- this way: rebind updates eventId/eventTitle in place, remove-member
+-- splices the member out of slots[], delete drops the row. Without
+-- this cascade, per-pull comp snapshots would drift out of sync with
+-- the corrected session-level roster — a removed member would still
+-- appear "present" in the comp, a rebound session would have orphan
+-- snapshots pointing to the wrong event.
+local function forEachCompSnapshotAt(startedAt, fn)
+    local comps = WGS.db and WGS.db.global and WGS.db.global.raidCompResults
+    if type(comps) ~= "table" then return end
+    for i = #comps, 1, -1 do
+        if comps[i].startedAt == startedAt then
+            fn(comps[i], i, comps)
+        end
+    end
+end
 
 --- Rebind a session to a different scheduled event. Backfills any
 --- raidCompResults rows sharing the session's startedAt so the
@@ -584,17 +602,14 @@ function WGS:RebindAttendanceSession(sessionIndex, eventId, eventTitle)
     session.eventId    = eventId or nil
     session.eventTitle = eventTitle or nil
 
-    local comps = self.db.global.raidCompResults or {}
-    for _, snap in ipairs(comps) do
-        if snap.startedAt == session.startedAt then
-            snap.eventId    = eventId or nil
-            snap.eventTitle = eventTitle or nil
-        end
-    end
+    forEachCompSnapshotAt(session.startedAt, function(snap)
+        snap.eventId    = eventId or nil
+        snap.eventTitle = eventTitle or nil
+    end)
 
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = session, kind = "rebind" })
-    self:Print(ATTENDANCE_LOCAL_HINT)
+    self:PrintCorrectionHint()
     return true
 end
 
@@ -618,21 +633,19 @@ function WGS:RemoveMemberFromSession(sessionIndex, memberName)
     end
     if not found then return false end
 
-    local comps = self.db.global.raidCompResults or {}
-    for _, snap in ipairs(comps) do
-        if snap.startedAt == session.startedAt and type(snap.slots) == "table" then
-            for i = #snap.slots, 1, -1 do
-                if snap.slots[i].name == memberName then
-                    table.remove(snap.slots, i)
-                end
+    forEachCompSnapshotAt(session.startedAt, function(snap)
+        if type(snap.slots) ~= "table" then return end
+        for i = #snap.slots, 1, -1 do
+            if snap.slots[i].name == memberName then
+                table.remove(snap.slots, i)
             end
         end
-    end
+    end)
 
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = session, kind = "remove_member",
           memberName = memberName })
-    self:Print(ATTENDANCE_LOCAL_HINT)
+    self:PrintCorrectionHint()
     return true
 end
 
@@ -648,17 +661,12 @@ function WGS:DeleteAttendanceSession(sessionIndex)
 
     local removed = table.remove(sessions, sessionIndex)
 
-    local comps = self.db.global.raidCompResults
-    if type(comps) == "table" then
-        for i = #comps, 1, -1 do
-            if comps[i].startedAt == removed.startedAt then
-                table.remove(comps, i)
-            end
-        end
-    end
+    forEachCompSnapshotAt(removed.startedAt, function(_, i, comps)
+        table.remove(comps, i)
+    end)
 
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = removed, kind = "delete" })
-    self:Print(ATTENDANCE_LOCAL_HINT)
+    self:PrintCorrectionHint()
     return true
 end

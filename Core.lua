@@ -82,6 +82,18 @@ function WGS:OnEnable()
     self:SetupTooltipHooks()
 end
 
+--- Print the standard "this edit is local-only" notice that the
+--- correction mutators (RetagLootRow, DeleteLootRow,
+--- RebindAttendanceSession, RemoveMemberFromSession,
+--- DeleteAttendanceSession) emit after every successful edit. Shared
+--- so the string stays consistent across surfaces — and so the day we
+--- add cross-officer edit propagation (per-row rev + LWW merge), the
+--- swap to the new message is one line.
+function WGS:PrintCorrectionHint()
+    self:Print("Local change saved. Other officers will need to apply " ..
+        "the same correction or re-import from the platform.")
+end
+
 --- Internal: fire a public event on the callback registry. Tolerant of
 --- being called before OnInitialize has wired callbacks up (load-order
 --- corner cases during early bootstrap). Modules use this instead of
