@@ -109,91 +109,83 @@ function WGS:OnDisable() end
 
 function WGS:PLAYER_ENTERING_WORLD() end
 
-function WGS:SlashCommand(input)
-    local cmd = self:GetArgs(input, 1)
-    cmd = (cmd or ""):lower()
+-- Slash command dispatch. Each entry is a function(self, input) where
+-- input is the raw rest-of-line so handlers that need sub-args can
+-- call self:GetArgs(input, n) themselves. Aliases map alternate names
+-- to the canonical handler key (the empty-string alias is what /gh
+-- with no args resolves to). Adding a new command = append to the
+-- table; no more elseif chain to grow.
+--
+-- Hidden commands (`interop`, `peerloopback`, `restore`) intentionally
+-- aren't in L["SLASH_HELP"] — they're dev / recovery affordances. The
+-- public help string only lists the user-facing surface.
+local SLASH_HANDLERS = {
+    show      = function(self) self:ToggleMainFrame() end,
+    export    = function(self) self:SelectMainFrameTab(self._ui.TAB_SYNC) end,
+    config    = function(self) self:OpenConfig() end,
+    teams     = function(self) self:SelectMainFrameTab(self._ui.TAB_TEAMS, self._ui.TEAMS_SUB_TEAMS) end,
+    events    = function(self) self:SelectMainFrameTab(self._ui.TAB_EVENTS) end,
+    invite    = function(self) self:AutoInvite() end,
+    sortgroups= function(self) self:SortRaidGroups() end,
+    loot      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_LOOT) end,
+    wishlists = function(self) self:SelectMainFrameTab(self._ui.TAB_TEAMS, self._ui.TEAMS_SUB_WISHLISTS) end,
+    rostercheck = function(self) self:SelectMainFrameTab(self._ui.TAB_TEAMS, self._ui.TEAMS_SUB_CHECK) end,
+    bank      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_BANK) end,
+    logs      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_LOOT) end,
+    restore   = function(self) self:RestoreClearedData() end,
 
-    local ui = self._ui
-    if cmd == "show" or cmd == "" then
-        self:ToggleMainFrame()
-    elseif cmd == "export" or cmd == "import" then
-        self:SelectMainFrameTab(ui.TAB_SYNC)
-    elseif cmd == "attendance" then
-        -- /gh attendance              → status + open log
-        -- /gh attendance reconcile    → retro-fill missing eventIds
+    -- /gh sync / catchup — manual peer-sync catch-up. Useful when you
+    -- join a raid late and the GROUP_ROSTER_UPDATE debounce hasn't
+    -- fired yet, or when you suspect a peer's data drifted. Bypasses
+    -- the 60s debounce so it always does something visible.
+    sync = function(self) self:PeerSync_ManualCatchup() end,
+
+    -- /gh interop — read-only MRT/NSRT integration diagnostic. Prints
+    -- which addons are loaded, VMRT/NSRT global presence, gap-fill
+    -- loot count, sessions with bossAttendance, MRT note size +
+    -- which public API surface fetched it. Safe to run anywhere.
+    interop = function(self) self:PrintInteropStatus() end,
+
+    -- /gh peerloopback — dev-only PeerSync loopback toggle. Every
+    -- broadcast self-delivers so the full encode → decode → merge →
+    -- catch-up round-trip can be tested from a single client. No
+    -- outbound broadcasts go anywhere they wouldn't have gone anyway
+    -- — this just enables self-delivery on top.
+    peerloopback = function(self)
+        self.db.profile.peerSyncLoopback = not self.db.profile.peerSyncLoopback
+        self:Print("PeerSync loopback: " ..
+            (self.db.profile.peerSyncLoopback
+                and "|cff00ff00on|r — broadcasts self-deliver for dev testing"
+                or  "|cff888888off|r"))
+    end,
+
+    -- /gh attendance              → live status + open the log
+    -- /gh attendance reconcile    → retro-fill missing eventIds
+    attendance = function(self, input)
         local _, sub = self:GetArgs(input, 2)
         if sub == "reconcile" then
             self:ReconcileAttendanceEventBindings()
             return
         end
-        -- Capture is auto-started on raid entry now. `/gh attendance`
-        -- prints the live status (whether we're recording, which
-        -- team/event) AND opens the Logs → Attendance log so the
-        -- officer can scan past sessions. Print + show together avoids
-        -- a separate "/gh attendance log" alias.
         self:AttendanceStatus()
-        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_ATTENDANCE)
-    elseif cmd == "config" or cmd == "options" then
-        self:OpenConfig()
-    elseif cmd == "teams" then
-        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_TEAMS)
-    elseif cmd == "bossnotes" or cmd == "bn" then
+        self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_ATTENDANCE)
+    end,
+
+    -- /gh bossnotes <name> — open the Events tab pre-selected to the
+    -- named boss. With no name, prints usage.
+    bossnotes = function(self, input)
         local _, bossName = self:GetArgs(input, 2)
         if bossName and bossName ~= "" then
             self:ShowBossNotes(bossName)
         else
             self:Print("Usage: /gh bossnotes <boss name>")
         end
-    elseif cmd == "events" then
-        self:SelectMainFrameTab(ui.TAB_EVENTS)
-    elseif cmd == "invite" or cmd == "autoinvite" then
-        self:AutoInvite()
-    elseif cmd == "sortgroups" or cmd == "sort" then
-        self:SortRaidGroups()
-    elseif cmd == "loot" then
-        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_LOOT)
-    elseif cmd == "wishlists" or cmd == "wishlist" or cmd == "wl" then
-        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_WISHLISTS)
-    elseif cmd == "rostercheck" or cmd == "check" then
-        self:SelectMainFrameTab(ui.TAB_TEAMS, ui.TEAMS_SUB_CHECK)
-    elseif cmd == "bank" then
-        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_BANK)
-    elseif cmd == "logs" then
-        self:SelectMainFrameTab(ui.TAB_LOGS, ui.LOGS_SUB_LOOT)
-    elseif cmd == "sync" or cmd == "catchup" then
-        -- Manual catch-up. Useful when you join a raid late and the
-        -- automatic GROUP_ROSTER_UPDATE debounce hasn't fired yet, or
-        -- when you suspect a peer's data drifted. Bypasses the 60s
-        -- debounce so it always does something visible.
-        self:PeerSync_ManualCatchup()
-    elseif cmd == "peerloopback" then
-        -- Dev-only: toggle PeerSync loopback. Every broadcast is also
-        -- re-fed through our own dispatch path so the full encode →
-        -- decode → merge → catch-up round-trip can be exercised from
-        -- a single client. No outbound broadcasts go to anyone else
-        -- that they wouldn't have gone to anyway — this just enables
-        -- self-delivery on top. Useful for verifying peer-sync work
-        -- without bothering other officers with test traffic.
-        self.db.profile.peerSyncLoopback = not self.db.profile.peerSyncLoopback
-        self:Print("PeerSync loopback: " ..
-            (self.db.profile.peerSyncLoopback
-                and "|cff00ff00on|r — broadcasts self-deliver for dev testing"
-                or  "|cff888888off|r"))
-    elseif cmd == "restore" then
-        self:RestoreClearedData()
-    elseif cmd == "interop" then
-        -- Print MRT/NSRT integration status: which addons are loaded,
-        -- whether VMRT/NSRT globals are populated, how many loot rows
-        -- came from the MRT gap-fill, how many sessions have
-        -- bossAttendance attached, and the MRT note size + which
-        -- public API surface fetched it. Read-only diagnostic; safe
-        -- to run anywhere.
-        self:PrintInteropStatus()
-    elseif cmd == "team" then
-        -- /gh team <name>   → set current-team picker by name (case-
-        --                     insensitive substring match)
-        -- /gh team all      → clear the filter (show all teams)
-        -- /gh team          → print current state
+    end,
+
+    -- /gh team <name>   → set current-team filter by name (case-insensitive substring)
+    -- /gh team all      → clear the filter (show all teams)
+    -- /gh team          → print current state
+    team = function(self, input)
         local _, arg = self:GetArgs(input, 2)
         if not arg or arg == "" then
             local id = self:GetCurrentTeamId()
@@ -227,6 +219,28 @@ function WGS:SlashCommand(input)
             end
         end
         self:Print("No team matching: " .. arg)
+    end,
+}
+
+local SLASH_ALIASES = {
+    [""]         = "show",
+    import       = "export",
+    options      = "config",
+    bn           = "bossnotes",
+    autoinvite   = "invite",
+    sort         = "sortgroups",
+    wishlist     = "wishlists",
+    wl           = "wishlists",
+    check        = "rostercheck",
+    catchup      = "sync",
+}
+
+function WGS:SlashCommand(input)
+    local cmd = (self:GetArgs(input, 1) or ""):lower()
+    cmd = SLASH_ALIASES[cmd] or cmd
+    local handler = SLASH_HANDLERS[cmd]
+    if handler then
+        handler(self, input)
     else
         self:Print(L["SLASH_HELP"])
     end
