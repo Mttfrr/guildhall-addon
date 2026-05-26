@@ -44,6 +44,62 @@ local ITEM_QUALITY_COLORS = {
 -- are excluded from a team-filtered view — they show up under "All
 -- Teams" as before.
 
+-- Shared event-picker menu builder for the correction surfaces. Walks
+-- db.global.events, filters to ±opts.windowSec (default 4h) of the
+-- reference timestamp, sorts by closest-in-time, and returns a list of
+-- EasyMenu entries — one per candidate event, plus an "empty"
+-- placeholder when nothing's in range and an optional separator + clear
+-- entry at the bottom.
+--
+-- Used by OpenLootRowMenu (wraps the result in a "Re-tag event ▸"
+-- submenu) and OpenSessionEventMenu (renders the result flat under a
+-- "Bind to event" title). Each caller passes its own onPick + onClear
+-- so the helper stays decoupled from which mutator runs on selection.
+local function BuildEventCandidateItems(refTs, opts)
+    opts = opts or {}
+    local windowSec = opts.windowSec or (4 * 60 * 60)
+
+    local candidates = {}
+    for _, ev in ipairs(WGS.db.global.events or {}) do
+        local startTs = WGS:GetEventPullTime(ev)
+        if startTs and math.abs(startTs - refTs) <= windowSec then
+            candidates[#candidates + 1] = {
+                ev      = ev,
+                startTs = startTs,
+                delta   = math.abs(startTs - refTs),
+            }
+        end
+    end
+    table.sort(candidates, function(a, b) return a.delta < b.delta end)
+
+    local items = {}
+    for _, c in ipairs(candidates) do
+        local teamName = WGS.GetTeamName and WGS:GetTeamName(c.ev.team_id) or "?"
+        items[#items + 1] = {
+            text = string.format("%s \194\183 %s \194\183 %s",
+                date("%m/%d %H:%M", c.startTs), teamName, c.ev.title or "?"),
+            notCheckable = true,
+            func = function() opts.onPick(c.ev) end,
+        }
+    end
+    if #candidates == 0 and opts.emptyLabel then
+        items[#items + 1] = {
+            text = opts.emptyLabel,
+            disabled = true,
+            notCheckable = true,
+        }
+    end
+    if opts.clearLabel and opts.onClear then
+        items[#items + 1] = { text = "", isTitle = true, notCheckable = true }
+        items[#items + 1] = {
+            text = opts.clearLabel,
+            notCheckable = true,
+            func = opts.onClear,
+        }
+    end
+    return items
+end
+
 -- Right-click context menu for a Logs → Loot row. Builds an event
 -- candidate list from db.global.events within ±4h of the row's
 -- timestamp (matches the wider window used by
@@ -57,49 +113,12 @@ local function OpenLootRowMenu(rowIndex)
     local row = WGS.db.global.loot and WGS.db.global.loot[rowIndex]
     if not row then return end
 
-    local rowTs = tonumber(row.timestamp) or 0
-    local WINDOW = 4 * 60 * 60   -- ±4h
-
-    local candidates = {}
-    for _, ev in ipairs(WGS.db.global.events or {}) do
-        local startTs = WGS:GetEventPullTime(ev)
-        if startTs and math.abs(startTs - rowTs) <= WINDOW then
-            candidates[#candidates + 1] = {
-                ev      = ev,
-                startTs = startTs,
-                delta   = math.abs(startTs - rowTs),
-            }
-        end
-    end
-    table.sort(candidates, function(a, b) return a.delta < b.delta end)
-
-    local retagItems = {}
-    for _, c in ipairs(candidates) do
-        local teamName = WGS.GetTeamName and WGS:GetTeamName(c.ev.team_id) or "?"
-        retagItems[#retagItems + 1] = {
-            text = string.format("%s \194\183 %s \194\183 %s",
-                date("%m/%d %H:%M", c.startTs),
-                teamName,
-                c.ev.title or "?"),
-            notCheckable = true,
-            func = function()
-                WGS:RetagLootRow(rowIndex, c.ev.id, c.ev.team_id)
-            end,
-        }
-    end
-    if #retagItems == 0 then
-        retagItems[#retagItems + 1] = {
-            text = "(no events within \194\1774h of this row)",
-            disabled = true,
-            notCheckable = true,
-        }
-    end
-    retagItems[#retagItems + 1] = { text = "", isTitle = true, notCheckable = true }
-    retagItems[#retagItems + 1] = {
-        text = "Untag (clear event/team)",
-        notCheckable = true,
-        func = function() WGS:RetagLootRow(rowIndex, nil, nil) end,
-    }
+    local retagItems = BuildEventCandidateItems(tonumber(row.timestamp) or 0, {
+        onPick     = function(ev) WGS:RetagLootRow(rowIndex, ev.id, ev.team_id) end,
+        emptyLabel = "(no events within \194\1774h of this row)",
+        clearLabel = "Untag (clear event/team)",
+        onClear    = function() WGS:RetagLootRow(rowIndex, nil, nil) end,
+    })
 
     local menu = {
         { text = "Re-tag event", notCheckable = true, hasArrow = true, menuList = retagItems },
@@ -463,57 +482,22 @@ StaticPopupDialogs["GUILDHALL_CONFIRM_SESSION_DELETE"] = {
     end,
 }
 
--- Right-click-equivalent event picker for an attendance session.
--- Same shape as OpenLootRowMenu but with a single-level menu (no
--- submenu — we always want a flat list here since the use case is
--- "fix this session's binding" rather than "browse"). ±4h of the
--- session's startedAt, matching the wider reconcile window.
+-- Event picker for an attendance session. Renders the candidate list
+-- flat (no submenu — the use case is "fix this session's binding"
+-- rather than "browse") under a "Bind to event" title.
 local function OpenSessionEventMenu(sessionIdx)
     local session = WGS.db.global.attendance and WGS.db.global.attendance[sessionIdx]
     if not session then return end
 
-    local sessTs = tonumber(session.startedAt) or 0
-    local WINDOW = 4 * 60 * 60
+    local items = BuildEventCandidateItems(tonumber(session.startedAt) or 0, {
+        onPick     = function(ev) WGS:RebindAttendanceSession(sessionIdx, ev.id, ev.title) end,
+        emptyLabel = "(no events within \194\1774h of this session)",
+        clearLabel = "Clear binding",
+        onClear    = function() WGS:RebindAttendanceSession(sessionIdx, nil, nil) end,
+    })
 
-    local candidates = {}
-    for _, ev in ipairs(WGS.db.global.events or {}) do
-        local startTs = WGS:GetEventPullTime(ev)
-        if startTs and math.abs(startTs - sessTs) <= WINDOW then
-            candidates[#candidates + 1] = {
-                ev      = ev,
-                startTs = startTs,
-                delta   = math.abs(startTs - sessTs),
-            }
-        end
-    end
-    table.sort(candidates, function(a, b) return a.delta < b.delta end)
-
-    local menu = {
-        { text = "Bind to event", isTitle = true, notCheckable = true },
-    }
-    for _, c in ipairs(candidates) do
-        local teamName = WGS.GetTeamName and WGS:GetTeamName(c.ev.team_id) or "?"
-        menu[#menu + 1] = {
-            text = string.format("%s \194\183 %s \194\183 %s",
-                date("%m/%d %H:%M", c.startTs), teamName, c.ev.title or "?"),
-            notCheckable = true,
-            func = function()
-                WGS:RebindAttendanceSession(sessionIdx, c.ev.id, c.ev.title)
-            end,
-        }
-    end
-    if #candidates == 0 then
-        menu[#menu + 1] = {
-            text = "(no events within \194\1774h of this session)",
-            disabled = true, notCheckable = true,
-        }
-    end
-    menu[#menu + 1] = { text = "", isTitle = true, notCheckable = true }
-    menu[#menu + 1] = {
-        text = "Clear binding",
-        notCheckable = true,
-        func = function() WGS:RebindAttendanceSession(sessionIdx, nil, nil) end,
-    }
+    local menu = { { text = "Bind to event", isTitle = true, notCheckable = true } }
+    for _, it in ipairs(items) do menu[#menu + 1] = it end
 
     if not _G.GuildHallSessionEventDropdown then
         _G.GuildHallSessionEventDropdown = CreateFrame("Frame",
