@@ -59,7 +59,18 @@ local function TeamNameById(teamId)
     return nil
 end
 
+-- Resolve an event's start time to a unix-seconds timestamp.
+-- Mirrors Modules/EventScheduler.lua's ParseEventTime: prefer the
+-- platform-supplied `start_ts` (UTC, IANA-correct, ships since the
+-- timezone-aware export commit), fall back to parsing the wall-clock
+-- date+time in the user's local timezone for events imported pre-fix.
+-- The fallback is wrong cross-region (Paris raid viewed from HK reads
+-- as 6-7h off) but matches legacy behaviour so re-import is the clean
+-- upgrade path.
 local function EventStartTs(ev)
+    local serverTs = tonumber(ev.start_ts)
+    if serverTs and serverTs > 0 then return serverTs end
+
     local y, mo, d = (ev.date or ""):match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
     if not y then return 0 end
     local h, mi = (ev.time or "00:00"):match("^(%d%d):(%d%d)$")
@@ -77,7 +88,14 @@ local function EventStatus(ev, now)
     -- ("Upcoming", "Past"). The all-caps form was addon-only invention
     -- and read as shoutier than the rest of the UI.
     if delta < -3 * 3600 then return "Past", STATUS_COLORS.PAST end
-    if delta < 86400 and ev.date == date("%Y-%m-%d", now) then
+    -- "Today" = the event's local day in the user's timezone matches
+    -- the user's local today. Compare derived local-day from startTs
+    -- (not ev.date string) so a raid scheduled "Wed 23:00 Paris" that
+    -- a HK viewer sees as Thu 05:00 reads as Today on Thursday — when
+    -- the user is actually in it. Before the fix this checked the
+    -- platform's raw date string, which is always the platform-side
+    -- calendar day regardless of where the user is.
+    if delta < 86400 and date("%Y-%m-%d", startTs) == date("%Y-%m-%d", now) then
         return "Today", STATUS_COLORS.TODAY
     end
     if delta < 7 * 86400 then return "Soon", STATUS_COLORS.SOON end

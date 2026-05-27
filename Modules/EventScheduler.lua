@@ -27,7 +27,26 @@ end
 -- Time parsing
 ---------------------------------------------------------------------------
 
+-- Resolve an event's start time to a unix-seconds timestamp.
+--
+-- The platform's addon export ships `start_ts` (UTC unix seconds,
+-- computed server-side from the event's IANA timezone) since the
+-- timezone-aware export commit. Use it when present — it's the
+-- authoritative answer and correct across all member timezones.
+--
+-- Fallback: parse the wall-clock date+time strings in the user's
+-- local timezone via Lua's time(table). This is wrong when the WoW
+-- client is in a different region than the raid schedule (Paris
+-- raids viewed from HK, etc.) — Events tab will flip to "Past"
+-- mid-raid, FindActiveScheduledEvent windows shift. But it's all we
+-- can do for events imported before the platform shipped start_ts;
+-- matches the legacy behaviour exactly so re-import is the clean
+-- upgrade path.
 local function ParseEventTime(event)
+    if not event then return nil end
+    local serverTs = tonumber(event.start_ts)
+    if serverTs and serverTs > 0 then return serverTs end
+
     if not event.date or not event.time then return nil end
     local y, m, d = event.date:match("(%d+)-(%d+)-(%d+)")
     if not y then return nil end
@@ -55,13 +74,18 @@ function WGS:FindTodayEventForTeam(teamId)
     local now = time()
     local best, bestDelta = nil, math.huge
     for _, ev in ipairs(events) do
-        if ev.date == today then
-            if not teamId or ev.team_id == teamId or ev.teamId == teamId then
-                local t = ParseEventTime(ev)
-                if t then
-                    local d = math.abs(t - now)
-                    if d < bestDelta then best, bestDelta = ev, d end
-                end
+        if not teamId or ev.team_id == teamId or ev.teamId == teamId then
+            local t = ParseEventTime(ev)
+            -- "Today" = the event's local day in the user's timezone
+            -- matches our local today. Derive from the parsed timestamp
+            -- when available (start_ts path) so a Paris raid the HK
+            -- viewer is actually in matches even when ev.date says
+            -- yesterday. Falls back to the raw ev.date string for
+            -- legacy events where ParseEventTime used local-time math.
+            local evDay = (t and date("%Y-%m-%d", t)) or ev.date
+            if evDay == today and t then
+                local d = math.abs(t - now)
+                if d < bestDelta then best, bestDelta = ev, d end
             end
         end
     end
