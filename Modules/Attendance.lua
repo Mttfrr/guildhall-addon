@@ -8,10 +8,52 @@ local module = WGS:NewModule("Attendance", "AceEvent-3.0")
 local isTracking = false
 local currentSession = nil
 
+-- Maximum age (seconds) for a stashed activeSession to be rehydrated on
+-- addon load. Anything older is treated as orphan — the user almost
+-- certainly logged off mid-raid and only came back the next day, so
+-- resurrecting it would produce a session that looks "live" but with
+-- no meaningful endedAt. 8h covers the longest realistic raid window
+-- (heroic clears that drag past midnight) without holding onto stale
+-- state across days.
+local SESSION_REHYDRATE_MAX_AGE = 8 * 60 * 60
+
+-- Rehydrate an in-flight session from db.global.activeSession after
+-- an addon load (/reload, /logout-login, fresh game session). Without
+-- this, every /reload mid-raid abandoned the session — currentSession
+-- was a module-local that reset to nil on load, while finalized rows
+-- only land in db.global.attendance via StopAttendance. So a /reload
+-- between Start and Stop dropped everything captured up to that point
+-- on the floor.
+--
+-- StartAttendanceForTeam aliases db.global.activeSession to the same
+-- table as currentSession (Lua reference semantics), so every
+-- subsequent mutation to currentSession.members / .endedAt / etc.
+-- writes through to SavedVariables for free — no per-mutation persist
+-- call needed. StopAttendance clears db.global.activeSession back to
+-- nil so a /reload AFTER stop doesn't resurrect the finalized session.
+local function rehydrateActiveSession()
+    local stored = WGS.db and WGS.db.global and WGS.db.global.activeSession
+    if not stored then return end
+    local now = WGS:GetTimestamp()
+    if (now - (tonumber(stored.startedAt) or 0)) > SESSION_REHYDRATE_MAX_AGE then
+        WGS.db.global.activeSession = nil   -- orphan, drop quietly
+        return
+    end
+    currentSession = stored
+    isTracking = true
+    local tag = currentSession.teamName or "untagged"
+    if currentSession.eventTitle and currentSession.eventTitle ~= "" then
+        tag = tag .. " \194\183 " .. currentSession.eventTitle
+    end
+    WGS:Print("Resumed attendance tracking: " .. tag .. " (carried over from before /reload)")
+end
+WGS._AttendanceRehydrate = rehydrateActiveSession   -- exposed for tests
+
 function module:OnEnable()
     self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
     self:RegisterEvent("RAID_INSTANCE_WELCOME", "OnRaidEnter")
     self:RegisterEvent("GROUP_LEFT", "OnGroupLeft")
+    rehydrateActiveSession()
 end
 
 function module:OnGroupLeft()
@@ -128,6 +170,12 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
         pullTime = event and WGS:GetEventPullTime(event) or nil,
         members = {},
     }
+    -- Alias the same table into SavedVariables so every subsequent
+    -- mutation to currentSession (member join/leave, comp snapshot,
+    -- endedAt finalization) automatically persists for /reload survival.
+    -- StopAttendance clears this back to nil so a /reload AFTER stop
+    -- doesn't resurrect the finalized session.
+    self.db.global.activeSession = currentSession
 
     for name, info in pairs(members) do
         local playerId = self:ResolvePlayerForCharacter(name)
@@ -145,6 +193,16 @@ function WGS:StartAttendanceForTeam(teamId, teamName, event)
     end
 
     self:FireEvent("WGS_SESSION_STARTED", currentSession)
+
+    -- Chat confirmation so the user sees that capture actually started
+    -- (auto-start fires on RAID_INSTANCE_WELCOME, manual start via the
+    -- Track button or shift-minimap; both go silent without this). Same
+    -- one-line style as the bank-capture confirmation.
+    local startTag = teamName or "untagged"
+    if event and event.title and event.title ~= "" then
+        startTag = startTag .. " \194\183 " .. event.title
+    end
+    self:Print("Attendance tracking started: " .. startTag)
 
     -- Take an immediate raid-comp snapshot now, while the roster is
     -- fresh from GetRaidMembers and every member has present=true. This
@@ -302,6 +360,35 @@ function WGS:StopAttendance()
 
     local endedSession = currentSession
     currentSession = nil
+    -- Clear the /reload-survival alias so the next addon load doesn't
+    -- rehydrate this (now finalised) session. Cleanup pair with the
+    -- alias in StartAttendanceForTeam.
+    self.db.global.activeSession = nil
+
+    -- One-line session summary so the user sees that the capture
+    -- actually finalized and lands a row in db.global.attendance.
+    -- Format mirrors the bank-capture confirmation. Boss kill count
+    -- only shows if MRT/NSRT is loaded and contributed bossAttendance.
+    local duration = (endedSession.endedAt or 0) - (endedSession.startedAt or 0)
+    local minutes  = math.max(0, math.floor(duration / 60))
+    local hours    = math.floor(minutes / 60)
+    local durStr   = hours > 0
+        and string.format("%dh %dm", hours, minutes % 60)
+        or  string.format("%dm", minutes)
+    local memberCount = #(endedSession.memberList or {})
+    local killCount = 0
+    for _, ba in ipairs(endedSession.bossAttendance or {}) do
+        if ba.isKill then killCount = killCount + 1 end
+    end
+    local killSuffix = ""
+    if killCount > 0 then
+        killSuffix = string.format(" \194\183 %d boss kill%s",
+            killCount, killCount > 1 and "s" or "")
+    end
+    self:Print(string.format(
+        "Attendance recorded: %d member%s \194\183 %s%s. " ..
+        "|cffffd100/gh attendance|r to review.",
+        memberCount, memberCount == 1 and "" or "s", durStr, killSuffix))
 
     self:FireEvent("WGS_SESSION_ENDED", endedSession)
 

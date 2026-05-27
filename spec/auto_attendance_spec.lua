@@ -360,3 +360,104 @@ describe("WGS:ReconcileAttendanceEventBindings (retro fix)", function()
             "existing bindings must not be overwritten")
     end)
 end)
+
+-- /reload survival: the in-flight session used to live only in a module-
+-- local, so /reload mid-raid dropped everything captured up to that
+-- point. Modules/Attendance.lua now aliases the active session into
+-- db.global.activeSession on Start and clears it on Stop, and exposes
+-- a rehydrateActiveSession that module:OnEnable calls on load to
+-- restore the local from SavedVariables.
+describe("attendance /reload survival", function()
+    local WGS
+
+    before_each(function()
+        WGS = helpers.setup()
+        WGS.GetTimestamp = function() return 1700000000 end
+        _G.IsInRaid = function() return true end
+        _G.IsInGroup = function() return true end
+        _G.GetInstanceInfo = function() return "TestRaid", nil, 16, "Mythic" end
+    end)
+
+    it("aliases db.global.activeSession to the in-flight session on Start", function()
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", { id = 7, title = "Tuesday Pulls" })
+        local stored = WGS.db.global.activeSession
+        assert.is_table(stored, "Start must populate db.global.activeSession")
+        assert.are.equal(42, stored.teamId)
+        assert.are.equal(7, stored.eventId)
+        assert.are.equal(1700000000, stored.startedAt)
+    end)
+
+    it("clears db.global.activeSession on Stop", function()
+        WGS:StartAttendanceForTeam(42, "Mythic Raiders", { id = 7 })
+        assert.is_table(WGS.db.global.activeSession)
+        WGS:StopAttendance()
+        assert.is_nil(WGS.db.global.activeSession,
+            "Stop must clear the rehydrate alias so the next /reload doesn't resurrect this session")
+    end)
+
+    it("rehydrates a recent session: restores currentSession + IsTrackingAttendance", function()
+        -- Simulate a /reload: stash a session into SavedVariables and
+        -- run the rehydrate path. The local currentSession reset to
+        -- nil between addon loads — rehydrate must repopulate it from
+        -- db.global.activeSession.
+        WGS.db.global.activeSession = {
+            startedAt = 1700000000 - (60 * 60),   -- 1h ago, well within window
+            startedBy = "Tester-TestRealm",
+            teamId = 42,
+            teamName = "Mythic Raiders",
+            eventId = 7,
+            eventTitle = "Tuesday Pulls",
+            members = { ["Tester-TestRealm"] = { name = "Tester-TestRealm", present = true } },
+        }
+        WGS._printed = {}
+        function WGS:Print(s) self._printed[#self._printed + 1] = s end
+
+        WGS:_AttendanceRehydrate()
+
+        assert.is_true(WGS:IsTrackingAttendance(),
+            "after rehydrate the addon must report tracking as active")
+        local ctx = WGS:GetCurrentAttendanceContext()
+        assert.is_table(ctx)
+        assert.are.equal(42, ctx.teamId)
+        assert.are.equal(7, ctx.eventId)
+        -- Resume message is the user-visible signal that the survival
+        -- path actually fired.
+        local sawResume = false
+        for _, line in ipairs(WGS._printed) do
+            if line:find("Resumed attendance tracking") then sawResume = true end
+        end
+        assert.is_true(sawResume)
+    end)
+
+    it("drops an orphan session older than 8h without rehydrating", function()
+        -- 24h-old stub: user logged off mid-raid and came back next day.
+        -- Resurrecting would produce a "live" session with no endedAt
+        -- and no useful continuation; better to quietly drop.
+        WGS.db.global.activeSession = {
+            startedAt = 1700000000 - (24 * 60 * 60),
+            teamId = 42,
+            members = {},
+        }
+        WGS._printed = {}
+        function WGS:Print(s) self._printed[#self._printed + 1] = s end
+
+        WGS:_AttendanceRehydrate()
+
+        assert.is_nil(WGS.db.global.activeSession,
+            "orphan stash must be cleared so it can't be resurrected on the next load either")
+        assert.is_false(WGS:IsTrackingAttendance())
+        assert.are.equal(0, #WGS._printed,
+            "no chat noise for the orphan-drop path — silent cleanup")
+    end)
+
+    it("no-ops when db.global.activeSession is nil (fresh install / clean stop)", function()
+        WGS.db.global.activeSession = nil
+        WGS._printed = {}
+        function WGS:Print(s) self._printed[#self._printed + 1] = s end
+
+        WGS:_AttendanceRehydrate()
+
+        assert.is_false(WGS:IsTrackingAttendance())
+        assert.are.equal(0, #WGS._printed)
+    end)
+end)

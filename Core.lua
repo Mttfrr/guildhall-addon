@@ -36,6 +36,11 @@ local dbDefaults = {
     },
     global = {
         attendance = {},
+        -- In-flight attendance session, mirrored from Modules/Attendance.lua's
+        -- currentSession so /reload mid-raid doesn't drop captured state.
+        -- StartAttendanceForTeam aliases the same Lua table here; mutations
+        -- write through for free. StopAttendance clears it back to nil.
+        activeSession = nil,
         loot = {},
         guildBankMoneyChanges = {},
         guildBankTransactions = {},
