@@ -3,6 +3,58 @@ local WGS = GuildHall
 local LDB = LibStub("LibDataBroker-1.1")
 local LDBIcon = LibStub("LibDBIcon-1.0")
 
+-- Right-click quick-action menu. Right-click used to go straight to
+-- /gh config, but most users want the addon's other quick actions —
+-- sync, attendance status, jumping to the Sync tab — without having
+-- to remember the slash commands. Settings stays in the menu so the
+-- old muscle memory still resolves in one extra click.
+local function OpenMinimapMenu()
+    local menu = {
+        { text = "GuildHall", isTitle = true, notCheckable = true },
+        {
+            text = "Show / hide main frame",
+            notCheckable = true,
+            func = function() WGS:ToggleMainFrame() end,
+        },
+        {
+            text = "Sync now (officer peer-sync)",
+            notCheckable = true,
+            func = function() WGS:PeerSync_ManualCatchup() end,
+        },
+        {
+            text = WGS:IsTrackingAttendance() and "Stop attendance tracking"
+                                              or "Start attendance tracking",
+            notCheckable = true,
+            func = function()
+                if WGS:IsTrackingAttendance() then
+                    WGS:StopAttendance()
+                else
+                    WGS:StartAttendanceAutoTagged()
+                end
+            end,
+        },
+        {
+            text = "Open Sync tab",
+            notCheckable = true,
+            func = function()
+                local ui = WGS._ui
+                if ui then WGS:SelectMainFrameTab(ui.TAB_SYNC) end
+            end,
+        },
+        { text = "", isTitle = true, notCheckable = true },
+        {
+            text = "Settings…",
+            notCheckable = true,
+            func = function() WGS:OpenConfig() end,
+        },
+    }
+    if not _G.GuildHallMinimapDropdown then
+        _G.GuildHallMinimapDropdown = CreateFrame("Frame", "GuildHallMinimapDropdown",
+            UIParent, "UIDropDownMenuTemplate")
+    end
+    EasyMenu(menu, _G.GuildHallMinimapDropdown, "cursor", 0, 0, "MENU")
+end
+
 local dataObj = LDB:NewDataObject("GuildHall", {
     type = "launcher",
     text = "GuildHall",
@@ -22,7 +74,7 @@ local dataObj = LDB:NewDataObject("GuildHall", {
                 WGS:ToggleMainFrame()
             end
         elseif button == "RightButton" then
-            WGS:OpenConfig()
+            OpenMinimapMenu()
         end
     end,
     OnTooltipShow = function(tooltip)
@@ -52,7 +104,7 @@ local dataObj = LDB:NewDataObject("GuildHall", {
         tooltip:AddLine(" ")
         tooltip:AddLine("|cff888888Left-click:|r Open main window")
         tooltip:AddLine("|cff888888Shift-left-click:|r Start / stop attendance")
-        tooltip:AddLine("|cff888888Right-click:|r Open settings")
+        tooltip:AddLine("|cff888888Right-click:|r Quick actions menu")
     end,
 })
 

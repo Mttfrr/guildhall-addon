@@ -23,6 +23,23 @@ local STATUS_COLORS = {
     PAST     = "ff666666",
 }
 
+-- Tooltip content for the rail status pills. Keyed by the mixed-case
+-- label EventStatus returns. Bodies are intentionally short — the
+-- pill is a glance affordance and the tooltip should reinforce, not
+-- lecture. Keep the cutoffs in lockstep with EventStatus below.
+local STATUS_TOOLTIP_TITLE = {
+    Today    = "Today",
+    Soon     = "Soon",
+    Upcoming = "Upcoming",
+    Past     = "Past",
+}
+local STATUS_TOOLTIP_BODY = {
+    Today    = "Event is scheduled for today in your timezone.",
+    Soon     = "Scheduled within the next 7 days.",
+    Upcoming = "Scheduled more than 7 days from now.",
+    Past     = "Scheduled start was more than 3 hours ago.",
+}
+
 ---------------------------------------------------------------------------
 -- Small helpers used by both the rail and the detail panel
 ---------------------------------------------------------------------------
@@ -156,6 +173,30 @@ local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
     local statusPill = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     statusPill:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -4)
     statusPill:SetText("|c" .. statusColor .. statusText .. "|r")
+
+    -- Hover surface over the pill that explains the cutoff rules. The
+    -- pill labels (Today / Soon / Upcoming / Past) are opaque if you
+    -- don't already know how EventStatus carves up the time range —
+    -- the tooltip turns them into a self-documenting affordance.
+    -- Click events forward to the row button so clicking the pill
+    -- still toggles row expansion the same as clicking elsewhere.
+    local pillHover = CreateFrame("Frame", nil, btn)
+    pillHover:SetPoint("TOPLEFT",     statusPill, "TOPLEFT",     -4, 4)
+    pillHover:SetPoint("BOTTOMRIGHT", statusPill, "BOTTOMRIGHT",  4, -4)
+    pillHover:EnableMouse(true)
+    pillHover:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine(STATUS_TOOLTIP_TITLE[statusText] or statusText,
+            1, 0.82, 0)
+        local body = STATUS_TOOLTIP_BODY[statusText]
+        if body then GameTooltip:AddLine(body, 1, 1, 1, true) end
+        GameTooltip:Show()
+    end)
+    pillHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    pillHover:SetScript("OnMouseUp", function(self, mouseBtn)
+        local parent = self:GetParent()
+        if parent and parent.Click then parent:Click(mouseBtn) end
+    end)
 
     -- Top-left: date + time range. Clamped left of the status pill so
     -- they can't overlap on long time-ranges.
