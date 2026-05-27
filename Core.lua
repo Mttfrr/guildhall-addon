@@ -53,6 +53,7 @@ local dbDefaults = {
         raidComps = {},
         events = {},
         characters = {},        -- { [playerId] = { displayName, main, alts } }
+        characterIds = {},      -- { [characterName] = guild_members.id } from platform export
         characterLookup = {},   -- reverse: { [charName-realm] = playerId }
         gearAudit = {},
         characterDetails = {},  -- imported per-character info: { charName → { class, spec, ilvl, missingEnchants, missingGems } }

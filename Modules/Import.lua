@@ -29,6 +29,13 @@ end
 local function importCharacters(self, data)
     if not data.characters then return 0 end
     self.db.global.characters = data.characters
+    -- characterIds: { [character_name] = guild_members.id }. Used by
+    -- the right-click "Copy profile link" affordance to build a
+    -- /character/:memberId URL. Optional — older exports omit it; the
+    -- profile-link menu item gracefully hides when the lookup misses.
+    if type(data.characterIds) == "table" then
+        self.db.global.characterIds = data.characterIds
+    end
     self:BuildCharacterLookup()
     local n = 0
     for _ in pairs(data.characters) do n = n + 1 end

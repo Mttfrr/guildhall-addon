@@ -239,3 +239,152 @@ function ui.BuildNumericCell(parent, x, yOff, width, height, value, isProblemWhe
     cell.text = text
     return cell
 end
+
+---------------------------------------------------------------------------
+-- Player context menu
+--
+-- Shared right-click handler used everywhere a player name appears
+-- (Logs → Loot rows, Logs → Attendance member grid, Events Roster
+-- section, Events Raid Comp slots, Teams Roster, Teams Wishlists).
+-- One implementation, one menu shape — clicking right on any player
+-- name surfaces the same actions, in the same order, with the same
+-- styling.
+--
+-- Actions:
+--   - Invite    → InviteUnit; greys out if we can't invite right now
+--   - Whisper   → opens the chat target ChatFrame_SendTell
+--   - Inspect   → opens the inspect window via NotifyInspect
+--   - Copy name → static popup with EditBox prefilled + auto-selected
+--                 (Ctrl+C in one keystroke; matches the "copy event
+--                 link" pattern shipped for the kebab popover)
+--   - Copy profile link → builds https://<PLATFORM_URL>/character/<id>
+--                 from db.global.characterIds[name]. Hides entirely
+--                 when the lookup misses (older imports, characters
+--                 not yet synced from the platform) so the user
+--                 doesn't see a broken item.
+---------------------------------------------------------------------------
+
+-- Hardcoded platform base URL. Single platform, no per-guild override.
+-- Bake into constants so changing it is one-line; if the platform ever
+-- moves we can plumb it through the addon-sync export instead.
+local PLATFORM_URL = "https://guildhall.run"
+
+-- Strip "Foo-Realm" → "Foo" since Blizzard's chat / invite APIs take
+-- either form but the short form is what users see in addon UI.
+local function ShortName(name)
+    if not name or name == "" then return name end
+    return name:match("^([^%-]+)") or name
+end
+
+-- StaticPopup for the copy-to-clipboard flow. Registered once at file
+-- scope (addon is single-instance per character; re-register is a
+-- no-op). The Popup auto-selects the EditBox text so a single Ctrl+C
+-- copies, then Esc / Close dismisses.
+StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
+    text         = "%s",  -- replaced by the format arg below
+    button1      = "Close",
+    hasEditBox   = true,
+    editBoxWidth = 350,
+    timeout      = 0,
+    whileDead    = true,
+    hideOnEscape = true,
+    EnterClicksFirstButton = true,
+    OnShow = function(self, data)
+        if data and self.editBox then
+            self.editBox:SetText(data.value or "")
+            self.editBox:HighlightText()
+            self.editBox:SetFocus()
+        end
+    end,
+}
+
+local function ShowCopyPopup(prompt, value)
+    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
+    if popup then popup.data = { value = value } end
+end
+
+function ui.OpenPlayerContextMenu(name, class)
+    if type(name) ~= "string" or name == "" then return end
+    local short = ShortName(name)
+
+    local menu = {
+        { text = short, isTitle = true, notCheckable = true },
+        {
+            text = "Whisper",
+            notCheckable = true,
+            func = function()
+                if ChatFrame_SendTell then
+                    ChatFrame_SendTell(short, ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or nil)
+                end
+            end,
+        },
+        {
+            text = "Invite",
+            notCheckable = true,
+            func = function()
+                if InviteUnit then InviteUnit(short) end
+            end,
+        },
+        {
+            text = "Inspect",
+            notCheckable = true,
+            func = function()
+                if NotifyInspect then NotifyInspect(short) end
+            end,
+        },
+        {
+            text = "Copy name",
+            notCheckable = true,
+            func = function() ShowCopyPopup("Character name:", short) end,
+        },
+    }
+
+    -- Profile-link item only renders when we know the memberId. The
+    -- characterIds map is populated on import from the platform's
+    -- /addon-sync/export — older imports or characters synced after
+    -- the addon's last import miss the lookup and the item hides
+    -- silently. The class arg is unused today but kept in the
+    -- signature so future items (e.g. class-themed inspect target)
+    -- can read it without changing call sites.
+    local _ = class  -- reserved
+    local memberIdMap = WGS.db and WGS.db.global and WGS.db.global.characterIds
+    local memberId = memberIdMap and memberIdMap[short]
+    if memberId then
+        menu[#menu + 1] = {
+            text = "Copy profile link",
+            notCheckable = true,
+            func = function()
+                ShowCopyPopup("Profile link:",
+                    PLATFORM_URL .. "/character/" .. tostring(memberId))
+            end,
+        }
+    end
+
+    if not _G.GuildHallPlayerDropdown then
+        _G.GuildHallPlayerDropdown = CreateFrame("Frame", "GuildHallPlayerDropdown",
+            UIParent, "UIDropDownMenuTemplate")
+    end
+    EasyMenu(menu, _G.GuildHallPlayerDropdown, "cursor", 0, 0, "MENU")
+end
+
+-- Helper to attach right-click → OpenPlayerContextMenu on an existing
+-- frame (typically the FontString's parent row). Caller is responsible
+-- for: (a) making the target a Button so it can RegisterForClicks,
+-- (b) adding any hover highlight texture to match local UX, (c) not
+-- swallowing left-click behaviour that the row already provides.
+function ui.AttachPlayerContextMenu(button, getName, getClass)
+    if not button then return end
+    if button.RegisterForClicks then
+        button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    end
+    local prevOnClick = button:GetScript("OnClick")
+    button:SetScript("OnClick", function(self, mouseBtn, ...)
+        if mouseBtn == "RightButton" then
+            local n = type(getName) == "function" and getName() or getName
+            local c = type(getClass) == "function" and getClass() or getClass
+            ui.OpenPlayerContextMenu(n, c)
+            return
+        end
+        if prevOnClick then prevOnClick(self, mouseBtn, ...) end
+    end)
+end

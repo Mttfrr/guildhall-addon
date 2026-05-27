@@ -52,6 +52,7 @@ read_globals = {
     "StaticPopup_Show", "StaticPopup_Hide", "UISpecialFrames",
     "DEFAULT_CHAT_FRAME", "SendChatMessage", "ChatFrame_AddMessageEventFilter",
     "ChatFrame_RemoveMessageEventFilter", "C_ChatInfo",
+    "ChatFrame_SendTell", "ChatEdit_ChooseBoxForSend",
 
     -- Roster / unit / party / raid APIs
     "UnitName", "UnitFullName", "UnitClass", "UnitLevel", "UnitExists",

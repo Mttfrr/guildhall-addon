@@ -253,7 +253,11 @@ local function PopulateRosterSection(content, anchor, roster, width, frame)
             last = groupHdr
 
             for _, row in ipairs(rows) do
-                local r = CreateFrame("Frame", nil, content)
+                -- Button (not Frame) so the row can receive right-click
+                -- for the shared player context menu. Left-click is a
+                -- no-op today; the row chrome doesn't have its own
+                -- click behaviour to preserve.
+                local r = CreateFrame("Button", nil, content)
                 r:SetSize(width, ROW_H)
                 r:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -1)
                 r:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -1)
@@ -274,6 +278,10 @@ local function PopulateRosterSection(content, anchor, roster, width, frame)
                 nameFs:SetJustifyH("LEFT")
                 nameFs:SetWordWrap(false)
                 nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
+
+                ui.AttachPlayerContextMenu(r,
+                    function() return row.short end,
+                    function() return classFile end)
 
                 BuildNumericCell(r, COL_ILVL_X, 0, NUM_W, ROW_H, row.ilvl, false)
                 BuildNumericCell(r, COL_ENCH_X, 0, NUM_W, ROW_H, row.missingEnchants, true)

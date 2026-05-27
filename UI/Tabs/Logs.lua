@@ -239,11 +239,26 @@ local function PopulateLoot(sv)
             local short = (entry.player or ""):match("^([^%-]+)") or entry.player or "?"
             local gi = roster[short]
             local pColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
-            local playerText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            playerText:SetPoint("LEFT", itemText, "RIGHT", 4, 0)
-            playerText:SetWidth(120)
+            -- Player cell is its own Button overlay (instead of a bare
+            -- FontString on the row Button) so right-click here opens
+            -- the player context menu — distinct from right-clicking
+            -- elsewhere on the row, which still opens the loot row
+            -- menu (Re-tag event / Delete row).
+            local playerCell = CreateFrame("Button", nil, row)
+            playerCell:SetSize(120, 18)
+            playerCell:SetPoint("LEFT", itemText, "RIGHT", 4, 0)
+            playerCell:RegisterForClicks("RightButtonUp")
+            local playerText = playerCell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            playerText:SetAllPoints(playerCell)
             playerText:SetJustifyH("LEFT")
             playerText:SetText("|c" .. pColor .. short .. "|r")
+            local cellPlayer = entry.player    -- closure captures
+            local cellClass = gi and gi.class
+            playerCell:SetScript("OnClick", function(_, mouseBtn)
+                if mouseBtn == "RightButton" then
+                    ui.OpenPlayerContextMenu(cellPlayer, cellClass)
+                end
+            end)
 
             local bossText = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
             bossText:SetPoint("LEFT", playerText, "RIGHT", 4, 0)
@@ -731,12 +746,24 @@ local function PopulateAttendance(sv)
                 local rowIdx = math.floor(i / COLS)
                 if rowIdx > maxRow then maxRow = rowIdx end
 
-                local fs = sv.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                fs:SetPoint("TOPLEFT", sv.content, "TOPLEFT",
+                -- Each cell is a Button so we can hang the player
+                -- context menu (Whisper / Invite / Inspect / Copy name /
+                -- Copy profile link) off right-click. Left-click is a
+                -- no-op today; the `x` button covers the remove action.
+                local cellBtn = CreateFrame("Button", nil, sv.content)
+                cellBtn:SetSize(COL_W - 22, memberRowH)
+                cellBtn:SetPoint("TOPLEFT", sv.content, "TOPLEFT",
                     26 + col * COL_W, yOff - rowIdx * memberRowH)
-                fs:SetWidth(COL_W - 22)   -- leave room for the x
+
+                local fs = cellBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                fs:SetAllPoints(cellBtn)
                 fs:SetJustifyH("LEFT")
                 fs:SetText("|c" .. colorHex .. short .. "|r")
+
+                local memberClass = classFile
+                ui.AttachPlayerContextMenu(cellBtn,
+                    function() return m.name end,
+                    function() return memberClass end)
 
                 local memberName = m.name   -- capture for the closure
                 local xBtn = CreateFrame("Button", nil, sv.content)
