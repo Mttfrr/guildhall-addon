@@ -302,6 +302,14 @@ local function ShowCopyPopup(prompt, value)
     local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
     if popup then popup.data = { value = value } end
 end
+-- Exposed so the kebab popover (and any future copy-to-clipboard surface)
+-- can reuse the same EditBox-preselected popup without re-declaring the
+-- StaticPopupDialogs entry.
+ui.ShowCopyPopup = ShowCopyPopup
+
+-- Platform base URL, also exposed so event/character link surfaces
+-- elsewhere can build URLs without re-hardcoding the host.
+ui.PLATFORM_URL = PLATFORM_URL
 
 function ui.OpenPlayerContextMenu(name, class)
     if type(name) ~= "string" or name == "" then return end

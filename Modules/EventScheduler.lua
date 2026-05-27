@@ -175,7 +175,7 @@ end
 -- /gh invite — manual auto-invite
 ---------------------------------------------------------------------------
 
-function WGS:AutoInvite()
+function WGS:AutoInvite(eventOverride)
     -- Permission gate. Lead-or-assist on the group (if any) + officer
     -- rank in the guild. Both branches print a clear reason and bail
     -- before we touch anything.
@@ -197,8 +197,11 @@ function WGS:AutoInvite()
         return
     end
 
-    -- Find today's event
-    local event = self:FindTodayEventForTeam(nil)
+    -- eventOverride lets callers (e.g. the rail-row kebab's "Invite
+    -- signups" item) target a specific event regardless of which
+    -- one is "today's." Falls back to the existing today-resolution
+    -- when no override is supplied — preserves the /gh invite flow.
+    local event = eventOverride or self:FindTodayEventForTeam(nil)
     if not event then
         self:Print(L["NO_EVENT_TODAY"])
         return

@@ -134,6 +134,48 @@ end
 ui.events.EventStatus     = EventStatus
 ui.events.FormatEventTime = FormatEventTime
 
+-- Right-click kebab on a rail row. Two actions today:
+--
+--   - Copy event link → builds <PLATFORM_URL>/event/<ev.id> and pops
+--     the shared copy-via-EditBox popup. WoW addons can't launch a
+--     browser directly (Blizzard's Lua sandbox has no OS access),
+--     so the auto-selected EditBox + Ctrl+C is the standard workaround.
+--   - Invite signups → /gh invite via WGS:AutoInvite. Slash command
+--     was the only entry until now; surfacing it on right-click is
+--     a discoverability win.
+--
+-- Forward-declared local so BuildRailRow's OnClick handler can call
+-- it; the actual table-building runs at click time so any data the
+-- menu needs (ev.id, ev.title) is captured per-row.
+local function OpenEventRowKebab(ev)
+    if not ev then return end
+    local menu = {
+        { text = ev.title or "Event", isTitle = true, notCheckable = true },
+    }
+    if ev.id then
+        menu[#menu + 1] = {
+            text = "Copy event link",
+            notCheckable = true,
+            func = function()
+                ui.ShowCopyPopup("Event link:",
+                    ui.PLATFORM_URL .. "/event/" .. tostring(ev.id))
+            end,
+        }
+    end
+    menu[#menu + 1] = {
+        text = "Invite signups",
+        notCheckable = true,
+        func = function()
+            if WGS.AutoInvite then WGS:AutoInvite(ev) end
+        end,
+    }
+    if not _G.GuildHallEventKebabDropdown then
+        _G.GuildHallEventKebabDropdown = CreateFrame("Frame",
+            "GuildHallEventKebabDropdown", UIParent, "UIDropDownMenuTemplate")
+    end
+    EasyMenu(menu, _G.GuildHallEventKebabDropdown, "cursor", 0, 0, "MENU")
+end
+
 ---------------------------------------------------------------------------
 -- Rail rendering
 ---------------------------------------------------------------------------
@@ -227,7 +269,14 @@ local function BuildRailRow(parent, ev, yOff, isSelected, onSelect)
             .. "|r")
     end
 
-    btn:SetScript("OnClick", function() onSelect(ev) end)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:SetScript("OnClick", function(_, mouseBtn)
+        if mouseBtn == "RightButton" then
+            OpenEventRowKebab(ev)
+        else
+            onSelect(ev)
+        end
+    end)
     return btn
 end
 
