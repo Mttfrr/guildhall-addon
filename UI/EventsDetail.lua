@@ -126,7 +126,7 @@ end
 -- reach the right edge of the section instead of dangling in the middle.
 ---------------------------------------------------------------------------
 
-local function PopulateRosterSection(content, anchor, roster, width)
+local function PopulateRosterSection(content, anchor, roster, width, frame)
     local header = BuildSectionHeader(content, anchor, "Roster", width)
 
     -- Inline summary on the section-title row: gear-gap total only.
@@ -146,12 +146,48 @@ local function PopulateRosterSection(content, anchor, roster, width)
         return empty
     end
 
+    -- Search filter. Frame-scoped persistence (frame._rosterFilter)
+    -- survives the per-render rebuild — PopulateDetail clears content
+    -- but `frame` stays. After OnTextChanged → PopulateEvents rebuild,
+    -- the new EditBox restores text + focus + cursor so typing feels
+    -- uninterrupted. Filter matches case-insensitively against the
+    -- short character name (post-realm-strip).
+    local currentFilter = (frame and frame._rosterFilter) or ""
+    local searchBox = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    searchBox:SetSize(160, 20)
+    searchBox:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 12, -6)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetText(currentFilter)
+    searchBox:SetCursorPosition(#currentFilter)
+    if currentFilter ~= "" then searchBox:SetFocus() end
+    searchBox:SetScript("OnTextChanged", function(self)
+        local txt = (self:GetText() or ""):lower()
+        if not frame then return end
+        if (frame._rosterFilter or "") == txt then return end   -- no-op guard
+        frame._rosterFilter = txt
+        if WGS.PopulateEvents then WGS:PopulateEvents(frame) end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")   -- triggers OnTextChanged → re-renders empty
+        self:ClearFocus()
+    end)
+    local searchHint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchHint:SetPoint("LEFT", searchBox, "RIGHT", 8, 0)
+    searchHint:SetText("|cff666666filter by name|r")
+
     -- Bucket rows by status code; sort within each by short name.
+    -- Filter is applied here so empty buckets fall out of the render
+    -- entirely (no group headers for groups with zero matches).
+    local needle = currentFilter ~= "" and currentFilter or nil
     local byStatus = {}
     for _, code in ipairs(ROSTER_GROUP_ORDER) do byStatus[code] = {} end
     for _, row in ipairs(roster.rows) do
         local bucket = byStatus[row.status]
-        if bucket then bucket[#bucket + 1] = row end
+        if bucket then
+            if not needle or ((row.short or ""):lower():find(needle, 1, true)) then
+                bucket[#bucket + 1] = row
+            end
+        end
     end
     for _, code in ipairs(ROSTER_GROUP_ORDER) do
         table.sort(byStatus[code], function(a, b)
@@ -181,8 +217,10 @@ local function PopulateRosterSection(content, anchor, roster, width)
     -- per group.
     local columnHdr = CreateFrame("Frame", nil, content)
     columnHdr:SetSize(width, HEADER_H)
-    columnHdr:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
-    columnHdr:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -4)
+    -- columnHdr anchors below the search box so the filter input
+    -- doesn't collide with the iLvl / Enchants / Gems labels.
+    columnHdr:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -12, -6)
+    columnHdr:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, -6)
 
     local function colLabel(x, text)
         local fs = columnHdr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -619,7 +657,7 @@ local function PopulateDetail(frame, ev)
     end
 
     local roster = BuildEventRoster(ev.id)
-    lastAnchor = PopulateRosterSection(content, lastAnchor, roster, sectionW)
+    lastAnchor = PopulateRosterSection(content, lastAnchor, roster, sectionW, frame)
 
     local comp = FindRaidCompForEvent(ev.id)
     lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
