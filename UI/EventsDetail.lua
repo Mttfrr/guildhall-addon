@@ -465,10 +465,16 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         -- the rest of the footer picks up the new state.
         if WGS.PopulateEvents then WGS:PopulateEvents(footer:GetParent()) end
     end)
-    -- Disable on past events when no session is in flight. If a session
-    -- IS running, leave the Stop button enabled so officers can always
-    -- stop a stuck capture regardless of which event they're viewing.
-    if isPast and not isTracking then trackBtn:Disable() end
+    -- Disable on past events when (a) no session is in flight AND
+    -- (b) we're not currently in a raid. The first guard stops officers
+    -- accidentally creating a session for last week's raid from town;
+    -- the IsInRaid() carve-out keeps the button usable mid-raid when
+    -- EventStatus has already flipped to "Past" (raid started >3h ago,
+    -- which is normal — 3.5-4h sessions are common) but the user
+    -- legitimately needs to manually attach the session to this event.
+    if isPast and not isTracking and not (IsInRaid and IsInRaid()) then
+        trackBtn:Disable()
+    end
 
     actionBtn("Share Roster", 78, 100, function()
         local channel = WGS:GetGroupChannel()
