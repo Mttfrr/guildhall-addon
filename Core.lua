@@ -170,6 +170,14 @@ local SLASH_HANDLERS = {
     -- which public API surface fetched it. Safe to run anywhere.
     interop = function(self) self:PrintInteropStatus() end,
 
+    -- /gh diag — print a one-screen health-check of db.global. Row
+    -- counts per telemetry table, last-import timestamp, addon
+    -- version, current team filter. Useful for "is something off?"
+    -- self-debugging without /dump-spelunking. Surfaces tables
+    -- growing unusually large so an officer notices before it
+    -- becomes a performance issue.
+    diag = function(self) self:PrintDiagSummary() end,
+
     -- /gh peerloopback — dev-only PeerSync loopback toggle. Every
     -- broadcast self-delivers so the full encode → decode → merge →
     -- catch-up round-trip can be tested from a single client. No
@@ -416,6 +424,99 @@ function WGS:ListTeams()
         elseif team.members and #team.members > 0 then
             self:Print("     " .. table.concat(team.members, ", "))
         end
+    end
+end
+
+---------------------------------------------------------------------------
+-- /gh diag — db.global health summary
+---------------------------------------------------------------------------
+--
+-- One-screen sanity check: addon version + interface, last-import
+-- recency, current team filter, and row counts for every telemetry /
+-- imported table on db.global. Useful for "is something off?" self-
+-- debugging without /dump-spelunking, and for surfacing a table
+-- growing unusually large so the officer notices before it becomes
+-- a performance problem.
+
+local DIAG_LARGE_THRESHOLDS = {
+    loot                  = 10000,
+    attendance            = 5000,
+    raidCompResults       = 5000,
+    encounters            = 5000,
+    guildBankTransactions = 20000,
+    guildBankMoneyChanges = 20000,
+}
+
+local function formatRowCount(name, val)
+    if type(val) ~= "table" then return "n/a" end
+    local n = 0
+    if val[1] ~= nil then
+        n = #val
+    else
+        for _ in pairs(val) do n = n + 1 end
+    end
+    local warn = DIAG_LARGE_THRESHOLDS[name] and n >= DIAG_LARGE_THRESHOLDS[name]
+    if warn then
+        return string.format("|cffffaa00%d|r (large — consider /gh clear)", n)
+    end
+    return tostring(n)
+end
+
+local function formatAgo(ts)
+    if not ts or ts <= 0 then return "never" end
+    local delta = (time() or 0) - ts
+    if delta < 60 then return delta .. "s ago" end
+    if delta < 3600 then return math.floor(delta / 60) .. "m ago" end
+    if delta < 86400 then return math.floor(delta / 3600) .. "h ago" end
+    return math.floor(delta / 86400) .. "d ago"
+end
+
+function WGS:PrintDiagSummary()
+    local g = self.db and self.db.global or {}
+    self:Print("|cffffd100=== GuildHall diag ===|r")
+    self:Print(string.format("Version: %s   |cff888888(see /gh whatsnew)|r", self.version))
+    self:Print(string.format("Last import: %s   Last export: %s",
+        formatAgo(g.lastImport), formatAgo(g.lastExport)))
+
+    local currentTeam = self.GetCurrentTeamId and self:GetCurrentTeamId() or nil
+    local teamLabel = "All Teams"
+    if currentTeam then
+        teamLabel = "team " .. tostring(currentTeam)
+        for _, t in ipairs(g.teams or {}) do
+            if t.id == currentTeam then teamLabel = t.name or teamLabel; break end
+        end
+    end
+    self:Print("Current-team filter: " .. teamLabel)
+
+    -- Telemetry / capture tables (officer cares: do these have data?
+    -- are any growing unusually large?)
+    self:Print("|cffaaaaaa-- telemetry --|r")
+    local TELEMETRY = {
+        "loot", "attendance", "raidCompResults", "encounters",
+        "guildBankTransactions", "guildBankMoneyChanges",
+    }
+    for _, name in ipairs(TELEMETRY) do
+        self:Print(string.format("  %s: %s", name, formatRowCount(name, g[name])))
+    end
+
+    -- Imported-from-platform tables (officer cares: did the import
+    -- come through? are there obvious empties from a partial paste?)
+    self:Print("|cffaaaaaa-- imported --|r")
+    local IMPORTED = {
+        "events", "teams", "signups", "wishlists", "bossNotes",
+        "raidComps", "characters", "characterIds", "gearAudit",
+        "characterDetails",
+    }
+    for _, name in ipairs(IMPORTED) do
+        self:Print(string.format("  %s: %s", name, formatRowCount(name, g[name])))
+    end
+
+    if g.activeSession then
+        self:Print("|cffaaaaaa-- in flight --|r")
+        self:Print(string.format("  activeSession: started %s ago (team=%s, event=%s)",
+            formatAgo(g.activeSession.startedAt),
+            tostring(g.activeSession.teamName or g.activeSession.teamId),
+            tostring(g.activeSession.eventTitle or g.activeSession.eventId or "untagged")))
     end
 end
 
