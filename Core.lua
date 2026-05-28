@@ -120,11 +120,11 @@ end
 function WGS:OnDisable() end
 
 function WGS:PLAYER_ENTERING_WORLD()
-    -- One-time post-update release-notes modal. Internal guard
-    -- (_whatsNewChecked) ensures zone changes don't re-fire it; the
-    -- function decides whether to show based on
-    -- db.profile.lastSeenVersion vs WGS.version. See UI/WhatsNew.lua.
-    if self.MaybeShowWhatsNew then self:MaybeShowWhatsNew() end
+    -- Reserved for future per-character init. The "What's new" modal
+    -- used to fire here on version bumps but auto-popping a modal on
+    -- every login was intrusive — it now surfaces via a title-bar
+    -- badge in the main frame (opt-in) and the /gh whatsnew slash.
+    -- See UI/WhatsNew.lua.
 end
 
 -- Slash command dispatch. Each entry is a function(self, input) where

@@ -298,6 +298,30 @@ local function CreateMainFrame()
     f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
     f.title:SetText("GuildHall")
 
+    -- "What's new" badge — appears to the right of the title when the
+    -- running addon version is newer than db.profile.lastSeenVersion.
+    -- Replaces the older PLAYER_ENTERING_WORLD modal pop, which fired
+    -- on every login after an update and felt intrusive. Click → opens
+    -- the modal + the dialog's "Got it" bumps lastSeenVersion which
+    -- re-evaluates this badge to hidden on the next OnShow.
+    f.whatsNewBadge = CreateFrame("Button", nil, f)
+    f.whatsNewBadge:SetSize(110, 18)
+    f.whatsNewBadge:SetPoint("LEFT", f.title, "RIGHT", 10, 0)
+    local badgeFs = f.whatsNewBadge:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    badgeFs:SetAllPoints(f.whatsNewBadge)
+    badgeFs:SetJustifyH("LEFT")
+    badgeFs:SetText("|cffffd100\226\152\133 What's new \226\134\146|r")
+    f.whatsNewBadge:SetScript("OnEnter", function(self)
+        badgeFs:SetText("|cffffe066\226\152\133 What's new \226\134\146|r")
+    end)
+    f.whatsNewBadge:SetScript("OnLeave", function(self)
+        badgeFs:SetText("|cffffd100\226\152\133 What's new \226\134\146|r")
+    end)
+    f.whatsNewBadge:SetScript("OnClick", function()
+        if WGS.ShowWhatsNew then WGS:ShowWhatsNew() end
+    end)
+    f.whatsNewBadge:Hide()
+
     -- Title-bar team picker. Sits left of the CloseButton; persists to
     -- db.profile.currentTeamId via WGS:SetCurrentTeamId. Tab readers
     -- pick it up via WGS:GetCurrentTeamId() on the next render. Stays in
@@ -382,6 +406,16 @@ local function CreateMainFrame()
         -- if the data crossed the 7-day threshold while the main frame
         -- was hidden (tab switch already handles in-session updates).
         UpdateStaleBanner(self)
+        -- Re-check the "What's new" badge — visible when the running
+        -- version is newer than lastSeenVersion. Modal's "Got it" path
+        -- bumps lastSeenVersion which flips this back to hidden.
+        if self.whatsNewBadge then
+            if WGS.HasUnreadWhatsNew and WGS:HasUnreadWhatsNew() then
+                self.whatsNewBadge:Show()
+            else
+                self.whatsNewBadge:Hide()
+            end
+        end
         RefreshCurrentTab(self)
     end)
 

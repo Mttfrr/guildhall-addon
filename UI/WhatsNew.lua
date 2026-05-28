@@ -162,33 +162,28 @@ end
 ---------------------------------------------------------------------------
 
 -- Show the modal regardless of seen-state. Used by /gh whatsnew so a
--- user can re-open the dialog any time, and by the version-bump
--- trigger below.
+-- user can re-open the dialog any time, by the main frame's title-bar
+-- badge when there's an unread version bump, and from anywhere else
+-- that wants to surface it.
 function WGS:ShowWhatsNew()
     if not modalFrame then modalFrame = CreateWhatsNewModal() end
     PopulateContent(modalFrame)
     modalFrame:Show()
 end
 
--- Called from Core.lua's PLAYER_ENTERING_WORLD handler. Once-per-session
--- guard on `WGS._whatsNewChecked` so zone changes don't re-fire it.
-function WGS:MaybeShowWhatsNew()
-    if WGS._whatsNewChecked then return end
-    WGS._whatsNewChecked = true
-
+-- Does this character have a pending "what's new" — i.e. is the
+-- running addon version newer than the last one acknowledged? The
+-- main frame's title-bar badge surfaces this so the user opts INTO
+-- viewing the notes (vs the old PLAYER_ENTERING_WORLD pop-on-login,
+-- which was intrusive and felt like a forced interruption every
+-- update). Fresh installs (lastSeenVersion == nil) get stamped
+-- silently here so a brand-new user doesn't see the badge either.
+function WGS:HasUnreadWhatsNew()
+    if not self.db or not self.db.profile then return false end
     local seen = self.db.profile.lastSeenVersion
     if not seen then
-        -- Fresh install / cleared profile: stamp without showing.
         self.db.profile.lastSeenVersion = self.version
-        return
+        return false
     end
-    if self:CompareVersions(self.version, seen) <= 0 then return end
-
-    -- Real version bump — show the modal after a short delay so the
-    -- login-time chat noise settles first.
-    if C_Timer and C_Timer.After then
-        C_Timer.After(3, function() WGS:ShowWhatsNew() end)
-    else
-        WGS:ShowWhatsNew()
-    end
+    return self:CompareVersions(self.version, seen) > 0
 end
