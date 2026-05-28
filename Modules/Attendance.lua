@@ -757,3 +757,52 @@ function WGS:DeleteAttendanceSession(sessionIndex)
     self:PrintCorrectionHint()
     return true
 end
+
+---------------------------------------------------------------------------
+-- Data normalization (export pre-pass)
+---------------------------------------------------------------------------
+--
+-- Belt-and-suspenders guardrail for the addon → platform import. Every
+-- now and then a scalar field on db.global.attendance ends up with a
+-- type-wrong value — a Lua table where the schema expected a number,
+-- a number where a string was expected, etc. The platform's Zod schema
+-- correctly rejects the whole row, which blocks the entire import over
+-- one bad field.
+--
+-- The principled fix is to clean the bad data at the source. This
+-- function walks db.global.attendance and coerces type-wrong scalars
+-- to nil, in place. Called from Sync/Encoder.lua:WGS:Encode as a
+-- pre-export pass so the platform never sees malformed rows. Mutates
+-- db.global so the repair persists — a one-time clean.
+--
+-- The list intentionally only covers scalar contract fields that the
+-- platform's addonAttendanceSessionSchema declares. memberList /
+-- bossAttendance are nested structures with their own per-row schemas
+-- and aren't reduced to nil here.
+
+local ATTENDANCE_SCALAR_TYPES = {
+    teamId       = "number",
+    eventId      = "number",
+    teamName     = "string",
+    eventTitle   = "string",
+    instanceName = "string",
+    startedBy    = "string",
+}
+
+function WGS:NormalizeAttendanceSessions()
+    local sessions = self.db and self.db.global and self.db.global.attendance
+    if type(sessions) ~= "table" then return 0 end
+    local repairs = 0
+    for _, session in ipairs(sessions) do
+        if type(session) == "table" then
+            for field, expected in pairs(ATTENDANCE_SCALAR_TYPES) do
+                local v = session[field]
+                if v ~= nil and type(v) ~= expected then
+                    session[field] = nil
+                    repairs = repairs + 1
+                end
+            end
+        end
+    end
+    return repairs
+end

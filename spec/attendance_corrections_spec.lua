@@ -158,3 +158,76 @@ describe("WGS:DeleteAttendanceSession", function()
         assert.are.equal(1000, fired.session.startedAt)
     end)
 end)
+
+-- Belt-and-suspenders guardrail for the addon → platform import. When
+-- a session ends up with type-wrong scalar fields (Lua table teamId
+-- observed in the wild), the platform's Zod schema correctly rejects
+-- the row, blocking the whole import. NormalizeAttendanceSessions
+-- walks db.global.attendance and nils out malformed scalars in place
+-- before the encoder serializes — the source-of-truth fix, run as a
+-- pre-export pass in Sync/Encoder.lua.
+describe("WGS:NormalizeAttendanceSessions", function()
+    local WGS
+    before_each(function()
+        WGS = helpers.setup()
+    end)
+
+    it("coerces type-wrong scalars to nil and reports the repair count", function()
+        WGS.db.global.attendance = {
+            {
+                startedAt = 1000,
+                teamId = { 1, 2 },              -- bad: should be number
+                eventId = "not a number",       -- bad: should be number
+                teamName = 42,                  -- bad: should be string
+                eventTitle = "Real Title",      -- good
+                instanceName = { foo = "bad" }, -- bad: should be string
+                startedBy = "Tester-Realm",     -- good
+            },
+            {
+                startedAt = 2000,
+                teamId = 5,                     -- good
+                eventTitle = "Another",         -- good
+            },
+        }
+
+        local repairs = WGS:NormalizeAttendanceSessions()
+        assert.are.equal(4, repairs, "4 fields needed nil-ing in session 1")
+
+        local s1 = WGS.db.global.attendance[1]
+        assert.is_nil(s1.teamId,       "array teamId nulled out")
+        assert.is_nil(s1.eventId,      "string eventId nulled out")
+        assert.is_nil(s1.teamName,     "number teamName nulled out")
+        assert.is_nil(s1.instanceName, "table instanceName nulled out")
+        assert.are.equal("Real Title",   s1.eventTitle, "good string passes through")
+        assert.are.equal("Tester-Realm", s1.startedBy,  "good string passes through")
+        assert.are.equal(1000, s1.startedAt, "startedAt is not in the coerced list")
+
+        local s2 = WGS.db.global.attendance[2]
+        assert.are.equal(5, s2.teamId,        "good number passes through")
+        assert.are.equal("Another", s2.eventTitle)
+    end)
+
+    it("returns 0 and mutates nothing when every session is well-formed", function()
+        WGS.db.global.attendance = {
+            { startedAt = 1, teamId = 1, eventId = 7, teamName = "T1" },
+            { startedAt = 2, teamId = 2, eventId = nil },                  -- nil is fine
+        }
+        local repairs = WGS:NormalizeAttendanceSessions()
+        assert.are.equal(0, repairs)
+        assert.are.equal(1, WGS.db.global.attendance[1].teamId)
+        assert.is_nil(WGS.db.global.attendance[2].eventId)
+    end)
+
+    it("is idempotent — re-running on already-clean data is a no-op", function()
+        WGS.db.global.attendance = { { startedAt = 1, teamId = { 1 } } }
+        WGS:NormalizeAttendanceSessions()
+        assert.are.equal(0, WGS:NormalizeAttendanceSessions())
+    end)
+
+    it("tolerates an empty / missing attendance table", function()
+        WGS.db.global.attendance = nil
+        assert.are.equal(0, WGS:NormalizeAttendanceSessions())
+        WGS.db.global.attendance = {}
+        assert.are.equal(0, WGS:NormalizeAttendanceSessions())
+    end)
+end)

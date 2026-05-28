@@ -34,6 +34,21 @@ end
 function WGS:Encode(data)
     if not data then return nil end
 
+    -- Normalize attendance session shape before serializing. Bad data
+    -- (type-wrong scalars: array teamId, table eventId, etc.) gets
+    -- coerced to nil so the platform's strict Zod schema doesn't 400
+    -- the whole import over one malformed row. Walks db.global.attendance
+    -- in place; idempotent. Surfaces a one-line print when repairs
+    -- happened so the user knows their data was self-healed.
+    if self.NormalizeAttendanceSessions then
+        local repairs = self:NormalizeAttendanceSessions()
+        if repairs > 0 then
+            self:Print(string.format(
+                "Normalized %d malformed field%s in attendance data before export.",
+                repairs, repairs == 1 and "" or "s"))
+        end
+    end
+
     -- v4 is the preferred envelope when LibDeflate is loaded. The
     -- payload's `v` field reflects the envelope ACTUALLY emitted (not
     -- EXPORT_VERSION), so decoders can route on either the envelope
