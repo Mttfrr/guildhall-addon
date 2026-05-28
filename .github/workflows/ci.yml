@@ -13,6 +13,9 @@ jobs:
       - name: Check TOC + Core.lua version consistency
         run: bash scripts/check_toc.sh
 
+      - name: Scan for references to removed WoW APIs
+        run: bash scripts/check_removed_apis.sh
+
   luacheck:
     runs-on: ubuntu-latest
     steps:
