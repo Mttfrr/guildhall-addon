@@ -27,6 +27,12 @@ local dbDefaults = {
         -- second officer required). See WGS:PeerSync_Broadcast for the
         -- loopback hook + `/gh peerloopback` to toggle.
         peerSyncLoopback = false,
+        -- Highest addon version this character has acknowledged the
+        -- "What's new" dialog for. nil on fresh install (the dialog
+        -- silently sets it without showing — we don't want to greet
+        -- a brand-new user with legacy release notes). Bumped to
+        -- WGS.version when the user clicks "Got it" on the modal.
+        lastSeenVersion = nil,
         -- Global current-team filter. nil = "All Teams" (no filter).
         -- Otherwise a `team.id` from db.global.teams. Read by the main
         -- frame's title-bar picker + every team-scoped tab via
@@ -113,7 +119,13 @@ end
 
 function WGS:OnDisable() end
 
-function WGS:PLAYER_ENTERING_WORLD() end
+function WGS:PLAYER_ENTERING_WORLD()
+    -- One-time post-update release-notes modal. Internal guard
+    -- (_whatsNewChecked) ensures zone changes don't re-fire it; the
+    -- function decides whether to show based on
+    -- db.profile.lastSeenVersion vs WGS.version. See UI/WhatsNew.lua.
+    if self.MaybeShowWhatsNew then self:MaybeShowWhatsNew() end
+end
 
 -- Slash command dispatch. Each entry is a function(self, input) where
 -- input is the raw rest-of-line so handlers that need sub-args can
@@ -139,6 +151,7 @@ local SLASH_HANDLERS = {
     bank      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_BANK) end,
     logs      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_LOOT) end,
     restore   = function(self) self:RestoreClearedData() end,
+    whatsnew  = function(self) if self.ShowWhatsNew then self:ShowWhatsNew() end end,
 
     -- /gh sync / catchup — manual peer-sync catch-up. Useful when you
     -- join a raid late and the GROUP_ROSTER_UPDATE debounce hasn't

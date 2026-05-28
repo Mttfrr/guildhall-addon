@@ -20,6 +20,90 @@ local SelectSubView = ui.SelectSubView
 local mainFrame = nil
 
 ---------------------------------------------------------------------------
+-- Stale-data banner
+---------------------------------------------------------------------------
+
+-- Persistent banner across the top of the main frame when the last
+-- platform import is more than STALE_AFTER seconds old. Officers
+-- routinely forget to re-import; rosters / events / signups drift
+-- silently and the addon's already-correct data quietly becomes
+-- already-wrong. One line + a "Sync now" button that jumps to the
+-- Sync tab so the fix is two clicks away.
+--
+-- lastImport == 0 means "never imported" (fresh install / freshly-
+-- cleared profile). We don't show the banner in that case because
+-- there's nothing useful to say — the empty Sync tab already explains.
+local STALE_AFTER_SECONDS = 7 * 86400
+
+local function UpdateStaleBanner(frame)
+    if not frame.staleBanner then return end
+    local lastImport = (WGS.db and WGS.db.global and WGS.db.global.lastImport) or 0
+    local now = time()
+    local stale = lastImport > 0 and (now - lastImport) > STALE_AFTER_SECONDS
+
+    if stale then
+        local daysAgo = math.floor((now - lastImport) / 86400)
+        frame.staleBanner.text:SetText(string.format(
+            "|cffffaa00\226\154\160 Data is %d days old.|r " ..
+            "Re-import from guildhall.run to refresh signups, events, and rosters.",
+            daysAgo))
+        frame.staleBanner:Show()
+    else
+        frame.staleBanner:Hide()
+    end
+
+    -- Re-anchor tab contents so they don't overlap the banner when shown.
+    -- The fixed-y anchor (TOPLEFT, f, TOPLEFT, 10, -35) used to live in
+    -- CreateMainFrame's tab-content loop; this dynamic version restores
+    -- the same geometry when stale=false and pushes content below the
+    -- banner when stale=true.
+    for i = 1, TAB_COUNT do
+        local content = frame.tabContents and frame.tabContents[i]
+        if content then
+            content:ClearAllPoints()
+            if stale then
+                content:SetPoint("TOPLEFT", frame.staleBanner, "BOTTOMLEFT", -10, -4)
+                content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 35)
+            else
+                content:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -35)
+                content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 35)
+            end
+        end
+    end
+end
+
+local function BuildStaleBanner(frame)
+    local banner = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    banner:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -30)
+    banner:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
+    banner:SetHeight(24)
+    banner:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    banner:SetBackdropColor(0.4, 0.3, 0.05, 0.85)
+    banner:SetBackdropBorderColor(1, 0.7, 0.1, 0.6)
+    banner:Hide()
+
+    banner.text = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    banner.text:SetPoint("LEFT", banner, "LEFT", 8, 0)
+    banner.text:SetPoint("RIGHT", banner, "RIGHT", -90, 0)
+    banner.text:SetJustifyH("LEFT")
+    banner.text:SetWordWrap(false)
+
+    local syncBtn = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+    syncBtn:SetSize(80, 18)
+    syncBtn:SetPoint("RIGHT", banner, "RIGHT", -4, 0)
+    syncBtn:SetText("Sync now")
+    syncBtn:SetScript("OnClick", function()
+        WGS:SelectMainFrameTab(ui.TAB_SYNC)
+    end)
+
+    return banner
+end
+
+---------------------------------------------------------------------------
 -- Tab switching
 ---------------------------------------------------------------------------
 
@@ -28,6 +112,10 @@ local function SelectTab(frame, tabIndex)
     frame.tabContents[tabIndex]:Show()
     frame.selectedTab = tabIndex
     PanelTemplates_SetTab(frame, tabIndex)
+    -- Re-check the stale banner on every tab switch so the freshness
+    -- state stays current even if a long-lived main-frame session
+    -- crossed the 7-day threshold between switches.
+    UpdateStaleBanner(frame)
 end
 
 local function RefreshCurrentTab(frame)
@@ -225,6 +313,16 @@ local function CreateMainFrame()
         end)
     end
 
+    -- Stale-data banner. Built once at frame creation; visibility +
+    -- copy update through UpdateStaleBanner, which fires on tab switch
+    -- and on every successful import (via WGS_IMPORT_APPLIED below).
+    f.staleBanner = BuildStaleBanner(f)
+    if WGS.RegisterCallback then
+        WGS.RegisterCallback(f, "WGS_IMPORT_APPLIED", function()
+            UpdateStaleBanner(f)
+        end)
+    end
+
     -- Status bar
     f.statusBar = CreateFrame("Frame", nil, f)
     f.statusBar:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 10)
@@ -280,6 +378,10 @@ local function CreateMainFrame()
         if self.teamPicker and self.teamPicker.refresh then
             self.teamPicker.refresh()
         end
+        -- Re-check stale state on every OnShow so the banner appears
+        -- if the data crossed the 7-day threshold while the main frame
+        -- was hidden (tab switch already handles in-session updates).
+        UpdateStaleBanner(self)
         RefreshCurrentTab(self)
     end)
 
