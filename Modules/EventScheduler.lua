@@ -237,9 +237,23 @@ function WGS:AutoInvite(eventOverride)
 
     if invited > 0 then
         self:Print(string.format(L["INVITE_SUMMARY"], invited, event.title or "?", source or "roster"))
-        -- Auto-sort raid groups once invites have had time to land. Only
-        -- meaningful when we know the planned groups (raid comp source).
-        if source == "raid comp" then
+        -- Auto-sort raid groups once invites have had time to land.
+        -- The previous guard (`source == "raid comp"`) skipped the
+        -- sort whenever signups existed — but signups take priority
+        -- over comp, so in the common case (officers using signups
+        -- on guildhall.run) invited raiders never got placed in
+        -- their planned groups. New rule: schedule the sort whenever
+        -- the event HAS a comp with at least one group assignment,
+        -- regardless of which list we used for the invites.
+        local eventId = event.id or event.eventId
+        local comp = eventId and self:GetRaidComp(eventId) or nil
+        local hasGroups = false
+        if comp and comp.assignments then
+            for _, a in ipairs(comp.assignments) do
+                if a.group then hasGroups = true; break end
+            end
+        end
+        if hasGroups then
             C_Timer.After(SORT_AFTER_INVITE_DELAY, function()
                 if IsInRaid() then self:SortRaidGroups() end
             end)

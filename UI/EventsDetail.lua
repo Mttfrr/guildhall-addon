@@ -25,12 +25,11 @@ local STATUS_LABEL_COLORS = WGS.SIGNUP_STATUS_COLORS
 local COMMITTED_STATUSES  = WGS.SIGNUP_STATUS_COMMITTED
 local ROSTER_GROUP_ORDER  = WGS.SIGNUP_STATUS_ORDER
 
+-- ROLE_ORDER is still used by the "Share Comp" chat output path which
+-- groups by role (tanks/healers/dps) for raid-chat readability. The
+-- main raid-comp UI now groups by raid group (1-8) since that matches
+-- the platform's Raid Comp builder.
 local ROLE_ORDER  = { "TANK", "HEALER", "DPS" }
-local ROLE_LABELS = {
-    TANK   = "|cff5599ffTanks|r",
-    HEALER = "|cff00ff00Healers|r",
-    DPS    = "|cffff4444DPS|r",
-}
 
 ---------------------------------------------------------------------------
 -- Data builders (small helpers used only by the detail panel)
@@ -309,52 +308,104 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
         return empty
     end
 
-    -- Group assignments by role.
+    -- Group assignments by raid group (1-8), with a fallback bucket
+    -- for slots that don't have a group assignment yet. This mirrors
+    -- the platform's Raid Comp builder, which is group-centric — the
+    -- earlier role-grouped rendering (Tanks / Healers / DPS) didn't
+    -- match what officers were planning on guildhall.run.
+    --
+    -- WGS:AutoInvite → invites fire → SortRaidGroups runs 5s later
+    -- to move accepted raiders into their assigned group. So this
+    -- view both PLANS the groups and is what officers see during the
+    -- raid as the in-game subgroups fill in.
     local assignments = comp.assignments or comp.members or {}
-    local byRole = { TANK = {}, HEALER = {}, DPS = {} }
+    local byGroup = {}
+    local unassigned = {}
     for _, m in ipairs(assignments) do
-        local role = WGS:NormalizeRole(m.role)
-        byRole[role][#byRole[role] + 1] = m
+        local g = tonumber(m.group)
+        if g and g >= 1 and g <= 8 then
+            byGroup[g] = byGroup[g] or {}
+            byGroup[g][#byGroup[g] + 1] = m
+        else
+            unassigned[#unassigned + 1] = m
+        end
     end
+
+    -- Within each group, sort by role (tanks first, then healers, then
+    -- dps) so the column reads at a glance.
+    local roleOrder = { TANK = 1, HEALER = 2, DPS = 3 }
+    local function sortGroup(g)
+        table.sort(g, function(a, b)
+            local ra = roleOrder[WGS:NormalizeRole(a.role)] or 4
+            local rb = roleOrder[WGS:NormalizeRole(b.role)] or 4
+            if ra ~= rb then return ra < rb end
+            return ((a.name or "")) < ((b.name or ""))
+        end)
+    end
+    for g = 1, 8 do
+        if byGroup[g] then sortGroup(byGroup[g]) end
+    end
+    sortGroup(unassigned)
 
     -- Split anchors: TOP-of-previous for vertical stacking, LEFT-of-
     -- header for a stable x column. Without the split, each row's
     -- TOPLEFT anchored to the previous row's BOTTOMLEFT at x = +12
-    -- accumulates the offset down the list — Teraiz at header+12,
-    -- Healers at Teraiz+0, Deconaga at Healers+12 = header+24,
-    -- and so on until DPS members render four indents deep. The
-    -- LEFT anchor pins every role heading to header.x and every
-    -- member to header.x + 12, regardless of what came before.
+    -- accumulates the offset down the list. The LEFT anchor pins
+    -- every group heading to header.x and every member to
+    -- header.x + 12, regardless of what came before.
     local last = header
-    for _, role in ipairs(ROLE_ORDER) do
-        local members = byRole[role]
-        if #members > 0 then
-            local roleFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            roleFs:SetPoint("TOP", last, "BOTTOM", 0, last == header and -6 or -4)
-            roleFs:SetPoint("LEFT", header, "LEFT", 0, 0)
-            roleFs:SetText((ROLE_LABELS[role] or role) .. " (" .. #members .. ")")
-            last = roleFs
 
-            for _, m in ipairs(members) do
-                local nameStr   = m.name or m.playerName or m.characterName or "Unknown"
-                local classFile = WGS:NormalizeClassFile(m.class or m.classFile or "")
-                local colorHex  = WGS.CLASS_COLORS[classFile]
+    local function renderBucket(label, color, members)
+        if #members == 0 then return end
+        local groupFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        groupFs:SetPoint("TOP", last, "BOTTOM", 0, last == header and -6 or -4)
+        groupFs:SetPoint("LEFT", header, "LEFT", 0, 0)
+        groupFs:SetText(string.format("|c%s%s|r |cff888888(%d)|r",
+            color, label, #members))
+        last = groupFs
 
-                local row = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                row:SetPoint("TOP", last, "BOTTOM", 0, -2)
-                row:SetPoint("LEFT", header, "LEFT", 12, 0)
-                row:SetWidth(width - 12)
-                row:SetJustifyH("LEFT")
-                local text = colorHex and ("|c" .. colorHex .. nameStr .. "|r") or nameStr
-                if m.spec and m.spec ~= "" then
-                    text = text .. "  |cff888888" .. m.spec .. "|r"
-                elseif m.note and m.note ~= "" then
-                    text = text .. "  |cff888888" .. m.note .. "|r"
-                end
-                row:SetText(text)
-                last = row
+        for _, m in ipairs(members) do
+            local nameStr   = m.name or m.playerName or m.characterName or "Unknown"
+            local classFile = WGS:NormalizeClassFile(m.class or m.classFile or "")
+            local colorHex  = WGS.CLASS_COLORS[classFile]
+
+            local row = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row:SetPoint("TOP", last, "BOTTOM", 0, -2)
+            row:SetPoint("LEFT", header, "LEFT", 12, 0)
+            row:SetWidth(width - 12)
+            row:SetJustifyH("LEFT")
+            local text = colorHex and ("|c" .. colorHex .. nameStr .. "|r") or nameStr
+            -- Role badge in front of the name so officers can scan
+            -- "where are the healers" without re-reading each spec.
+            local roleNorm = WGS:NormalizeRole(m.role)
+            if roleNorm == "TANK" then
+                text = "|cff5599ffT|r " .. text
+            elseif roleNorm == "HEALER" then
+                text = "|cff00ff00H|r " .. text
+            elseif roleNorm == "DPS" then
+                text = "|cffff4444D|r " .. text
             end
+            if m.spec and m.spec ~= "" then
+                text = text .. "  |cff888888" .. m.spec .. "|r"
+            elseif m.note and m.note ~= "" then
+                text = text .. "  |cff888888" .. m.note .. "|r"
+            end
+            row:SetText(text)
+            last = row
         end
+    end
+
+    -- Group 1-8 in order, then any unassigned slots at the bottom.
+    -- Group colors are subtle on purpose — the platform's comp
+    -- builder doesn't colour groups, and a too-loud palette here
+    -- would compete with class colours.
+    for g = 1, 8 do
+        if byGroup[g] and #byGroup[g] > 0 then
+            renderBucket("Group " .. g, "ffffd100", byGroup[g])
+        end
+    end
+    if #unassigned > 0 then
+        renderBucket("Unassigned", "ff888888", unassigned)
     end
 
     return last
