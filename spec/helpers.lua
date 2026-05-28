@@ -171,6 +171,119 @@ function M.setup()
     return GuildHall
 end
 
+--- Opt-in loader for the UI shim layer. Specs that exercise UI code
+--- (frame builders, menu helpers, popups) call this AFTER M.setup()
+--- to install minimal stubs for CreateFrame, MenuUtil, UIParent,
+--- StaticPopupDialogs, GameTooltip, etc. + load UI/UIHelpers.lua.
+---
+--- The shims are intentionally tiny — full-fidelity WoW UI rendering
+--- isn't the goal, just "loads without nil-call errors" so the UI
+--- code's own logic (menu construction, popup wiring, layout calls)
+--- can be observed.
+---
+--- After loading, specs can read:
+---   GuildHall._ui.OpenContextMenu(...)    -- exercises the dispatcher
+---   _G._capturedMenus                     -- array of menu descriptions
+---                                            produced by MenuUtil mock
+function M.loadUIShims()
+    -- Chainable frame mock. Every unknown method returns self so
+    -- chained calls (frame:SetSize():SetPoint():Show()) don't blow
+    -- up. A handful of methods need real behaviour so the UI's own
+    -- assertions about state work — those override the catch-all.
+    local function makeMockFrame(frameType, name, parent)
+        local mock = {
+            _type     = frameType,
+            _name     = name,
+            _parent   = parent,
+            _scripts  = {},
+            _shown    = false,
+            _enabled  = true,
+        }
+        function mock:SetScript(scriptName, fn) self._scripts[scriptName] = fn end
+        function mock:GetScript(scriptName) return self._scripts[scriptName] end
+        function mock:HasScript(scriptName) return self._scripts[scriptName] ~= nil end
+        function mock:Show() self._shown = true end
+        function mock:Hide() self._shown = false end
+        function mock:IsShown() return self._shown end
+        function mock:SetShown(v) self._shown = v and true or false end
+        function mock:Enable() self._enabled = true end
+        function mock:Disable() self._enabled = false end
+        function mock:IsEnabled() return self._enabled end
+        function mock:SetEnabled(v) self._enabled = v and true or false end
+        function mock:GetParent() return self._parent end
+        function mock:GetWidth() return 0 end
+        function mock:GetHeight() return 0 end
+        function mock:GetStringHeight() return 14 end
+        function mock:GetCursorPosition() return 0, 0 end
+        function mock:CreateFontString() return makeMockFrame("FontString", nil, self) end
+        function mock:CreateTexture() return makeMockFrame("Texture", nil, self) end
+        function mock:CreateLine() return makeMockFrame("Line", nil, self) end
+        function mock:GetChildren() return end
+        function mock:GetRegions() return end
+        function mock:GetHighlightTexture() return makeMockFrame("Texture", nil, self) end
+        -- Catch-all: any other method becomes a no-op returning self.
+        return setmetatable(mock, {
+            __index = function(t, k)
+                local fn = function(self_) return self_ end
+                rawset(t, k, fn)
+                return fn
+            end,
+        })
+    end
+
+    _G.UIParent = makeMockFrame("Frame", "UIParent")
+    _G.GameTooltip = makeMockFrame("GameTooltip", "GameTooltip")
+    _G.UISpecialFrames = {}
+    _G.StaticPopupDialogs = {}
+    _G.StaticPopup_Show = function() return makeMockFrame("Frame") end
+    _G.StaticPopup_Hide = function() end
+    _G.ITEM_QUALITY_COLORS = setmetatable({}, { __index = function() return "ffffffff" end })
+    _G.CreateFrame = function(frameType, name, parent)
+        return makeMockFrame(frameType, name, parent)
+    end
+
+    -- MenuUtil mock: records every CreateContextMenu invocation +
+    -- the menu description tree the callback built, so specs can
+    -- assert on what was constructed without having to render it.
+    _G._capturedMenus = {}
+    local function makeMenuNode(label, fn)
+        local node = { label = label, func = fn, _children = {}, _enabled = true }
+        function node:CreateTitle(text)
+            local child = { kind = "title", text = text }
+            table.insert(self._children, child)
+            return child
+        end
+        function node:CreateButton(text, callback)
+            local child = makeMenuNode(text, callback)
+            child.kind = "button"
+            table.insert(self._children, child)
+            return child
+        end
+        function node:CreateDivider()
+            local child = { kind = "divider" }
+            table.insert(self._children, child)
+            return child
+        end
+        function node:SetEnabled(v) self._enabled = v end
+        function node:IsEnabled() return self._enabled end
+        return node
+    end
+    _G.MenuUtil = {
+        CreateContextMenu = function(owner, builder)
+            local root = makeMenuNode("(root)")
+            root.kind = "root"
+            builder(owner, root)
+            table.insert(_G._capturedMenus, root)
+            return root
+        end,
+    }
+
+    -- Bring in UI/UIHelpers.lua now that the globals it expects
+    -- exist. Tests can then call GuildHall._ui.OpenContextMenu(...)
+    -- directly.
+    dofile("UI/UIHelpers.lua")
+end
+
 --- Opt-in loader for the vendored LibDeflate library. Specs that
 --- exercise the v4 (deflate) envelope call this AFTER M.setup() so
 --- the LibStub stub already exists. We dofile the real source rather
