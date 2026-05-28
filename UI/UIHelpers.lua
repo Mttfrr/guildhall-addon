@@ -302,6 +302,61 @@ local function ShowCopyPopup(prompt, value)
     local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
     if popup then popup.data = { value = value } end
 end
+
+---------------------------------------------------------------------------
+-- Context-menu compatibility helper
+---------------------------------------------------------------------------
+--
+-- Convert EasyMenu-style menu tables into MenuUtil.CreateContextMenu
+-- calls. EasyMenu was removed from retail in the 11.0 interface (TOC
+-- 110000+); the addon's right-click affordances (loot row menu,
+-- session event picker, player context menu, minimap menu, event row
+-- kebab) all targeted EasyMenu and now fail with "attempt to call a
+-- nil value" on current retail.
+--
+-- The conversion preserves the existing menu-table format so each
+-- callsite only changes its dispatch line, not the menu construction:
+--   text         (string)
+--   isTitle      → :CreateTitle (or :CreateDivider when text is empty —
+--                  the EasyMenu code used { isTitle = true, text = "" }
+--                  as a separator)
+--   disabled     → button with :SetEnabled(false)
+--   menuList     → nested submenu, walked recursively
+--   func         → click handler (called by MenuUtil on activation)
+--   notCheckable → ignored (EasyMenu required it; MenuUtil doesn't
+--                  render checkboxes by default so this field becomes
+--                  a no-op marker)
+local function buildContextItem(parent, item)
+    if not item then return end
+    if item.isTitle then
+        if item.text and item.text ~= "" then
+            parent:CreateTitle(item.text)
+        else
+            parent:CreateDivider()
+        end
+        return
+    end
+    if type(item.menuList) == "table" then
+        local sub = parent:CreateButton(item.text or "")
+        for _, child in ipairs(item.menuList) do
+            buildContextItem(sub, child)
+        end
+        return
+    end
+    local btn = parent:CreateButton(item.text or "", item.func)
+    if item.disabled and btn and btn.SetEnabled then
+        btn:SetEnabled(false)
+    end
+end
+
+function ui.OpenContextMenu(menu)
+    if type(MenuUtil) ~= "table" or type(MenuUtil.CreateContextMenu) ~= "function" then
+        return   -- pre-11.0 client without MenuUtil; defensive only
+    end
+    MenuUtil.CreateContextMenu(UIParent, function(_, root)
+        for _, item in ipairs(menu) do buildContextItem(root, item) end
+    end)
+end
 -- Exposed so the kebab popover (and any future copy-to-clipboard surface)
 -- can reuse the same EditBox-preselected popup without re-declaring the
 -- StaticPopupDialogs entry.
@@ -368,11 +423,7 @@ function ui.OpenPlayerContextMenu(name, class)
         }
     end
 
-    if not _G.GuildHallPlayerDropdown then
-        _G.GuildHallPlayerDropdown = CreateFrame("Frame", "GuildHallPlayerDropdown",
-            UIParent, "UIDropDownMenuTemplate")
-    end
-    EasyMenu(menu, _G.GuildHallPlayerDropdown, "cursor", 0, 0, "MENU")
+    ui.OpenContextMenu(menu)
 end
 
 -- Helper to attach right-click → OpenPlayerContextMenu on an existing

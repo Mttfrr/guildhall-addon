@@ -48,11 +48,7 @@ local function OpenMinimapMenu()
             func = function() WGS:OpenConfig() end,
         },
     }
-    if not _G.GuildHallMinimapDropdown then
-        _G.GuildHallMinimapDropdown = CreateFrame("Frame", "GuildHallMinimapDropdown",
-            UIParent, "UIDropDownMenuTemplate")
-    end
-    EasyMenu(menu, _G.GuildHallMinimapDropdown, "cursor", 0, 0, "MENU")
+    WGS._ui.OpenContextMenu(menu)
 end
 
 local dataObj = LDB:NewDataObject("GuildHall", {

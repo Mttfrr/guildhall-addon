@@ -47,7 +47,7 @@ local ITEM_QUALITY_COLORS = {
 -- Shared event-picker menu builder for the correction surfaces. Walks
 -- db.global.events, filters to ±opts.windowSec (default 4h) of the
 -- reference timestamp, sorts by closest-in-time, and returns a list of
--- EasyMenu entries — one per candidate event, plus an "empty"
+-- context-menu entries — one per candidate event, plus an "empty"
 -- placeholder when nothing's in range and an optional separator + clear
 -- entry at the bottom.
 --
@@ -106,9 +106,8 @@ end
 -- WGS:ReconcileAttendanceEventBindings), each one offered as a
 -- re-tag target. Always includes "Untag" and "Delete row" entries.
 --
--- Uses EasyMenu (broadly supported across client flavours). A single
--- shared dropdown frame is created lazily on first use — building one
--- per row would leak frames as the list re-renders.
+-- Dispatched via ui.OpenContextMenu (MenuUtil.CreateContextMenu under
+-- the hood — EasyMenu was removed from retail in the 11.0 interface).
 local function OpenLootRowMenu(rowIndex)
     local row = WGS.db.global.loot and WGS.db.global.loot[rowIndex]
     if not row then return end
@@ -127,11 +126,7 @@ local function OpenLootRowMenu(rowIndex)
           func = function() WGS:DeleteLootRow(rowIndex) end },
     }
 
-    if not _G.GuildHallLootRowDropdown then
-        _G.GuildHallLootRowDropdown = CreateFrame("Frame", "GuildHallLootRowDropdown",
-                                                  UIParent, "UIDropDownMenuTemplate")
-    end
-    EasyMenu(menu, _G.GuildHallLootRowDropdown, "cursor", 0, 0, "MENU")
+    ui.OpenContextMenu(menu)
 end
 
 local function BuildLootSubView(sv)
@@ -514,11 +509,7 @@ local function OpenSessionEventMenu(sessionIdx)
     local menu = { { text = "Bind to event", isTitle = true, notCheckable = true } }
     for _, it in ipairs(items) do menu[#menu + 1] = it end
 
-    if not _G.GuildHallSessionEventDropdown then
-        _G.GuildHallSessionEventDropdown = CreateFrame("Frame",
-            "GuildHallSessionEventDropdown", UIParent, "UIDropDownMenuTemplate")
-    end
-    EasyMenu(menu, _G.GuildHallSessionEventDropdown, "cursor", 0, 0, "MENU")
+    ui.OpenContextMenu(menu)
 end
 
 local function BuildAttendanceSubView(sv)

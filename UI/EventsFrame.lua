@@ -169,11 +169,7 @@ local function OpenEventRowKebab(ev)
             if WGS.AutoInvite then WGS:AutoInvite(ev) end
         end,
     }
-    if not _G.GuildHallEventKebabDropdown then
-        _G.GuildHallEventKebabDropdown = CreateFrame("Frame",
-            "GuildHallEventKebabDropdown", UIParent, "UIDropDownMenuTemplate")
-    end
-    EasyMenu(menu, _G.GuildHallEventKebabDropdown, "cursor", 0, 0, "MENU")
+    ui.OpenContextMenu(menu)
 end
 
 ---------------------------------------------------------------------------
