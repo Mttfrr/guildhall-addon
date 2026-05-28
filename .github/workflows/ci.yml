@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check TOC + Core.lua version consistency
+        run: bash scripts/check_toc.sh
+
   luacheck:
     runs-on: ubuntu-latest
     steps:
