@@ -8,6 +8,12 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN defaults to read-only on modern repos. The packager
+    # needs write access on `contents` to create / update the GitHub
+    # release at the tag. Without this, the run fails late with
+    # `403 Resource not accessible by integration` after a clean build.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
