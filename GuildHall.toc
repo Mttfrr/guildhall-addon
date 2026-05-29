@@ -1,8 +1,8 @@
-## Interface: 120000
+## Interface: 120007
 ## Title: GuildHall
 ## Notes: Guild management companion — sync loot, attendance, bank gold, and more with guildhall.run.
 ## Author: Mttfrr
-## Version: 0.7.3
+## Version: 0.7.4-beta
 ## SavedVariables: GuildHallDB
 ## IconTexture: Interface\Icons\INV_Misc_Gear_01
 ## AddonCompartmentFunc: GuildHall_OnAddonCompartmentClick

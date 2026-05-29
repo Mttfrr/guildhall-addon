@@ -2,7 +2,11 @@
 
 All notable changes to GuildHall will be documented in this file.
 
-## [0.7.4-beta] — Unreleased
+## [0.7.4-beta] — 2026-05-26
+
+### Changed (release-only)
+- **`## Interface:` bumped 120000 → 120007** to match the current retail patch (12.0.7). Wago's fingerprinting pass was rejecting 120000 as not matching any active game version. CurseForge and the GitHub release accepted 120000 (they classify by interface number directly), but Wago requires a current-retail match to fingerprint the upload.
+
 
 ### What's New
 
