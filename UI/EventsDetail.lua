@@ -298,6 +298,80 @@ end
 -- Raid Comp section
 ---------------------------------------------------------------------------
 
+-- Classes that bring a combat rez to the raid. Hits any of these and
+-- we have at least one B-rez slot covered. (Druid, DK, Hunter, Warlock.)
+local BATTLE_REZ_CLASSES = {
+    DEATHKNIGHT = true, DRUID = true, HUNTER = true, WARLOCK = true,
+}
+
+-- Classes that bring Bloodlust/Heroism/Time Warp/Primal Rage/Fury of
+-- the Aspects. At least one of these guarantees lust coverage.
+local LUST_CLASSES = {
+    SHAMAN = true, MAGE = true, HUNTER = true, EVOKER = true,
+}
+
+-- Evaluate a planned raid comp's class/role mix and return a list of
+-- short warning strings ("No combat rez", "Only 1 healer"). Empty
+-- result = comp looks balanced under our heuristics; that's the
+-- happy path — we don't render anything in that case.
+--
+-- Counts (tank/healer) are only warned about when the comp is
+-- close-to-mythic-sized (≥18). Smaller groups (HC/Normal/flex M+)
+-- legitimately use fewer healers/tanks so a fixed threshold would
+-- spam false positives.
+local function evaluateRaidCompBalance(assignments)
+    local warnings = {}
+    local total, tanks, healers = 0, 0, 0
+    local classCount = {}
+    local hasBR, hasLust = false, false
+
+    for _, m in ipairs(assignments) do
+        total = total + 1
+        local role = WGS:NormalizeRole(m.role)
+        if role == "TANK" then tanks = tanks + 1
+        elseif role == "HEALER" then healers = healers + 1
+        end
+        local cls = WGS:NormalizeClassFile(m.class or m.classFile or "")
+        if cls and cls ~= "" then
+            classCount[cls] = (classCount[cls] or 0) + 1
+            if BATTLE_REZ_CLASSES[cls] then hasBR = true end
+            if LUST_CLASSES[cls] then hasLust = true end
+        end
+    end
+
+    if total >= 18 then
+        if tanks < 2 then
+            warnings[#warnings + 1] = string.format(
+                "Only %d tank%s (mythic expects 2)",
+                tanks, tanks == 1 and "" or "s")
+        end
+        if healers < 4 then
+            warnings[#warnings + 1] = string.format(
+                "Only %d healer%s (mythic expects 4-5)",
+                healers, healers == 1 and "" or "s")
+        end
+    end
+    if total > 0 and not hasBR then
+        warnings[#warnings + 1] = "No combat rez (DK / Druid / Hunter / Warlock)"
+    end
+    if total > 0 and not hasLust then
+        warnings[#warnings + 1] = "No Bloodlust (Shaman / Mage / Hunter / Evoker)"
+    end
+    -- 4+ of the same class signals stacking that's usually a balance
+    -- mistake — surface it so the officer notices on the planning
+    -- pass instead of mid-pull.
+    for cls, n in pairs(classCount) do
+        if n >= 4 then
+            warnings[#warnings + 1] = string.format(
+                "%dx %s stacking",
+                n, cls:lower():gsub("^%l", string.upper))
+        end
+    end
+
+    return warnings
+end
+WGS._EvaluateRaidCompBalance = evaluateRaidCompBalance   -- exposed for tests
+
 local function PopulateRaidCompSection(content, anchor, comp, width)
     local header = BuildSectionHeader(content, anchor, "Raid Comp", width)
 
@@ -354,6 +428,23 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
     -- every group heading to header.x and every member to
     -- header.x + 12, regardless of what came before.
     local last = header
+
+    -- Class-balance warnings strip. Rendered above the group list
+    -- when the comp has heuristic issues (no B-rez, no lust,
+    -- low tank/healer count at mythic size, class stacking ≥4).
+    -- Officer catches these at planning time instead of at the pull.
+    local warnings = evaluateRaidCompBalance(assignments)
+    if #warnings > 0 then
+        local warnFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        warnFs:SetPoint("TOP", last, "BOTTOM", 0, -4)
+        warnFs:SetPoint("LEFT", header, "LEFT", 0, 0)
+        warnFs:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+        warnFs:SetJustifyH("LEFT")
+        warnFs:SetWordWrap(true)
+        warnFs:SetText("|cffffaa00\226\154\160 " ..
+            table.concat(warnings, "  \194\183  ") .. "|r")
+        last = warnFs
+    end
 
     local function renderBucket(label, color, members)
         if #members == 0 then return end
