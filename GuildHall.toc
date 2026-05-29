@@ -1,4 +1,4 @@
-## Interface: 120007
+## Interface: 120005
 ## Title: GuildHall
 ## Notes: Guild management companion — sync loot, attendance, bank gold, and more with guildhall.run.
 ## Author: Mttfrr
