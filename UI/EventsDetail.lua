@@ -372,6 +372,75 @@ local function evaluateRaidCompBalance(assignments)
 end
 WGS._EvaluateRaidCompBalance = evaluateRaidCompBalance   -- exposed for tests
 
+-- Compare the planned raid-comp slots against the in-flight session's
+-- captured members. Returns { planned, actual, present, missing,
+-- extras } where:
+--   planned   = number of planned slots
+--   actual    = number of session members
+--   present   = number of planned slots whose name is also in the
+--               session (the people who actually showed)
+--   missing   = array of { name, class, role, group } for planned
+--               slots whose name is NOT in the session
+--   extras    = array of { name, class, role } for session members
+--               whose name is NOT in the planned comp (subs / pugs)
+--
+-- Matching is short-name (post-realm-strip) and case-insensitive so
+-- "Foo-EU" in the comp and "Foo-Realm" in-session resolve as the
+-- same character. Drives the diff strip below the Raid Comp section.
+local function buildCompDiff(assignments, sessionMembers)
+    local plannedByShort = {}
+    for _, slot_ in ipairs(assignments) do
+        local short = ((slot_.name or ""):match("^([^%-]+)") or slot_.name or ""):lower()
+        if short ~= "" then plannedByShort[short] = slot_ end
+    end
+
+    local actualByShort = {}
+    for _, m in ipairs(sessionMembers) do
+        local short = ((m.name or ""):match("^([^%-]+)") or m.name or ""):lower()
+        if short ~= "" then actualByShort[short] = m end
+    end
+
+    local present, missing, extras = 0, {}, {}
+    for short, slot_ in pairs(plannedByShort) do
+        if actualByShort[short] then
+            present = present + 1
+        else
+            missing[#missing + 1] = {
+                name  = slot_.name or short,
+                class = slot_.class or slot_.classFile,
+                role  = slot_.role,
+                group = slot_.group,
+            }
+        end
+    end
+    for short, m in pairs(actualByShort) do
+        if not plannedByShort[short] then
+            extras[#extras + 1] = {
+                name  = m.name or short,
+                class = m.class,
+                role  = m.role,
+            }
+        end
+    end
+
+    -- Sort missing by group asc (then by name) so the strip reads
+    -- "Group 1: …, Group 2: …" cleanly.
+    table.sort(missing, function(a, b)
+        local ga, gb = tonumber(a.group) or 99, tonumber(b.group) or 99
+        if ga ~= gb then return ga < gb end
+        return (a.name or "") < (b.name or "")
+    end)
+    table.sort(extras, function(a, b) return (a.name or "") < (b.name or "") end)
+
+    local actual = 0
+    for _ in pairs(actualByShort) do actual = actual + 1 end
+    local planned = 0
+    for _ in pairs(plannedByShort) do planned = planned + 1 end
+    return { planned = planned, actual = actual, present = present,
+             missing = missing, extras = extras }
+end
+WGS._BuildCompDiff = buildCompDiff   -- exposed for tests
+
 local function PopulateRaidCompSection(content, anchor, comp, width)
     local header = BuildSectionHeader(content, anchor, "Raid Comp", width)
 
@@ -497,6 +566,64 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
     end
     if #unassigned > 0 then
         renderBucket("Unassigned", "ff888888", unassigned)
+    end
+
+    -- Planned vs actual diff strip. Renders only when there's an
+    -- in-flight session for the same event we're viewing — i.e. the
+    -- officer is mid-raid AND opened the planned comp panel. The
+    -- counts ("Planned 25 · In raid 22") and the gap names ("Missing:
+    -- Alice (Group 1, Warlock); Subbed: Charlie") help the officer
+    -- spot who hasn't joined yet OR who got swapped in without the
+    -- platform-side comp being updated.
+    local sessionMembers = WGS.GetCurrentSessionMembers and WGS:GetCurrentSessionMembers() or nil
+    local ctx = WGS.GetCurrentAttendanceContext and WGS:GetCurrentAttendanceContext() or nil
+    if sessionMembers and ctx and comp and ctx.eventId == (comp.eventId or comp.event_id) then
+        local diff = buildCompDiff(assignments, sessionMembers)
+        local summary = string.format(
+            "|cffaaaaaaPlanned %d \194\183 In raid %d \194\183 Present %d|r",
+            diff.planned, diff.actual, diff.present)
+        local sumFs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sumFs:SetPoint("TOP", last, "BOTTOM", 0, -6)
+        sumFs:SetPoint("LEFT", header, "LEFT", 0, 0)
+        sumFs:SetText(summary)
+        last = sumFs
+
+        if #diff.missing > 0 then
+            local labels = {}
+            for _, m in ipairs(diff.missing) do
+                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local classFile = WGS:NormalizeClassFile(m.class or "")
+                local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
+                labels[#labels + 1] = "|c" .. colorHex .. short .. "|r"
+                    .. (m.group and (" |cff888888(G" .. m.group .. ")|r") or "")
+            end
+            local missFs = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            missFs:SetPoint("TOP", last, "BOTTOM", 0, -2)
+            missFs:SetPoint("LEFT", header, "LEFT", 12, 0)
+            missFs:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+            missFs:SetJustifyH("LEFT")
+            missFs:SetWordWrap(true)
+            missFs:SetText("|cffff8888Missing:|r  " .. table.concat(labels, ", "))
+            last = missFs
+        end
+
+        if #diff.extras > 0 then
+            local labels = {}
+            for _, m in ipairs(diff.extras) do
+                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local classFile = WGS:NormalizeClassFile(m.class or "")
+                local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
+                labels[#labels + 1] = "|c" .. colorHex .. short .. "|r"
+            end
+            local subFs = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            subFs:SetPoint("TOP", last, "BOTTOM", 0, -2)
+            subFs:SetPoint("LEFT", header, "LEFT", 12, 0)
+            subFs:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+            subFs:SetJustifyH("LEFT")
+            subFs:SetWordWrap(true)
+            subFs:SetText("|cff88ff88Subbed in:|r  " .. table.concat(labels, ", "))
+            last = subFs
+        end
     end
 
     return last

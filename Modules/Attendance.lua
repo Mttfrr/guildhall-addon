@@ -579,6 +579,27 @@ function WGS:GetCurrentAttendanceContext()
     }
 end
 
+-- Snapshot of the in-flight session's members as an array (the
+-- internal storage during a session is keyed by name). Returns nil
+-- when no session is tracking. Used by the Events detail panel's
+-- planned-vs-actual diff to find who showed up vs who was planned.
+function WGS:GetCurrentSessionMembers()
+    if not isTracking or not currentSession or not currentSession.members then
+        return nil
+    end
+    local out = {}
+    for name, m in pairs(currentSession.members) do
+        if m.present then
+            out[#out + 1] = {
+                name  = name,
+                class = m.class,
+                role  = m.role,
+            }
+        end
+    end
+    return out
+end
+
 function WGS:GetAttendanceStartTime()
     return currentSession and currentSession.startedAt or nil
 end
