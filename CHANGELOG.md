@@ -2,6 +2,37 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [0.7.4-beta] — Unreleased
+
+### What's New
+
+- **Planned vs actual raid-comp diff.** When you're mid-raid AND viewing the planned comp for the event being tracked, a diff strip appears below the Group 1-8 list: `Planned 25 · In raid 22 · Present 21` plus `Missing: Alice (G1), Bob (G3)` (sorted by group) and `Subbed in: Charlie`. Catches "who hasn't joined yet?" + "who got swapped in without me updating the platform comp?" in a single glance. Data was already on both sides (raidComps for the plan, currentSession.members for the in-flight roster); just no view that connected them.
+- **Class-balance warnings on the planned comp.** Yellow strip above the Group 1-8 list when the comp has obvious balance issues: `⚠ No combat rez (DK / Druid / Hunter / Warlock) · No Bloodlust (Shaman / Mage / Hunter / Evoker) · 4x Mage stacking`. Tank/healer count warnings gate on comp size ≥18 so heroic / M+ comps don't get spammed. Empty result = comp looks balanced, render nothing.
+- **Raid Comp section groups by raid group (1-8) instead of by role.** Matches the platform's Raid Comp builder. Within each group, members sort tanks → healers → DPS for at-a-glance scanning, with a per-name role badge (T/H/D in colour). "Unassigned" tail bucket for slots without a group set. Auto-sort after `/gh invite` now fires whenever the comp has any group assignment (was previously gated on the unlikely "invite source was comp" case, missing the common signups-driven flow).
+- **Officer "Mark status" right-click on Roster rows.** Right-click any signed-up player → "Mark status ▸" submenu with all 8 status codes (Present / Late / Late-officer / Bench / Tentative / Absent / Left-early / Replaced-mid-raid). Mutates `db.global.signups` in place AND queues into `db.global.pendingSignupChanges` for export. Platform's import endpoint applies the queued changes idempotently and the queue clears on the next successful import.
+- **Stale-data banner across the top of the main frame** when `db.global.lastImport > 7 days ago`. One yellow line + a "Sync now" button that jumps to the Sync tab. Re-evaluates on tab switch, OnShow, and after every import.
+- **"What's new" badge in the title bar** when the running version is newer than `db.profile.lastSeenVersion`. Click → opens the modal in place. No login auto-pop; the badge stays opt-in until you click "Got it".
+- **`/gh search <name>`** — cross-context character lookup. Walks loot / attendance / signups / teams / wishlists and prints counts + sample rows. Replaces the four-different-tabs-and-eyeballing flow with one chat dump.
+- **`/gh export <table>`** — selective single-table export with a copy-via-EditBox popup. Useful for the "I just want to update the loot ledger" workflow when the full export is large or partially stale. Allowed: `loot`, `attendance`, `encounters`, `raidCompResults`, `guildBankMoneyChanges`, `guildBankTransactions`.
+- **`/gh diag`** — db.global health summary. Addon version, last-import / last-export age, current-team filter, row counts for every telemetry and imported table, in-flight session state. Telemetry rows highlight orange when they cross "unusually large" thresholds.
+- **CI quality gates.** Three new automated checks: TOC ↔ `WGS.version` consistency (catches release-bump drift before merge), removed-API scan (curated list of WoW APIs removed at TOC 110000+ — would have caught the EasyMenu break at PR time), and a public-event contract spec against `docs/EVENTS.md` (drift between the documented payload and the actual fired payload becomes a CI failure). Also a UI shim layer in `spec/helpers.lua` that mocks `CreateFrame` + `MenuUtil` + `StaticPopupDialogs` so menu builders can be unit-tested. **295 specs total** — up from ~250.
+
+### Changed
+
+- **All five right-click menus migrated from `EasyMenu` to `MenuUtil.CreateContextMenu`.** EasyMenu was removed in retail's 11.0 interface (TOC 110000+) and every right-click in the addon was erroring on current retail. New `ui.OpenContextMenu(menu)` compatibility helper preserves the existing menu-table format so per-callsite construction code didn't have to change.
+- **Export envelope auto-normalizes malformed attendance scalars at the source.** Type-wrong fields (a Lua table where a number was expected, observed in the wild) get nil'd in place before serialisation. One-line `Normalized N malformed fields…` print so the user knows their data was self-healed. The platform schema stays strict so genuine corruption surfaces as a clear rejection.
+- **Release workflow grants `contents: write` to `GITHUB_TOKEN`** so the BigWigsMods packager can update the GitHub release at the tag. Default token is read-only on modern repos; without this, every release run died with a late-stage 403 on the release PATCH.
+- **`WGS.version` in `Core.lua` synced to `0.7.3`** — had silently lagged at `"0.7.0-beta"` across two version bumps because only the TOC was bumped. The new TOC ↔ Core consistency check (above) prevents future drift.
+- **`WGS:AutoInvite` accepts an optional event override** so the rail kebab's "Invite signups" targets a specific event. The no-arg `/gh invite` call site is unchanged.
+- **Client-side decode errors include per-stage diagnostics** instead of the previous catch-all "Export string appears truncated." Now: checksum mismatch lists expected vs computed hex + payload length, decode-character errors point at the offending character, decompression failures carry context. Server validation errors include the Zod path + per-field issue message instead of just "Validation failed".
+
+### Removed
+
+- **`EasyMenu` dependency** — gone, replaced by `MenuUtil`. Legacy `_G.GuildHall*Dropdown` per-menu frame instances dropped (no longer needed under `MenuUtil`'s lifecycle).
+- **Login auto-pop of the "What's New" modal.** Auto-popping a modal on every login after an update felt intrusive — surfaced as a title-bar badge instead. Opt-in, click to open. `PLAYER_ENTERING_WORLD` no longer touches the modal.
+- **The `.catch(null)` schema loosening on `addonAttendanceSessionSchema`** that was added in a previous attempt. Restored the strict guardrail; bad addon-side data gets normalized at the source on export (above) instead. Same end state, principled architecture.
+- **The strict `source == "raid comp"` gate on auto-sort post-invite** — replaced with "fires whenever the event has any group assignment." Signup-driven invite flows (the common case) now place raiders in their planned groups too.
+
 ## [0.7.3] — 2026-05-26
 
 ### Added
