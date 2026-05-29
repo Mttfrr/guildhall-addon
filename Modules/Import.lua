@@ -273,6 +273,31 @@ function WGS:ProcessImport(data)
         self.db.global.lastImport = self:GetTimestamp()
         self:Print(string.format(L["IMPORT_SUCCESS"], count))
 
+        -- Drop pending officer signup edits that the platform has now
+        -- seen at least one import cycle later than. Anything with a
+        -- timestamp older than the just-completed import is presumed
+        -- already-applied — the freshly-imported signups table is
+        -- authoritative. Keep newer pending changes so a queue-up
+        -- between export and import isn't lost.
+        local queue = self.db.global.pendingSignupChanges
+        local cutoff = self.db.global.lastImport
+        if type(queue) == "table" and #queue > 0 then
+            local kept, dropped = {}, 0
+            for _, q in ipairs(queue) do
+                if (tonumber(q.t) or 0) > cutoff then
+                    kept[#kept + 1] = q
+                else
+                    dropped = dropped + 1
+                end
+            end
+            self.db.global.pendingSignupChanges = kept
+            if dropped > 0 then
+                self:Print(string.format(
+                    "Cleared %d applied signup change%s from the export queue.",
+                    dropped, dropped == 1 and "" or "s"))
+            end
+        end
+
         self:FireEvent("WGS_IMPORT_APPLIED", { count = count, importedAt = self.db.global.lastImport })
     end
 

@@ -58,3 +58,86 @@ end
 function WGS:IsCommittedStatus(code)
     return self.SIGNUP_STATUS_COMMITTED[code] == true
 end
+
+---------------------------------------------------------------------------
+-- Officer signup-status mutation
+---------------------------------------------------------------------------
+--
+-- Officers right-click a player in the Events Roster section to mark
+-- them Late / Tentative / Bench / Absent / etc. without leaving WoW.
+-- The change lands in db.global.signups in place AND gets queued in
+-- db.global.pendingSignupChanges so the next addon-sync export ships
+-- it to the platform. Idempotent: setting the same status twice is a
+-- no-op; the queue collapses to one entry per (event, character).
+--
+-- Permission gate mirrors the other officer-side mutations (invite,
+-- export, sortgroups). Non-officers see a clear "requires officer"
+-- print and the mutation is rejected.
+
+function WGS:UpdateSignupStatus(eventId, characterName, status)
+    if not self:IsGuildOfficer() then
+        self:Print("|cffff5555Marking signups requires officer rank.|r")
+        return false, "not officer"
+    end
+    if not tonumber(eventId) or not characterName or characterName == "" then
+        return false, "bad args"
+    end
+    if not self.SIGNUP_STATUS_LABELS[status] then
+        return false, "unknown status: " .. tostring(status)
+    end
+
+    self.db.global.signups = self.db.global.signups or {}
+    local signups = self.db.global.signups
+    local matched
+    for _, s in ipairs(signups) do
+        if s.eventId == eventId and s.characterName == characterName then
+            matched = s; break
+        end
+    end
+    if matched then
+        if matched.status == status then return true end   -- no-op
+        matched.status = status
+    else
+        signups[#signups + 1] = {
+            eventId       = eventId,
+            characterName = characterName,
+            status        = status,
+        }
+    end
+
+    -- Queue for the next export. Collapse duplicates: if there's
+    -- already a pending entry for this (event, character), update
+    -- its status + timestamp in place rather than appending a
+    -- second row. Keeps the queue small and idempotent.
+    self.db.global.pendingSignupChanges = self.db.global.pendingSignupChanges or {}
+    local queue = self.db.global.pendingSignupChanges
+    local existing
+    for _, q in ipairs(queue) do
+        if q.eventId == eventId and q.characterName == characterName then
+            existing = q; break
+        end
+    end
+    if existing then
+        existing.status = status
+        existing.t      = self:GetTimestamp()
+    else
+        queue[#queue + 1] = {
+            eventId       = eventId,
+            characterName = characterName,
+            status        = status,
+            t             = self:GetTimestamp(),
+        }
+    end
+
+    self:FireEvent("WGS_SIGNUP_EDITED", {
+        eventId       = eventId,
+        characterName = characterName,
+        status        = status,
+    })
+    self:Print(string.format(
+        "Marked |cffaaccff%s|r as %s for event #%s. Re-export to push.",
+        characterName,
+        self:FormatSignupStatus(status),
+        tostring(eventId)))
+    return true
+end

@@ -69,6 +69,7 @@ local dbDefaults = {
         gearAudit = {},
         characterDetails = {},  -- imported per-character info: { charName → { class, spec, ilvl, missingEnchants, missingGems } }
         signups = {},           -- imported event signups: [{eventId, characterName, class, status}]
+        pendingSignupChanges = {}, -- queued officer mutations from WGS:UpdateSignupStatus; shipped via the next export
         targetIlvl = 0,
         lastExport = 0,
         lastImport = 0,

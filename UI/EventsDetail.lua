@@ -278,9 +278,48 @@ local function PopulateRosterSection(content, anchor, roster, width, frame)
                 nameFs:SetWordWrap(false)
                 nameFs:SetText("|c" .. colorHex .. row.short .. "|r")
 
-                ui.AttachPlayerContextMenu(r,
-                    function() return row.short end,
-                    function() return classFile end)
+                -- Roster row right-click: prepend a "Mark status ▸"
+                -- submenu to the shared player-action items so the
+                -- officer can re-tag this signup (Late / Tentative /
+                -- Absent / etc.) without leaving WoW. The mutation
+                -- lands in db.global.signups + queues for export via
+                -- WGS:UpdateSignupStatus. Non-officers see the menu
+                -- but the mutation rejects with a clear print.
+                local capturedEventId = frame and frame._selectedEventId
+                local capturedFullName = row.fullName
+                r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                r:SetScript("OnClick", function(_, mouseBtn)
+                    if mouseBtn ~= "RightButton" then return end
+
+                    local statusMenu = {}
+                    for _, statusCode in ipairs(WGS.SIGNUP_STATUS_ORDER or {}) do
+                        statusMenu[#statusMenu + 1] = {
+                            text = (WGS.SIGNUP_STATUS_LABELS or {})[statusCode] or statusCode,
+                            notCheckable = true,
+                            func = function()
+                                WGS:UpdateSignupStatus(
+                                    capturedEventId,
+                                    capturedFullName,
+                                    statusCode)
+                            end,
+                        }
+                    end
+
+                    local menu = {
+                        { text = row.short, isTitle = true, notCheckable = true },
+                        {
+                            text = "Mark status",
+                            notCheckable = true,
+                            hasArrow = true,
+                            menuList = statusMenu,
+                        },
+                        { text = "", isTitle = true, notCheckable = true },
+                    }
+                    for _, item in ipairs(ui.BuildPlayerMenuItems(row.short, classFile)) do
+                        menu[#menu + 1] = item
+                    end
+                    ui.OpenContextMenu(menu)
+                end)
 
                 BuildNumericCell(r, COL_ILVL_X, 0, NUM_W, ROW_H, row.ilvl, false)
                 BuildNumericCell(r, COL_ENCH_X, 0, NUM_W, ROW_H, row.missingEnchants, true)

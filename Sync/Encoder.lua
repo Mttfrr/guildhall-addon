@@ -140,6 +140,17 @@ function WGS:BuildExportData(modules)
         data.characterMapVersion = self.db.global.lastImport
     end
 
+    -- Officer-side signup edits queued by WGS:UpdateSignupStatus.
+    -- Platform's addonSync import handler reads this field and applies
+    -- each change to the signups table (idempotent — same effect if
+    -- the user re-exports without re-importing). Addon-side cleanup
+    -- runs on WGS_IMPORT_APPLIED below: any pending change older than
+    -- the latest import is presumed already-applied and dropped.
+    local queue = self.db.global.pendingSignupChanges
+    if type(queue) == "table" and #queue > 0 then
+        data.pendingSignupChanges = queue
+    end
+
     return data
 end
 

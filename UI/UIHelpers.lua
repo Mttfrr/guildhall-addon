@@ -366,34 +366,36 @@ ui.ShowCopyPopup = ShowCopyPopup
 -- elsewhere can build URLs without re-hardcoding the host.
 ui.PLATFORM_URL = PLATFORM_URL
 
-function ui.OpenPlayerContextMenu(name, class)
-    if type(name) ~= "string" or name == "" then return end
+-- Build the standard player-action items (Whisper / Invite / Inspect /
+-- Copy name / Copy profile link) as an array. No title or separators —
+-- callers compose their own menu structure around this. Same items
+-- everywhere a player name shows up, with the same ordering and
+-- conditional profile-link visibility.
+function ui.BuildPlayerMenuItems(name, class)
+    if type(name) ~= "string" or name == "" then return {} end
     local short = ShortName(name)
+    local _ = class   -- reserved for future class-themed items
 
-    local menu = {
-        { text = short, isTitle = true, notCheckable = true },
+    local items = {
         {
             text = "Whisper",
             notCheckable = true,
             func = function()
                 if ChatFrame_SendTell then
-                    ChatFrame_SendTell(short, ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or nil)
+                    ChatFrame_SendTell(short,
+                        ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or nil)
                 end
             end,
         },
         {
             text = "Invite",
             notCheckable = true,
-            func = function()
-                if InviteUnit then InviteUnit(short) end
-            end,
+            func = function() if InviteUnit then InviteUnit(short) end end,
         },
         {
             text = "Inspect",
             notCheckable = true,
-            func = function()
-                if NotifyInspect then NotifyInspect(short) end
-            end,
+            func = function() if NotifyInspect then NotifyInspect(short) end end,
         },
         {
             text = "Copy name",
@@ -402,18 +404,13 @@ function ui.OpenPlayerContextMenu(name, class)
         },
     }
 
-    -- Profile-link item only renders when we know the memberId. The
-    -- characterIds map is populated on import from the platform's
-    -- /addon-sync/export — older imports or characters synced after
-    -- the addon's last import miss the lookup and the item hides
-    -- silently. The class arg is unused today but kept in the
-    -- signature so future items (e.g. class-themed inspect target)
-    -- can read it without changing call sites.
-    local _ = class  -- reserved
+    -- Profile link conditionally appears when the platform-supplied
+    -- characterIds map knows this character's memberId. Older imports
+    -- miss the lookup and the item silently hides.
     local memberIdMap = WGS.db and WGS.db.global and WGS.db.global.characterIds
     local memberId = memberIdMap and memberIdMap[short]
     if memberId then
-        menu[#menu + 1] = {
+        items[#items + 1] = {
             text = "Copy profile link",
             notCheckable = true,
             func = function()
@@ -422,7 +419,15 @@ function ui.OpenPlayerContextMenu(name, class)
             end,
         }
     end
+    return items
+end
 
+function ui.OpenPlayerContextMenu(name, class)
+    if type(name) ~= "string" or name == "" then return end
+    local menu = { { text = ShortName(name), isTitle = true, notCheckable = true } }
+    for _, item in ipairs(ui.BuildPlayerMenuItems(name, class)) do
+        menu[#menu + 1] = item
+    end
     ui.OpenContextMenu(menu)
 end
 
