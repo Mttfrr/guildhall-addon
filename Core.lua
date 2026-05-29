@@ -178,6 +178,21 @@ local SLASH_HANDLERS = {
     -- becomes a performance issue.
     diag = function(self) self:PrintDiagSummary() end,
 
+    -- /gh search <name> — cross-context lookup. Walks loot,
+    -- attendance, signups, teams, wishlists for any row mentioning
+    -- the character (case-insensitive substring on short or full
+    -- name). Useful for "where have I seen this player?" — replaces
+    -- the four-different-tabs-and-eyeballing flow with one chat
+    -- dump.
+    search = function(self, input)
+        local _, query = self:GetArgs(input, 2)
+        if not query or query == "" then
+            self:Print("Usage: |cffffd100/gh search <character-name>|r")
+            return
+        end
+        self:PrintSearchResults(query)
+    end,
+
     -- /gh peerloopback — dev-only PeerSync loopback toggle. Every
     -- broadcast self-delivers so the full encode → decode → merge →
     -- catch-up round-trip can be tested from a single client. No
@@ -517,6 +532,135 @@ function WGS:PrintDiagSummary()
             formatAgo(g.activeSession.startedAt),
             tostring(g.activeSession.teamName or g.activeSession.teamId),
             tostring(g.activeSession.eventTitle or g.activeSession.eventId or "untagged")))
+    end
+end
+
+---------------------------------------------------------------------------
+-- /gh search — cross-context character lookup
+---------------------------------------------------------------------------
+--
+-- Returns counts (and a few sample rows where useful) across every
+-- db.global table that references a character by name. Matches case-
+-- insensitively against either the short name (post-realm-strip) or
+-- the full Name-Realm form, so users can search "foo" and find both
+-- "Foo-EU" rows and "Foo-Realm" rows.
+
+local function shortLower(name)
+    if not name or name == "" then return "" end
+    return ((name):match("^([^%-]+)") or name):lower()
+end
+
+local function nameMatches(needle, value)
+    if not value or value == "" then return false end
+    return shortLower(value):find(needle, 1, true) ~= nil
+        or value:lower():find(needle, 1, true) ~= nil
+end
+
+function WGS:PrintSearchResults(query)
+    local needle = (query or ""):lower()
+    if needle == "" then return end
+
+    local g = self.db and self.db.global or {}
+    self:Print(string.format("|cffffd100/gh search '%s'|r", query))
+
+    -- Loot
+    local lootHits, latestLoot = 0, nil
+    for _, row in ipairs(g.loot or {}) do
+        if nameMatches(needle, row.player) then
+            lootHits = lootHits + 1
+            if not latestLoot or (row.timestamp or 0) > (latestLoot.timestamp or 0) then
+                latestLoot = row
+            end
+        end
+    end
+    if lootHits > 0 then
+        local last = latestLoot and string.format("latest: %s (%s)",
+            latestLoot.itemName or "?",
+            date("%m/%d", latestLoot.timestamp or 0)) or ""
+        self:Print(string.format("  Loot:        %d row%s   %s",
+            lootHits, lootHits == 1 and "" or "s", last))
+    end
+
+    -- Attendance
+    local attendHits = 0
+    for _, session in ipairs(g.attendance or {}) do
+        for _, m in ipairs(session.memberList or {}) do
+            if nameMatches(needle, m.name) then
+                attendHits = attendHits + 1; break
+            end
+        end
+    end
+    if attendHits > 0 then
+        self:Print(string.format("  Attendance:  %d session%s",
+            attendHits, attendHits == 1 and "" or "s"))
+    end
+
+    -- Signups
+    local signupHits = {}
+    for _, s in ipairs(g.signups or {}) do
+        if nameMatches(needle, s.characterName) then
+            signupHits[#signupHits + 1] = s
+        end
+    end
+    if #signupHits > 0 then
+        local labels = {}
+        for _, s in ipairs(signupHits) do
+            labels[s.status or "?"] = (labels[s.status or "?"] or 0) + 1
+        end
+        local parts = {}
+        for status, n in pairs(labels) do
+            parts[#parts + 1] = n .. "x " .. status
+        end
+        self:Print(string.format("  Signups:     %d   (%s)",
+            #signupHits, table.concat(parts, ", ")))
+    end
+
+    -- Teams (membership)
+    local teamHits = {}
+    for _, t in ipairs(g.teams or {}) do
+        for _, member in ipairs(t.members or {}) do
+            if nameMatches(needle, member) then
+                teamHits[#teamHits + 1] = t.name or "?"
+                break
+            end
+        end
+        if t.playerMembers then
+            for _, pm in ipairs(t.playerMembers) do
+                if nameMatches(needle, pm.main) then
+                    teamHits[#teamHits + 1] = (t.name or "?") .. " (linked)"
+                    break
+                end
+            end
+        end
+    end
+    if #teamHits > 0 then
+        self:Print(string.format("  Teams:       %s", table.concat(teamHits, ", ")))
+    end
+
+    -- Wishlists
+    local wishHits = 0
+    local wl = g.wishlists or {}
+    -- Wishlists can be keyed by playerName → list[] OR a flat array
+    -- with playerName field. Handle both shapes.
+    if wl[1] ~= nil then
+        for _, w in ipairs(wl) do
+            if nameMatches(needle, w.playerName) then wishHits = wishHits + 1 end
+        end
+    else
+        for playerName, items in pairs(wl) do
+            if nameMatches(needle, playerName) and type(items) == "table" then
+                wishHits = wishHits + #items
+            end
+        end
+    end
+    if wishHits > 0 then
+        self:Print(string.format("  Wishlist:    %d item%s",
+            wishHits, wishHits == 1 and "" or "s"))
+    end
+
+    if lootHits == 0 and attendHits == 0 and #signupHits == 0
+       and #teamHits == 0 and wishHits == 0 then
+        self:Print("  |cff888888no matches|r")
     end
 end
 
