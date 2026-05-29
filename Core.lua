@@ -144,7 +144,22 @@ end
 -- public help string only lists the user-facing surface.
 local SLASH_HANDLERS = {
     show      = function(self) self:ToggleMainFrame() end,
-    export    = function(self) self:SelectMainFrameTab(self._ui.TAB_SYNC) end,
+    -- /gh export             → open the Sync tab (full export flow)
+    -- /gh export <table>     → emit a selective export string for one
+    --                          telemetry table only, popped into the
+    --                          copy-via-EditBox dialog. Useful for the
+    --                          "I just want to update the loot ledger,
+    --                          not push every captured row" workflow
+    --                          when the full export is large or
+    --                          partially stale.
+    export = function(self, input)
+        local _, tableName = self:GetArgs(input, 2)
+        if not tableName or tableName == "" then
+            self:SelectMainFrameTab(self._ui.TAB_SYNC)
+            return
+        end
+        self:ExportTableInteractive(tableName)
+    end,
     config    = function(self) self:OpenConfig() end,
     teams     = function(self) self:SelectMainFrameTab(self._ui.TAB_TEAMS, self._ui.TEAMS_SUB_TEAMS) end,
     events    = function(self) self:SelectMainFrameTab(self._ui.TAB_EVENTS) end,

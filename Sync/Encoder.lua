@@ -167,6 +167,46 @@ function WGS:ExportModule(moduleName)
     return self:Encode({ [moduleName] = exportData })
 end
 
+-- Selective tables that /gh export <name> will accept. Listed
+-- explicitly so a typo prints "unknown — did you mean…" instead of
+-- emitting an empty/wrong payload, and so a future internal table
+-- (per-team caches, debug rings) can't be accidentally shipped to
+-- the platform via the slash.
+local SELECTIVE_EXPORT_TABLES = {
+    attendance = true, loot = true, encounters = true,
+    raidCompResults = true,
+    guildBankMoneyChanges = true, guildBankTransactions = true,
+}
+
+-- /gh export <table> entry point. Validates the table name, asks
+-- ExportModule to produce a selective envelope, then pops the same
+-- copy-via-EditBox dialog the player profile-link / event-link
+-- affordances use. No UI dependency beyond ui.ShowCopyPopup, which
+-- is registered at file scope in UI/UIHelpers.lua.
+function WGS:ExportTableInteractive(tableName)
+    if not SELECTIVE_EXPORT_TABLES[tableName] then
+        local valid = {}
+        for k in pairs(SELECTIVE_EXPORT_TABLES) do valid[#valid + 1] = k end
+        table.sort(valid)
+        self:Print(string.format(
+            "Unknown export table: |cffff5555%s|r. Valid: %s",
+            tostring(tableName), table.concat(valid, ", ")))
+        return
+    end
+    local encoded = self:ExportModule(tableName)
+    if not encoded then return end   -- ExportModule already printed the empty-data hint
+    self.db.global.lastExport = self:GetTimestamp()
+    if self._ui and self._ui.ShowCopyPopup then
+        self._ui.ShowCopyPopup(
+            string.format("Export string for |cffffd100%s|r — Ctrl+C to copy:", tableName),
+            encoded)
+    else
+        -- Fall back to chat dump if UI helpers somehow aren't loaded
+        -- (early-init slash invocation in a stripped client).
+        self:Print(encoded)
+    end
+end
+
 -- Export multiple specific modules
 function WGS:ExportModules(moduleNames)
     local data = {}
