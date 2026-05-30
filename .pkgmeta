@@ -1,0 +1,18 @@
+# Minimal exclude list for the BigWigsMods packager. Intentionally
+# does NOT use `package-as:` (we let the packager use the default
+# folder name behaviour, which was working in v0.6.0-beta) and does
+# NOT use `manual-changelog:` (auto-generation from commit messages
+# was also working previously). Only purpose: keep non-addon files
+# (shell scripts, Lua test specs, markdown docs, lint config, type
+# stubs) out of the published zip so Wago's fingerprinter sees a
+# clean WoW-addon-shaped archive.
+#
+# CHANGELOG.md and README.md intentionally NOT in the ignore list —
+# Wago/CurseForge display them on the project listing.
+ignore:
+  - scripts
+  - spec
+  - docs
+  - .github
+  - .luacheckrc
+  - types.lua
