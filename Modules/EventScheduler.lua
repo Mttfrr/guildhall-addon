@@ -93,16 +93,25 @@ function WGS:FindTodayEventForTeam(teamId)
 end
 
 --- Return the character names that committed to attending an event.
---- Status filter matches COMMITTED_SIGNUP_STATUSES (P/L/B/LT).
-function WGS:GetEventSignups(eventId)
+--- Status filter matches COMMITTED_SIGNUP_STATUSES (P/L/B/LT) by
+--- default. Pass includeBench=false to drop B (Bench) — the
+--- split-button's primary action uses this to match the semantic of
+--- "Bench = available if needed, not actively going."
+function WGS:GetEventSignups(eventId, includeBench)
     local names = {}
     if not eventId then return names end
     local signups = self.db.global.signups
     if not signups then return names end
+    -- Default (no arg) = include bench, preserves the legacy callers
+    -- (export pipeline, status counts) that aren't about invites.
+    if includeBench == nil then includeBench = true end
     for _, s in ipairs(signups) do
+        local committed = COMMITTED_SIGNUP_STATUSES[s.status]
+        local benchSkip = not includeBench and s.status == "B"
         if s.eventId == eventId
            and s.characterName
-           and COMMITTED_SIGNUP_STATUSES[s.status]
+           and committed
+           and not benchSkip
         then
             names[#names + 1] = s.characterName
         end
@@ -114,14 +123,53 @@ end
 ---   1. Event signups (web platform's source of truth — who said "I'm in")
 ---   2. Raid comp assignments (planned roster for this event)
 ---   3. Team roster (everyone on the team — broadest net)
-function WGS:GetEventInviteList(event)
+---
+--- opts.includeBench (default false): include B (Bench) status when
+---   pulling from signups. Bench-included is the dropdown override on
+---   the split button; the primary action excludes bench.
+--- opts.sourceOverride: "roster" forces the team-roster source, skipping
+---   the signups + comp tiers. Used by the split button's "Invite team
+---   roster" dropdown option.
+function WGS:GetEventInviteList(event, opts)
+    opts = opts or {}
     local eventId = event.id or event.eventId
+
+    -- Team-roster override skips ahead to tier 3.
+    if opts.sourceOverride == "roster" then
+        local teamId = event.team_id or event.teamId
+        if teamId then
+            local teams = self.db.global.teams
+            if teams then
+                for _, t in ipairs(teams) do
+                    if t.id == teamId then
+                        local names = {}
+                        if t.playerMembers then
+                            local chars = self.db.global.characters or {}
+                            for _, pm in ipairs(t.playerMembers) do
+                                if pm.main then names[#names + 1] = pm.main end
+                                local info = chars[pm.playerId]
+                                if info and info.alts then
+                                    for _, alt in ipairs(info.alts) do
+                                        names[#names + 1] = alt
+                                    end
+                                end
+                            end
+                        elseif t.members then
+                            for _, m in ipairs(t.members) do names[#names + 1] = m end
+                        end
+                        return names, "team roster"
+                    end
+                end
+            end
+        end
+        return {}, "team roster"   -- override fell through
+    end
 
     -- 1. Event signups — primary source. If the web has signups for this
     -- event, that's what officers actually committed to. Comp slots may
     -- be stale or speculative; team roster pulls in benched players.
     if eventId then
-        local signupNames = self:GetEventSignups(eventId)
+        local signupNames = self:GetEventSignups(eventId, opts.includeBench)
         if #signupNames > 0 then
             return signupNames, "signups"
         end
@@ -175,7 +223,8 @@ end
 -- /gh invite — manual auto-invite
 ---------------------------------------------------------------------------
 
-function WGS:AutoInvite(eventOverride)
+function WGS:AutoInvite(eventOverride, opts)
+    opts = opts or {}
     -- Permission gate. Lead-or-assist on the group (if any) + officer
     -- rank in the guild. Both branches print a clear reason and bail
     -- before we touch anything.
@@ -207,7 +256,7 @@ function WGS:AutoInvite(eventOverride)
         return
     end
 
-    local names, source = self:GetEventInviteList(event)
+    local names, source = self:GetEventInviteList(event, opts)
     if #names == 0 then
         self:Print(string.format(L["INVITE_NONE_FOR"], event.title or "?"))
         return

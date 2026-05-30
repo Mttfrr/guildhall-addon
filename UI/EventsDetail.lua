@@ -795,8 +795,42 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         return btn
     end
 
-    actionBtn("Invite", 4, 70, function()
-        if WGS.AutoInvite then WGS:AutoInvite() end
+    -- Split-button Invite. Primary action (left chunk, 56px wide)
+    -- runs AutoInvite excluding bench — semantic match for B = "available
+    -- if needed, not actively going." A narrow arrow chunk (14px) on the
+    -- right opens a MenuUtil dropdown with two overrides:
+    --   - Invite signups + bench  → includeBench = true
+    --   - Invite team roster      → sourceOverride = "roster"
+    -- Total width stays 70px so the Share Roster button anchored at x=78
+    -- doesn't have to move.
+    local inviteMain = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+    inviteMain:SetSize(56, 24)
+    inviteMain:SetPoint("LEFT", footer, "LEFT", insetLeft + 4, 0)
+    inviteMain:SetText("Invite")
+    inviteMain:SetScript("OnClick", function()
+        if WGS.AutoInvite then WGS:AutoInvite(ev) end
+    end)
+
+    local inviteArrow = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+    inviteArrow:SetSize(14, 24)
+    inviteArrow:SetPoint("LEFT", inviteMain, "RIGHT", 0, 0)
+    inviteArrow:SetText("\194\187")   -- "»" rendered small
+    inviteArrow:SetScript("OnClick", function()
+        local menu = {
+            { text = "More invite options",
+              isTitle = true, notCheckable = true },
+            { text = "Invite signups + bench",
+              notCheckable = true,
+              func = function()
+                  if WGS.AutoInvite then WGS:AutoInvite(ev, { includeBench = true }) end
+              end },
+            { text = "Invite team roster",
+              notCheckable = true,
+              func = function()
+                  if WGS.AutoInvite then WGS:AutoInvite(ev, { sourceOverride = "roster" }) end
+              end },
+        }
+        ui.OpenContextMenu(menu)
     end)
 
     -- Track / Stop attendance. Scoped to the currently-selected event:
