@@ -73,7 +73,7 @@ local SNAPSHOT_DEDUP_GRACE = 30
 -- Catch-up tuning. The probe debounce keeps GROUP_ROSTER_UPDATE storms
 -- from flooding the channel; the history cap stops a peer with months
 -- of saved data from replaying everything on a fresh install.
-local CATCHUP_DEBOUNCE        = 60        -- seconds between probes
+local CATCHUP_DEBOUNCE        = 300       -- seconds between probes (5 min)
 local CATCHUP_OFFER_WAIT      = 5         -- seconds to collect offers before requesting
 local CATCHUP_MAX_HISTORY     = 86400 * 7 -- never replay older than 7 days
 
@@ -728,16 +728,28 @@ function module:OnEnable()
         C_ChatInfo.RegisterAddonMessagePrefix(PEER_FRAME_PREFIX)
     end
     self:RegisterEvent("CHAT_MSG_ADDON", "OnAddonMessage")
-    -- GROUP_ROSTER_UPDATE fires on raid entry, member churn, and zone
-    -- changes inside an instance. The 60s debounce inside
-    -- PeerSync_Catchup keeps the noisy ones cheap; one probe per raid
-    -- entry is what we actually care about.
-    self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
+    -- Probe on zone-into-raid only (PLAYER_ENTERING_WORLD fires once
+    -- per zone change), not on GROUP_ROSTER_UPDATE which fires on
+    -- every member join / leave / spec change inside the raid. The
+    -- old GROUP_ROSTER_UPDATE trigger meant ~5 officers each probed
+    -- every 60s (debounce window) — most of which was redundant
+    -- since real-time per-row broadcasts already cover in-session
+    -- captures. Manual /gh sync still bypasses the debounce for the
+    -- "I think peer data drifted" override case.
+    self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnPlayerEnteringWorld")
     WGS:_PeerSync_InstallStandardWiring()
 end
 
-function module:OnGroupRosterUpdate()
+function module:OnPlayerEnteringWorld()
+    -- Only probe when we've actually entered a raid instance, not
+    -- every zone load. IsInRaid covers the "we're in a raid group"
+    -- check; IsInInstance(0) === "raid" filters out party / world
+    -- transitions where the catchup isn't useful anyway.
     if not IsInRaid or not IsInRaid() then return end
+    if IsInInstance then
+        local _, instanceType = IsInInstance()
+        if instanceType ~= "raid" then return end
+    end
     WGS:PeerSync_Catchup()
 end
 
