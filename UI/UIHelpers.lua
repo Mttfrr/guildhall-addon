@@ -326,6 +326,23 @@ end
 --   notCheckable → ignored (EasyMenu required it; MenuUtil doesn't
 --                  render checkboxes by default so this field becomes
 --                  a no-op marker)
+-- Wrap a click callback so the menu always receives an explicit
+-- MenuResponse. Live retail MenuUtil (observed on the Events Roster
+-- right-click in 0.7.3-beta) silently drops the click when the
+-- responder returns nil — the documented default is CloseAll but in
+-- practice the action callback never fires unless we say so. The
+-- wrapper also pcalls the user's func so a runtime error inside
+-- (e.g. InviteUnit throwing) doesn't leave the menu wedged open.
+local function wrapMenuCallback(fn)
+    if type(fn) ~= "function" then return nil end
+    return function()
+        pcall(fn)
+        if _G.MenuResponse and _G.MenuResponse.CloseAll then
+            return _G.MenuResponse.CloseAll
+        end
+    end
+end
+
 local function buildContextItem(parent, item)
     if not item then return end
     if item.isTitle then
@@ -343,7 +360,7 @@ local function buildContextItem(parent, item)
         end
         return
     end
-    local btn = parent:CreateButton(item.text or "", item.func)
+    local btn = parent:CreateButton(item.text or "", wrapMenuCallback(item.func))
     if item.disabled and btn and btn.SetEnabled then
         btn:SetEnabled(false)
     end

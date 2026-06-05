@@ -117,6 +117,49 @@ describe("ui.OpenContextMenu", function()
         assert.is_true(root._children[2]._enabled,  "normal item stays enabled")
     end)
 
+    -- Regression for the 0.7.4-beta bug: Events Roster right-click menu
+    -- opened on live retail but clicking action items (Invite, Whisper,
+    -- Copy profile link) did nothing. Root cause: live MenuUtil's
+    -- responder swallows the click unless the callback returns an
+    -- explicit MenuResponse. buildContextItem now wraps every action
+    -- callback with `pcall(fn); return MenuResponse.CloseAll`.
+    it("button callbacks return MenuResponse.CloseAll so live MenuUtil fires them", function()
+        _G.MenuResponse = { CloseAll = "CLOSE", Refresh = "REFRESH", Open = "OPEN" }
+        ui.OpenContextMenu({
+            { text = "Invite", func = function() end },
+        })
+        local btn = _G._capturedMenus[1]._children[1]
+        local result = btn.func()
+        assert.are.equal("CLOSE", result,
+            "wrapper must return MenuResponse.CloseAll so the menu acts on the click")
+        _G.MenuResponse = nil
+    end)
+
+    it("wrapped callback invokes the user's func before returning", function()
+        _G.MenuResponse = { CloseAll = "CLOSE" }
+        local called = false
+        ui.OpenContextMenu({
+            { text = "Invite", func = function() called = true end },
+        })
+        _G._capturedMenus[1]._children[1].func()
+        assert.is_true(called)
+        _G.MenuResponse = nil
+    end)
+
+    it("a runtime error inside the user's func is swallowed by pcall, menu still closes", function()
+        _G.MenuResponse = { CloseAll = "CLOSE" }
+        ui.OpenContextMenu({
+            { text = "Boom", func = function() error("kaboom") end },
+        })
+        local ok, result = pcall(function()
+            return _G._capturedMenus[1]._children[1].func()
+        end)
+        assert.is_true(ok, "pcall inside wrapper must prevent the error from escaping")
+        assert.are.equal("CLOSE", result,
+            "menu must still close even when the action func errors")
+        _G.MenuResponse = nil
+    end)
+
     it("silently no-ops when MenuUtil is unavailable (pre-11.0 fallback)", function()
         local saved = _G.MenuUtil
         _G.MenuUtil = nil
