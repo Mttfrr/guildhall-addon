@@ -32,6 +32,7 @@ All notable changes to GuildHall will be documented in this file.
 
 ### Removed
 
+- **Auto-probe trigger on peer-sync — `/gh sync` is now the only way to initiate a catchup.** Earlier in this beta the trigger was moved from `GROUP_ROSTER_UPDATE` → `PLAYER_ENTERING_WORLD` (raid-instance only) with the debounce widened from 60 s → 5 min; in practice even that was too chatty during real raids. Dropped the auto-trigger entirely: catchup runs only when the officer types `/gh sync` (or clicks "Sync now" in the Sync tab). What still runs automatically: real-time per-row broadcasts on capture (loot / attendance / encounter / raid-comp — silent, one-way, no probe handshake) and the inbound message handler (so another officer's manual sync can still pull data from this client). Net effect: addon channel goes from "probing every raid zone-in" → "silent unless an officer asks for a catchup."
 - **`EasyMenu` dependency** — gone, replaced by `MenuUtil`. Legacy `_G.GuildHall*Dropdown` per-menu frame instances dropped (no longer needed under `MenuUtil`'s lifecycle).
 - **Login auto-pop of the "What's New" modal.** Auto-popping a modal on every login after an update felt intrusive — surfaced as a title-bar badge instead. Opt-in, click to open. `PLAYER_ENTERING_WORLD` no longer touches the modal.
 - **The `.catch(null)` schema loosening on `addonAttendanceSessionSchema`** that was added in a previous attempt. Restored the strict guardrail; bad addon-side data gets normalized at the source on export (above) instead. Same end state, principled architecture.

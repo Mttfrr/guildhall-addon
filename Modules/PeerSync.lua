@@ -419,9 +419,11 @@ local function processCatchupOffers()
 end
 WGS._PeerSync_ProcessCatchupOffers = processCatchupOffers   -- for tests
 
--- Public trigger. Called from GROUP_ROSTER_UPDATE on entering a raid,
--- or directly via /gh sync for manual recovery. Debounced so a
--- raid-frame storm can't flood the channel.
+-- Internal catchup entry point. Only reached via PeerSync_ManualCatchup
+-- (i.e. /gh sync) — there is no auto-trigger any more. The debounce
+-- gate stays as a belt-and-braces guard against a double-/gh-sync
+-- inside the 5-min window; ManualCatchup resets lastProbeAt to 0
+-- before calling, so the user-initiated path is never blocked.
 function WGS:PeerSync_Catchup()
     if not self:IsGuildOfficer() then return end
     if not self:PeerSync_PreferredChannel() then return end
@@ -728,29 +730,14 @@ function module:OnEnable()
         C_ChatInfo.RegisterAddonMessagePrefix(PEER_FRAME_PREFIX)
     end
     self:RegisterEvent("CHAT_MSG_ADDON", "OnAddonMessage")
-    -- Probe on zone-into-raid only (PLAYER_ENTERING_WORLD fires once
-    -- per zone change), not on GROUP_ROSTER_UPDATE which fires on
-    -- every member join / leave / spec change inside the raid. The
-    -- old GROUP_ROSTER_UPDATE trigger meant ~5 officers each probed
-    -- every 60s (debounce window) — most of which was redundant
-    -- since real-time per-row broadcasts already cover in-session
-    -- captures. Manual /gh sync still bypasses the debounce for the
-    -- "I think peer data drifted" override case.
-    self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnPlayerEnteringWorld")
+    -- No auto-probe trigger: catchup runs only on /gh sync. Real-time
+    -- per-row broadcasts (loot / attendance / encounter / raidComp)
+    -- still fire automatically on capture — those are silent one-way
+    -- pushes, not the probe → offer → request → replay handshake that
+    -- fills the addon channel. The inbound handler (OnAddonMessage)
+    -- also stays live so another officer's manual /gh sync can still
+    -- pull data from this client.
     WGS:_PeerSync_InstallStandardWiring()
-end
-
-function module:OnPlayerEnteringWorld()
-    -- Only probe when we've actually entered a raid instance, not
-    -- every zone load. IsInRaid covers the "we're in a raid group"
-    -- check; IsInInstance(0) === "raid" filters out party / world
-    -- transitions where the catchup isn't useful anyway.
-    if not IsInRaid or not IsInRaid() then return end
-    if IsInInstance then
-        local _, instanceType = IsInInstance()
-        if instanceType ~= "raid" then return end
-    end
-    WGS:PeerSync_Catchup()
 end
 
 function module:OnAddonMessage(_, prefix, msg, _channel, sender)
