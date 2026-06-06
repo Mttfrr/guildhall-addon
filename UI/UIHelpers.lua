@@ -277,34 +277,38 @@ end
 
 -- StaticPopup for the copy-to-clipboard flow. Registered once at file
 -- scope (addon is single-instance per character; re-register is a
--- no-op). The Popup auto-selects the EditBox text so a single Ctrl+C
--- copies, then Esc / Close dismisses.
+-- no-op). Text gets set on the editBox by ShowCopyPopup AFTER
+-- StaticPopup_Show returns — see the comment there. Keeping the
+-- dialog body itself simple (no OnShow, no data plumbing) sidesteps
+-- the retail-version-specific lifecycle quirks we hit earlier:
+-- passing data via the 4th arg worked in tests but not in live
+-- retail (the editBox configuration after OnShow appears to clobber
+-- the data-driven SetText on some retail builds).
 StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
     text         = "%s",  -- replaced by the format arg below
     button1      = "Close",
-    hasEditBox   = true,
+    hasEditBox   = 1,     -- Blizzard convention; truthy is what gets checked
     editBoxWidth = 350,
     timeout      = 0,
     whileDead    = true,
     hideOnEscape = true,
     EnterClicksFirstButton = true,
-    OnShow = function(self, data)
-        if data and self.editBox then
-            self.editBox:SetText(data.value or "")
-            self.editBox:HighlightText()
-            self.editBox:SetFocus()
-        end
-    end,
 }
 
--- The 4th arg (data) MUST be passed to StaticPopup_Show, not assigned
--- to popup.data afterwards: Blizzard fires OnShow synchronously inside
--- StaticPopup_Show, so by the time we set popup.data on the return
--- value, OnShow has already run with data == nil and the EditBox is
--- blank. Both "Copy name" and "Copy profile link" hit this on live —
--- the popup opened with an empty field.
+-- Open the copy popup with `value` pre-selected. The text is set
+-- DIRECTLY on the returned dialog's editBox rather than via the
+-- info.data/OnShow path: Blizzard's StaticPopup setup runs its own
+-- editBox:SetText("") during dialog configuration, and on retail
+-- 11.0+ that clear happens AFTER our OnShow on some clients —
+-- leaving the field empty even though data was passed correctly.
+-- Setting on the returned popup is post-setup, so it sticks.
 local function ShowCopyPopup(prompt, value)
-    StaticPopup_Show("GUILDHALL_COPY_STRING", prompt, nil, { value = value })
+    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
+    if popup and popup.editBox then
+        popup.editBox:SetText(value or "")
+        popup.editBox:HighlightText()
+        popup.editBox:SetFocus()
+    end
 end
 
 ---------------------------------------------------------------------------
