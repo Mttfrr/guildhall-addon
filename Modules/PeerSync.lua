@@ -775,35 +775,30 @@ function WGS:_PeerSync_InstallStandardWiring()
     -- merge-fn lookup as the row-stream tables.
     self:PeerSync_RegisterMerge("__snapshot",      mergeSnapshot)
 
-    -- Each broadcast checks officer rank + channel availability
-    -- internally — failure is a silent no-op so capture sites don't
-    -- need to know whether sync is reachable right now.
-    GuildHall.RegisterCallback(self, "WGS_LOOT_RECORDED", function(_, row)
-        WGS:PeerSync_Broadcast("loot", row)
-    end)
-    GuildHall.RegisterCallback(self, "WGS_SESSION_ENDED", function(_, row)
-        WGS:PeerSync_Broadcast("attendance", row)
-    end)
-    GuildHall.RegisterCallback(self, "WGS_ENCOUNTER_RECORDED", function(_, row)
-        WGS:PeerSync_Broadcast("encounters", row)
-    end)
-    GuildHall.RegisterCallback(self, "WGS_RAID_COMP_SNAPSHOT", function(_, row)
-        WGS:PeerSync_Broadcast("raidCompResults", row)
-    end)
-    -- Edit broadcasts share the loot / attendance channel — the merge
-    -- fns are rev-aware so a higher-rev incoming row replaces the
-    -- existing one, and `_deleted = true` tombstones remove it. Payload
-    -- shape from the correction mutators: { index, row | session, kind }.
-    GuildHall.RegisterCallback(self, "WGS_LOOT_EDITED", function(_, payload)
-        if payload and payload.row then
-            WGS:PeerSync_Broadcast("loot", payload.row)
-        end
-    end)
-    GuildHall.RegisterCallback(self, "WGS_ATTENDANCE_EDITED", function(_, payload)
-        if payload and payload.session then
-            WGS:PeerSync_Broadcast("attendance", payload.session)
-        end
-    end)
+    -- Broadcast subscriptions. Each entry: { event, table, picker }
+    -- where picker extracts the row to broadcast from the event
+    -- payload. Captures hand the row in directly; edits wrap it in
+    -- { row | session, kind, index } so the picker dereferences the
+    -- right field. Broadcast checks officer rank + channel internally
+    -- so capture/edit sites don't need to know about sync state.
+    local broadcasts = {
+        { "WGS_LOOT_RECORDED",      "loot",            function(p) return p end },
+        { "WGS_SESSION_ENDED",      "attendance",      function(p) return p end },
+        { "WGS_ENCOUNTER_RECORDED", "encounters",      function(p) return p end },
+        { "WGS_RAID_COMP_SNAPSHOT", "raidCompResults", function(p) return p end },
+        -- Edit broadcasts ride the loot/attendance channel; merge fns
+        -- are rev-aware so higher-rev replaces and _deleted tombstones
+        -- remove on the peer side.
+        { "WGS_LOOT_EDITED",        "loot",            function(p) return p and p.row end },
+        { "WGS_ATTENDANCE_EDITED",  "attendance",      function(p) return p and p.session end },
+    }
+    for _, entry in ipairs(broadcasts) do
+        local event, tableName, picker = entry[1], entry[2], entry[3]
+        GuildHall.RegisterCallback(self, event, function(_, payload)
+            local row = picker(payload)
+            if row then WGS:PeerSync_Broadcast(tableName, row) end
+        end)
+    end
 end
 
 function module:OnEnable()

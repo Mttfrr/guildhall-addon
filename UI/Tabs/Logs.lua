@@ -160,13 +160,8 @@ local function BuildLootSubView(sv)
     sv.scrollFrame = sf
     sv.content = content
     sv.filterText = ""
-
-    -- Live refresh when an officer edits a loot row (re-tag or delete).
-    -- Uses the existing _refreshFn pattern that the search box already
-    -- shares — wired in BuildLogsTab below; resolved at fire time.
-    GuildHall.RegisterCallback(sv, "WGS_LOOT_EDITED", function()
-        if sv._refreshFn then sv._refreshFn() end
-    end)
+    -- WGS_LOOT_EDITED refresh handled by MainFrame's central
+    -- dispatcher — see CreateMainFrame's refreshEvents list.
 end
 
 local function PopulateLoot(sv)
@@ -531,13 +526,8 @@ local function BuildAttendanceSubView(sv)
     -- member list expanded. Per-session-index rather than per-session-
     -- object so a re-render survives a re-sort.
     sv._expanded = {}
-
-    -- Live refresh when an officer rebinds / edits / deletes a
-    -- session. Same pattern as the loot sub-view's WGS_LOOT_EDITED
-    -- callback; resolved via _refreshFn wired in BuildLogsTab.
-    GuildHall.RegisterCallback(sv, "WGS_ATTENDANCE_EDITED", function()
-        if sv._refreshFn then sv._refreshFn() end
-    end)
+    -- WGS_ATTENDANCE_EDITED refresh handled by MainFrame's central
+    -- dispatcher — see CreateMainFrame's refreshEvents list.
 end
 
 local function PopulateAttendance(sv)

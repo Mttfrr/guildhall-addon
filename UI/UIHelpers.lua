@@ -276,81 +276,49 @@ local function ShortName(name)
 end
 
 -- Resolve a StaticPopup dialog's EditBox child. Tries the modern
--- direct field first, then the legacy global-name pattern. Both have
--- been observed across retail patches; on some clients .editBox is
--- nil while _G[parent:GetName() .. "EditBox"] resolves, and vice
--- versa. Returns nil only when neither path works.
+-- direct field first, then the legacy global-name pattern — both
+-- ship across retail patches and which one resolves varies.
 local function GetPopupEditBox(popup)
     if not popup then return nil end
     if popup.editBox then return popup.editBox end
     if popup.GetName then
         local n = popup:GetName()
-        if n then
-            local eb = _G[n .. "EditBox"]
-            if eb then return eb end
-        end
+        if n then return _G[n .. "EditBox"] end
     end
     return nil
 end
 
 -- StaticPopup for the copy-to-clipboard flow. Registered once at file
--- scope (addon is single-instance per character; re-register is a
--- no-op). Belt-and-braces population: OnShow sets the text from data,
--- ShowCopyPopup also sets it post-return, AND a C_Timer.After(0)
--- retry catches the case where Blizzard's setup re-clears the editBox
--- after OnShow on some retail builds. At least one of the three paths
--- has to stick.
+-- scope (single-instance addon; re-register is a no-op).
 StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
-    text         = "%s",  -- replaced by the format arg below
+    text         = "%s",
     button1      = "Close",
-    hasEditBox   = 1,     -- Blizzard convention; truthy is what gets checked
+    hasEditBox   = 1,
     editBoxWidth = 350,
     timeout      = 0,
     whileDead    = true,
     hideOnEscape = true,
     EnterClicksFirstButton = true,
-    OnShow = function(self, data)
-        if not data or not data.value then return end
-        local eb = GetPopupEditBox(self)
-        if eb then
-            eb:SetText(data.value)
-            eb:HighlightText()
-            eb:SetFocus()
-        end
-    end,
     EditBoxOnEnterPressed  = function(self) self:GetParent():Hide() end,
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 }
 
+-- C_Timer.After(0, ...) queues to the next frame tick — after all of
+-- Blizzard's StaticPopup setup finishes. Synchronous SetText (whether
+-- from OnShow or post-return) gets clobbered by the deferred config
+-- on retail 11.0+; the next-tick retry is the only path that sticks.
 local function ShowCopyPopup(prompt, value)
-    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt, nil, { value = value })
-    if not popup then return end
-
-    -- Path 2: post-return SetText. Runs after OnShow synchronously
-    -- completes, so it stomps any cleanup that happened during setup.
-    local eb = GetPopupEditBox(popup)
-    if eb then
-        eb:SetText(value or "")
-        eb:HighlightText()
-        eb:SetFocus()
-    end
-
-    -- Path 3: next-frame retry. Some retail builds defer editBox
-    -- configuration past the current synchronous frame, so even the
-    -- post-return SetText above can be wiped. C_Timer.After(0, ...)
-    -- queues to the very next frame tick, which is after all that.
-    if C_Timer and C_Timer.After and value then
-        C_Timer.After(0, function()
-            if popup.IsShown and popup:IsShown() then
-                local eb2 = GetPopupEditBox(popup)
-                if eb2 then
-                    eb2:SetText(value)
-                    eb2:HighlightText()
-                    eb2:SetFocus()
-                end
-            end
-        end)
-    end
+    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
+    if not popup or not value or not C_Timer or not C_Timer.After then return end
+    C_Timer.After(0, function()
+        if not popup.IsShown or not popup:IsShown() then return end
+        local eb = GetPopupEditBox(popup)
+        if eb then
+            eb:SetText(value)
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end)
 end
 
 ---------------------------------------------------------------------------

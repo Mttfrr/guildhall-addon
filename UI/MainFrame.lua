@@ -347,19 +347,16 @@ local function CreateMainFrame()
         end)
     end
 
-    -- Live UI refresh dispatcher. Each of these events changes what
-    -- the visible tab should render — wire them once here so adding
-    -- a new tab doesn't require remembering to re-subscribe. Each
-    -- tab's `refresh` fn no-ops when its frame isn't visible, so
-    -- off-screen events don't pay the cost.
-    --
-    -- WGS_LOOT_EDITED / WGS_ATTENDANCE_EDITED are intentionally NOT
-    -- listed: the Logs sub-views own those subscriptions directly
-    -- (sv-scoped refresh, sharper than tab-level). Listing them here
-    -- would just double-render. Everything else lives here.
+    -- Live UI refresh dispatcher — single source of truth for which
+    -- public events should re-render the visible tab. Each tab's
+    -- `refresh` fn no-ops when its frame isn't visible, so off-screen
+    -- events don't pay the cost. Adding a new tab doesn't require
+    -- remembering to re-subscribe.
     if WGS.RegisterCallback then
         local refreshEvents = {
             "WGS_SIGNUP_EDITED",       -- Events Roster Mark-status
+            "WGS_LOOT_EDITED",         -- Logs → Loot retag/delete
+            "WGS_ATTENDANCE_EDITED",   -- Logs → Attendance rebind/remove/delete
             "WGS_SESSION_STARTED",     -- live-raid badges + Teams RosterCheck
             "WGS_SESSION_ENDED",       -- new attendance row + post-raid state
             "WGS_LOOT_RECORDED",       -- new drop appears in Logs → Loot

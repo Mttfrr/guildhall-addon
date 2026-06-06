@@ -718,7 +718,7 @@ function WGS:RebindAttendanceSession(sessionIndex, eventId, eventTitle)
 
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = session, kind = "rebind" })
-    self:PrintCorrectionHint()
+    self:PrintCorrectionApplied()
     return true
 end
 
@@ -756,7 +756,7 @@ function WGS:RemoveMemberFromSession(sessionIndex, memberName)
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = session, kind = "remove_member",
           memberName = memberName })
-    self:PrintCorrectionHint()
+    self:PrintCorrectionApplied()
     return true
 end
 
@@ -787,7 +787,7 @@ function WGS:DeleteAttendanceSession(sessionIndex)
     }
     self:FireEvent("WGS_ATTENDANCE_EDITED",
         { index = sessionIndex, session = tombstone, kind = "delete" })
-    self:PrintCorrectionHint()
+    self:PrintCorrectionApplied()
     return true
 end
 

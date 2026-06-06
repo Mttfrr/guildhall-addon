@@ -403,7 +403,7 @@ function WGS:RetagLootRow(rowIndex, eventId, teamId)
     row.teamId  = teamId  or nil
     row.rev     = (tonumber(row.rev) or 0) + 1
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = row, kind = "retag" })
-    self:PrintCorrectionHint()
+    self:PrintCorrectionApplied()
     return true
 end
 
@@ -426,6 +426,6 @@ function WGS:DeleteLootRow(rowIndex)
         _deleted  = true,
     }
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = tombstone, kind = "delete" })
-    self:PrintCorrectionHint()
+    self:PrintCorrectionApplied()
     return true
 end

@@ -66,45 +66,49 @@ describe("ui.BuildPlayerMenuItems", function()
     end)
 
     -- Copy name and Copy profile link both call ShowCopyPopup. The
-    -- value MUST be set directly on the returned popup's editBox AFTER
-    -- StaticPopup_Show returns — the OnShow/data path worked in tests
-    -- but not in live retail (StaticPopup setup configures the editBox
-    -- after OnShow on some 11.0+ clients, clobbering data-driven text).
-    -- These specs lock the post-return SetText path.
-    it("Copy name sets the short name on the returned popup's editBox", function()
+    -- text is set via C_Timer.After(0, …) — synchronous SetText (from
+    -- OnShow or post-return) gets clobbered by Blizzard's deferred
+    -- editBox config on retail 11.0+. These specs mock C_Timer.After
+    -- to fire the callback immediately so the deferred SetText is
+    -- observable synchronously.
+    local function mockPopup()
         local capturedText
         local fakeEditBox = {
             SetText       = function(_, t) capturedText = t end,
             HighlightText = function() end,
             SetFocus      = function() end,
         }
-        _G.StaticPopup_Show = function() return { editBox = fakeEditBox } end
+        local popup = { editBox = fakeEditBox, IsShown = function() return true end }
+        _G.StaticPopup_Show = function() return popup end
+        _G.C_Timer = { After = function(_, fn) fn() end }
+        return function() return capturedText end
+    end
+
+    it("Copy name sets the short name on the popup's editBox", function()
+        local capturedText = mockPopup()
         local items = ui.BuildPlayerMenuItems("Foo-Realm", "WARRIOR")
         items[3].func()   -- Copy name
-        assert.are.equal("Foo", capturedText,
-            "ShowCopyPopup must SetText on popup.editBox after StaticPopup_Show returns")
+        assert.are.equal("Foo", capturedText())
         _G.StaticPopup_Show = function() return nil end
+        _G.C_Timer = nil
     end)
 
-    it("Copy profile link sets the platform URL on the returned popup's editBox", function()
+    it("Copy profile link sets the platform URL on the popup's editBox", function()
         WGS.db.global.characterIds = { Foo = 999 }
-        local capturedText
-        local fakeEditBox = {
-            SetText       = function(_, t) capturedText = t end,
-            HighlightText = function() end,
-            SetFocus      = function() end,
-        }
-        _G.StaticPopup_Show = function() return { editBox = fakeEditBox } end
+        local capturedText = mockPopup()
         local items = ui.BuildPlayerMenuItems("Foo-Realm", "WARRIOR")
         items[4].func()   -- Copy profile link
-        assert.are.equal("https://guildhall.run/character/999", capturedText)
+        assert.are.equal("https://guildhall.run/character/999", capturedText())
         _G.StaticPopup_Show = function() return nil end
+        _G.C_Timer = nil
     end)
 
     it("Copy popup no-ops gracefully when StaticPopup_Show returns nil (defensive)", function()
         _G.StaticPopup_Show = function() return nil end
+        _G.C_Timer = { After = function(_, fn) fn() end }
         local items = ui.BuildPlayerMenuItems("Foo-Realm", "WARRIOR")
         assert.has_no.errors(function() items[3].func() end)
+        _G.C_Timer = nil
     end)
 
     it("returns empty list when name is nil or empty", function()

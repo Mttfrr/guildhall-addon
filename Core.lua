@@ -104,11 +104,9 @@ end
 --- mutators (RetagLootRow, DeleteLootRow, RebindAttendanceSession,
 --- RemoveMemberFromSession, DeleteAttendanceSession) emit after every
 --- successful edit. Shared so the string stays consistent across
---- surfaces. The cross-officer edit-propagation work (per-row rev
---- counter + LWW merge) closed the "local-only" gap — edits now
---- broadcast through the same PeerSync channel as captures, so this
---- print is a confirmation rather than a limitation warning.
-function WGS:PrintCorrectionHint()
+--- surfaces. Edits ride the PeerSync channel (per-row rev + LWW
+--- merge), so this print is a confirmation, not a limitation warning.
+function WGS:PrintCorrectionApplied()
     self:Print("Correction applied — propagating to other officers.")
 end
 
@@ -282,34 +280,6 @@ local SLASH_HANDLERS = {
             end
         end
         self:Print("No team matching: " .. arg)
-    end,
-
-    -- Diagnostic for the Copy popup empty-field bug: opens the popup
-    -- with a sentinel value and reports what each editBox lookup
-    -- returns. If the popup field is still empty after this, the
-    -- output here pinpoints exactly which retail-specific path broke.
-    debugpopup = function(self)
-        if not StaticPopup_Show then
-            self:Print("StaticPopup_Show is nil — no popup framework available.")
-            return
-        end
-        local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", "Debug:", nil, { value = "DEBUG_VALUE_123" })
-        if not popup then
-            self:Print("StaticPopup_Show returned nil — popup didn't open.")
-            return
-        end
-        local name = popup.GetName and popup:GetName() or "(no GetName)"
-        self:Print("popup frame: " .. tostring(name))
-        self:Print("popup.editBox = " .. tostring(popup.editBox))
-        if name then
-            local eb = _G[name .. "EditBox"]
-            self:Print("_G[name..\"EditBox\"] = " .. tostring(eb))
-        end
-        local eb = popup.editBox or (name and _G[name .. "EditBox"])
-        if eb and eb.GetText then
-            self:Print("editBox current text: |cffaaaaaa\"" ..
-                tostring(eb:GetText() or "") .. "\"|r")
-        end
     end,
 }
 
