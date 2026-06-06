@@ -198,7 +198,11 @@ local function BuildDataRow(parent, member, roster, yOff, evenStripe)
     local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
     local gi       = roster[short]
 
-    local nameCell = CreateFrame("Frame", nil, row)
+    -- Button (not Frame) so right-click can open the shared player
+    -- context menu (Whisper / Invite / Copy name / Copy profile link).
+    -- AttachPlayerContextMenu sets RegisterForClicks + OnClick; the row
+    -- has no left-click behaviour of its own to preserve.
+    local nameCell = CreateFrame("Button", nil, row)
     nameCell:SetSize(COL.NAME.w, ROW_H)
     nameCell:SetPoint("TOPLEFT", row, "TOPLEFT", COL.NAME.x, 0)
 
@@ -218,6 +222,8 @@ local function BuildDataRow(parent, member, roster, yOff, evenStripe)
     local nameText = nameCell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     nameText:SetPoint("LEFT", icon, "RIGHT", 6, 0)
     nameText:SetText("|c" .. colorHex .. short .. "|r")
+
+    ui.AttachPlayerContextMenu(nameCell, member.name, classFile)
 
     -- Numeric cells
     BuildNumericCell(row, COL.ILVL, COL.ILVL.x, member.ilvl,             false, 0)

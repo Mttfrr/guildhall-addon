@@ -251,9 +251,8 @@ end
 -- styling.
 --
 -- Actions:
---   - Invite    → InviteUnit; greys out if we can't invite right now
 --   - Whisper   → opens the chat target ChatFrame_SendTell
---   - Inspect   → opens the inspect window via NotifyInspect
+--   - Invite    → InviteUnit; greys out if we can't invite right now
 --   - Copy name → static popup with EditBox prefilled + auto-selected
 --                 (Ctrl+C in one keystroke; matches the "copy event
 --                 link" pattern shipped for the kebab popover)
@@ -298,9 +297,14 @@ StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
     end,
 }
 
+-- The 4th arg (data) MUST be passed to StaticPopup_Show, not assigned
+-- to popup.data afterwards: Blizzard fires OnShow synchronously inside
+-- StaticPopup_Show, so by the time we set popup.data on the return
+-- value, OnShow has already run with data == nil and the EditBox is
+-- blank. Both "Copy name" and "Copy profile link" hit this on live —
+-- the popup opened with an empty field.
 local function ShowCopyPopup(prompt, value)
-    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
-    if popup then popup.data = { value = value } end
+    StaticPopup_Show("GUILDHALL_COPY_STRING", prompt, nil, { value = value })
 end
 
 ---------------------------------------------------------------------------
@@ -408,11 +412,6 @@ function ui.BuildPlayerMenuItems(name, class)
             text = "Invite",
             notCheckable = true,
             func = function() if InviteUnit then InviteUnit(short) end end,
-        },
-        {
-            text = "Inspect",
-            notCheckable = true,
-            func = function() if NotifyInspect then NotifyInspect(short) end end,
         },
         {
             text = "Copy name",
