@@ -6,8 +6,11 @@ local helpers = require("spec.helpers")
 -- the session-level roster — otherwise a removed member would still
 -- appear "present" in the comp.
 --
--- Same v1 local-only limitation as the loot mutators; chat hint is
--- the user-visible signal.
+-- Edits propagate to peer officers: every mutator bumps session.rev,
+-- and PeerSync's mergeAttendance does rev-based LWW + cascades into
+-- raidCompResults so the peer's view stays consistent. Delete
+-- broadcasts a `_deleted = true` tombstone; the peer cascade removes
+-- their orphan comp snapshots.
 
 local function setup()
     local WGS = helpers.setup()
@@ -65,6 +68,15 @@ describe("WGS:RebindAttendanceSession", function()
         assert.are.equal("rebind", fired.kind)
         assert.are.equal(1, fired.index)
     end)
+
+    it("bumps session.rev so peers' mergeAttendance wins LWW", function()
+        assert.is_nil(WGS.db.global.attendance[1].rev,
+            "fresh session has no rev field (treated as 0)")
+        WGS:RebindAttendanceSession(1, 99, "New")
+        assert.are.equal(1, WGS.db.global.attendance[1].rev)
+        WGS:RebindAttendanceSession(1, 100, "Newer")
+        assert.are.equal(2, WGS.db.global.attendance[1].rev)
+    end)
 end)
 
 describe("WGS:RemoveMemberFromSession", function()
@@ -115,6 +127,11 @@ describe("WGS:RemoveMemberFromSession", function()
     it("returns false on out-of-range session index", function()
         assert.is_false(WGS:RemoveMemberFromSession(99, "Alpha"))
     end)
+
+    it("bumps session.rev so peers' mergeAttendance wins LWW", function()
+        WGS:RemoveMemberFromSession(1, "Beta")
+        assert.are.equal(1, WGS.db.global.attendance[1].rev)
+    end)
 end)
 
 describe("WGS:DeleteAttendanceSession", function()
@@ -147,7 +164,7 @@ describe("WGS:DeleteAttendanceSession", function()
         assert.are.equal(2, #WGS.db.global.attendance)
     end)
 
-    it("fires WGS_ATTENDANCE_EDITED with the removed session and kind=delete", function()
+    it("fires WGS_ATTENDANCE_EDITED with the tombstone and kind=delete", function()
         WGS:DeleteAttendanceSession(1)
         local fired
         for _, f in ipairs(GuildHall._fired) do
@@ -156,6 +173,23 @@ describe("WGS:DeleteAttendanceSession", function()
         assert.is_table(fired)
         assert.are.equal("delete", fired.kind)
         assert.are.equal(1000, fired.session.startedAt)
+    end)
+
+    -- Delete broadcasts a tombstone (not the full session) so peers can
+    -- find and remove their copy via the natural key. The tombstone
+    -- carries _deleted=true + a bumped rev so LWW kicks in on the peer
+    -- merge fn. Without _deleted, the peer would treat it as a re-add.
+    it("broadcasts a tombstone with _deleted=true and a bumped rev", function()
+        WGS.db.global.attendance[1].rev = 3   -- pretend this session already had edits
+        WGS:DeleteAttendanceSession(1)
+        local fired
+        for _, f in ipairs(GuildHall._fired) do
+            if f.event == "WGS_ATTENDANCE_EDITED" then fired = f.args[1] end
+        end
+        assert.is_true(fired.session._deleted, "tombstone must carry _deleted=true")
+        assert.are.equal(4, fired.session.rev, "rev bumped past the deleted session's rev")
+        assert.are.equal(1000, fired.session.startedAt,
+            "tombstone keeps the natural key so peers find the session")
     end)
 end)
 

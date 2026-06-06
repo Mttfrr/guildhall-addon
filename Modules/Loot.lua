@@ -382,12 +382,14 @@ end
 -- identity across re-sorts — it looks up the index from its sorted
 -- view on each call.
 --
--- Cross-officer propagation: NOT supported in v1. PeerSync's per-row
--- merge is first-wins on (itemID, shortName(player), timestamp ±60s),
--- so an edit to a row another officer already has gets dropped as a
--- dupe. Each editing officer prints a hint after every edit so they
--- know the change is local. A future commit can introduce a per-row
--- rev counter + WGS_LOOT_EDITED broadcast + LWW merge.
+-- Cross-officer propagation: edits ride the WGS_LOOT_EDITED → PeerSync
+-- broadcast pipeline (Modules/PeerSync.lua). Every edit bumps the row's
+-- `rev` counter; the peer merge fn does rev-based LWW so the highest
+-- rev wins on conflict. Deletes broadcast a tombstone row with
+-- `_deleted = true` plus the bumped rev; the peer's merge fn finds the
+-- row by natural key, sees the higher rev + `_deleted`, and removes it
+-- locally. Editors stay in sync within seconds — no re-import round
+-- trip required.
 
 --- Re-tag a loot row's eventId / teamId. Pass nil for both to clear
 --- the binding (Untag). Returns true on success, false if the index
@@ -399,6 +401,7 @@ function WGS:RetagLootRow(rowIndex, eventId, teamId)
     if not row then return false end
     row.eventId = eventId or nil   -- nil collapses 0 / false too
     row.teamId  = teamId  or nil
+    row.rev     = (tonumber(row.rev) or 0) + 1
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = row, kind = "retag" })
     self:PrintCorrectionHint()
     return true
@@ -413,7 +416,16 @@ function WGS:DeleteLootRow(rowIndex)
     if type(loot) ~= "table" then return false end
     if not loot[rowIndex] then return false end
     local removed = table.remove(loot, rowIndex)
-    self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = removed, kind = "delete" })
+    -- Tombstone: same natural key (itemID, player, timestamp) so peers
+    -- can find the row to remove, with a bumped rev so LWW kicks in.
+    local tombstone = {
+        itemID    = removed.itemID,
+        player    = removed.player,
+        timestamp = removed.timestamp,
+        rev       = (tonumber(removed.rev) or 0) + 1,
+        _deleted  = true,
+    }
+    self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = tombstone, kind = "delete" })
     self:PrintCorrectionHint()
     return true
 end

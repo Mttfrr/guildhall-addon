@@ -588,6 +588,19 @@ local function shortName(full)
     return full:match("^([^%-]+)") or full
 end
 
+-- Read the rev counter off a row with a 0 default. Pre-correction-UX
+-- rows + initial captures don't carry a rev; both sides treat that as
+-- "rev 0", so an unedited row from peer A merging into peer B's
+-- unedited row stays first-wins (incoming rev == existing rev). Edits
+-- bump rev so LWW kicks in only when something actually changed.
+local function getRev(row) return tonumber(row.rev) or 0 end
+
+-- LWW on the dedup key. Three outcomes when an existing row is found:
+--   incomingRev <= existingRev  → skip (existing is at least as new)
+--   incomingRev >  existingRev  → replace, OR remove if _deleted
+-- When no row matches:
+--   _deleted tombstone          → skip (nothing to remove)
+--   normal row                  → append
 local function mergeLoot(row)
     if type(row) ~= "table" or not row.itemID or not row.player or not row.timestamp then
         return "skipped"
@@ -595,27 +608,87 @@ local function mergeLoot(row)
     local loot = WGS.db and WGS.db.global and WGS.db.global.loot
     if not loot then return "skipped" end
     local incomingShort = shortName(row.player)
-    for _, existing in ipairs(loot) do
+    local incomingRev   = getRev(row)
+    for i, existing in ipairs(loot) do
         if existing.itemID == row.itemID
            and shortName(existing.player) == incomingShort
            and math.abs((existing.timestamp or 0) - row.timestamp) <= LOOT_DEDUP_WINDOW then
-            return "skipped"
+            if incomingRev <= getRev(existing) then
+                return "skipped"
+            end
+            if row._deleted then
+                table.remove(loot, i)
+                return "deleted"
+            end
+            loot[i] = row
+            return "updated"
         end
     end
+    if row._deleted then return "skipped" end
     loot[#loot + 1] = row
     return "added"
+end
+
+-- Cascade member-list edits into raidCompResults sharing the session's
+-- startedAt. Removes any slot whose name isn't in the session's current
+-- memberList — matches RemoveMemberFromSession's local cascade so a
+-- peer applying an incoming session edit ends up with the same comp
+-- view as the editing officer. Idempotent: rerunning with an unchanged
+-- memberList is a no-op.
+local function cascadeCompSlotsFromMemberList(session)
+    if type(session.memberList) ~= "table" then return end
+    local results = WGS.db and WGS.db.global and WGS.db.global.raidCompResults
+    if type(results) ~= "table" then return end
+    local keep = {}
+    for _, m in ipairs(session.memberList) do
+        if type(m) == "table" and m.name then keep[m.name] = true end
+    end
+    for _, snap in ipairs(results) do
+        if snap.startedAt == session.startedAt and type(snap.slots) == "table" then
+            for i = #snap.slots, 1, -1 do
+                if snap.slots[i].name and not keep[snap.slots[i].name] then
+                    table.remove(snap.slots, i)
+                end
+            end
+        end
+    end
+end
+
+-- Cascade session deletion into raidCompResults. Removes every snapshot
+-- sharing the deleted session's startedAt so peers don't end up with
+-- orphan comp rows pointing at a session that no longer exists.
+local function cascadeDeleteCompResults(startedAt)
+    local results = WGS.db and WGS.db.global and WGS.db.global.raidCompResults
+    if type(results) ~= "table" then return end
+    for i = #results, 1, -1 do
+        if results[i].startedAt == startedAt then
+            table.remove(results, i)
+        end
+    end
 end
 
 local function mergeAttendance(row)
     if type(row) ~= "table" or not row.startedAt then return "skipped" end
     local attendance = WGS.db and WGS.db.global and WGS.db.global.attendance
     if not attendance then return "skipped" end
-    for _, existing in ipairs(attendance) do
+    local incomingRev = getRev(row)
+    for i, existing in ipairs(attendance) do
         if existing.startedAt == row.startedAt
            and (existing.startedBy or "") == (row.startedBy or "") then
-            return "skipped"
+            if incomingRev <= getRev(existing) then
+                return "skipped"
+            end
+            if row._deleted then
+                table.remove(attendance, i)
+                cascadeDeleteCompResults(row.startedAt)
+                return "deleted"
+            end
+            attendance[i] = row
+            cascadeCompSlotsFromMemberList(row)
+            return "updated"
         end
     end
+    if row._deleted then return "skipped" end
     attendance[#attendance + 1] = row
     return "added"
 end
@@ -716,6 +789,20 @@ function WGS:_PeerSync_InstallStandardWiring()
     end)
     GuildHall.RegisterCallback(self, "WGS_RAID_COMP_SNAPSHOT", function(_, row)
         WGS:PeerSync_Broadcast("raidCompResults", row)
+    end)
+    -- Edit broadcasts share the loot / attendance channel — the merge
+    -- fns are rev-aware so a higher-rev incoming row replaces the
+    -- existing one, and `_deleted = true` tombstones remove it. Payload
+    -- shape from the correction mutators: { index, row | session, kind }.
+    GuildHall.RegisterCallback(self, "WGS_LOOT_EDITED", function(_, payload)
+        if payload and payload.row then
+            WGS:PeerSync_Broadcast("loot", payload.row)
+        end
+    end)
+    GuildHall.RegisterCallback(self, "WGS_ATTENDANCE_EDITED", function(_, payload)
+        if payload and payload.session then
+            WGS:PeerSync_Broadcast("attendance", payload.session)
+        end
     end)
 end
 

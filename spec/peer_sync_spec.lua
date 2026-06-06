@@ -317,6 +317,69 @@ describe("WGS:PeerSync per-table merge fns", function()
             assert.are.equal("skipped", WGS._PeerSync_MergeLoot({}))
             assert.are.equal("skipped", WGS._PeerSync_MergeLoot({ itemID = 1 }))
         end)
+
+        -- LWW + tombstone behaviour. Without these, edits from officer
+        -- A (RetagLootRow / DeleteLootRow) would arrive at officer B
+        -- and either get dropped as dupes (no rev bump) or re-added as
+        -- duplicate rows (tombstone without _deleted handling). The
+        -- correction UX is local-only without this.
+        it("replaces an existing row when incoming rev > existing rev", function()
+            WGS.db.global.loot[1] = {
+                itemID = 1, player = "X-Realm", timestamp = 1000,
+                eventId = 5, teamId = 1, rev = 0,
+            }
+            assert.are.equal("updated", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000,
+                eventId = 99, teamId = 2, rev = 1,
+            }))
+            assert.are.equal(99, WGS.db.global.loot[1].eventId,
+                "eventId replaced in place")
+            assert.are.equal(2, WGS.db.global.loot[1].teamId)
+            assert.are.equal(1, #WGS.db.global.loot, "no duplicate row appended")
+        end)
+
+        it("drops an incoming row when its rev is not strictly greater than existing", function()
+            WGS.db.global.loot[1] = {
+                itemID = 1, player = "X-Realm", timestamp = 1000, rev = 2,
+            }
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000, rev = 2,
+            }))
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000, rev = 1,
+            }))
+        end)
+
+        it("removes an existing row on a _deleted tombstone with a higher rev", function()
+            WGS.db.global.loot[1] = {
+                itemID = 1, player = "X-Realm", timestamp = 1000, rev = 0,
+            }
+            assert.are.equal("deleted", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000,
+                rev = 1, _deleted = true,
+            }))
+            assert.are.equal(0, #WGS.db.global.loot)
+        end)
+
+        it("ignores a tombstone with no matching local row", function()
+            -- Edge case: officer B already imported a cleaned dataset
+            -- and doesn't have the row that officer A is deleting.
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 999, player = "Phantom-Realm", timestamp = 5000,
+                rev = 1, _deleted = true,
+            }))
+        end)
+
+        it("ignores a tombstone with non-higher rev (defensive — local is at least as fresh)", function()
+            WGS.db.global.loot[1] = {
+                itemID = 1, player = "X-Realm", timestamp = 1000, rev = 2,
+            }
+            assert.are.equal("skipped", WGS._PeerSync_MergeLoot({
+                itemID = 1, player = "X-Realm", timestamp = 1000,
+                rev = 2, _deleted = true,
+            }))
+            assert.are.equal(1, #WGS.db.global.loot, "local row preserved")
+        end)
     end)
 
     describe("attendance", function()
@@ -339,6 +402,72 @@ describe("WGS:PeerSync per-table merge fns", function()
             assert.are.equal("added", WGS._PeerSync_MergeAttendance({
                 startedAt = 1, startedBy = "Other-Realm",
             }))
+        end)
+
+        it("replaces an existing session when incoming rev > existing rev", function()
+            WGS.db.global.attendance[1] = {
+                startedAt = 1, startedBy = "GM-Realm",
+                eventId = 5, eventTitle = "Old", rev = 0,
+            }
+            assert.are.equal("updated", WGS._PeerSync_MergeAttendance({
+                startedAt = 1, startedBy = "GM-Realm",
+                eventId = 99, eventTitle = "New", rev = 1,
+            }))
+            assert.are.equal(99, WGS.db.global.attendance[1].eventId,
+                "session edits propagate to peer in place")
+            assert.are.equal("New", WGS.db.global.attendance[1].eventTitle)
+            assert.are.equal(1, #WGS.db.global.attendance, "no duplicate row appended")
+        end)
+
+        it("removes a session on a _deleted tombstone with a higher rev AND cascades into raidCompResults", function()
+            WGS.db.global.attendance[1] = {
+                startedAt = 1000, startedBy = "GM-Realm", rev = 0,
+            }
+            WGS.db.global.raidCompResults = {
+                { startedAt = 1000, signature = "A" },
+                { startedAt = 1000, signature = "B" },
+                { startedAt = 9999, signature = "Z" },   -- unrelated
+            }
+            assert.are.equal("deleted", WGS._PeerSync_MergeAttendance({
+                startedAt = 1000, startedBy = "GM-Realm",
+                rev = 1, _deleted = true,
+            }))
+            assert.are.equal(0, #WGS.db.global.attendance)
+            assert.are.equal(1, #WGS.db.global.raidCompResults,
+                "comp snapshots sharing startedAt removed in cascade")
+            assert.are.equal("Z", WGS.db.global.raidCompResults[1].signature,
+                "unrelated snapshot kept")
+        end)
+
+        it("cascades remove-member edits into raidCompResults.slots on rev replace", function()
+            -- Officer A removed Beta from session. The incoming session
+            -- carries the new memberList (Alpha, Gamma); peer's
+            -- mergeAttendance should drop Beta out of every snapshot's
+            -- slots sharing startedAt to match.
+            WGS.db.global.attendance[1] = {
+                startedAt = 1000, startedBy = "GM-Realm", rev = 0,
+                memberList = {
+                    { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" },
+                },
+            }
+            WGS.db.global.raidCompResults = {
+                { startedAt = 1000, signature = "A", slots = {
+                    { name = "Alpha" }, { name = "Beta" }, { name = "Gamma" },
+                } },
+                { startedAt = 9999, signature = "Z", slots = {
+                    { name = "Beta" },   -- different session — keep
+                } },
+            }
+            WGS._PeerSync_MergeAttendance({
+                startedAt = 1000, startedBy = "GM-Realm", rev = 1,
+                memberList = { { name = "Alpha" }, { name = "Gamma" } },
+            })
+            local slots = WGS.db.global.raidCompResults[1].slots
+            assert.are.equal(2, #slots, "Beta gone from session-1 snapshot")
+            assert.are.equal("Alpha", slots[1].name)
+            assert.are.equal("Gamma", slots[2].name)
+            assert.are.equal("Beta", WGS.db.global.raidCompResults[2].slots[1].name,
+                "unrelated session's snapshot left intact")
         end)
     end)
 
@@ -426,6 +555,27 @@ describe("WGS:PeerSync standard wiring", function()
         _G.GetGuildInfo = function() return "TestGuild", "Member", 5 end
         WGS:FireEvent("WGS_LOOT_RECORDED", { itemID = 1, player = "X", timestamp = 1 })
         assert.are.equal(0, #sent)
+    end)
+
+    -- Edit broadcasts share the loot / attendance channel — the merge
+    -- fns are rev-aware so the LWW path applies on the peer side. These
+    -- two specs are the wire end: WGS_LOOT_EDITED and
+    -- WGS_ATTENDANCE_EDITED must actually go on the wire.
+    it("broadcasts on WGS_LOOT_EDITED (correction propagation)", function()
+        WGS:FireEvent("WGS_LOOT_EDITED", {
+            index = 1, kind = "retag",
+            row = { itemID = 42, player = "X-TestRealm", timestamp = 1000, rev = 1 },
+        })
+        assert.is_true(#sent >= 1,
+            "edit broadcasts ride the same outbound channel as captures")
+    end)
+
+    it("broadcasts on WGS_ATTENDANCE_EDITED (correction propagation)", function()
+        WGS:FireEvent("WGS_ATTENDANCE_EDITED", {
+            index = 1, kind = "rebind",
+            session = { startedAt = 1, startedBy = "X-TestRealm", rev = 1 },
+        })
+        assert.is_true(#sent >= 1)
     end)
 
     it("end-to-end: officer A broadcasts → officer B's merge fn applies it", function()

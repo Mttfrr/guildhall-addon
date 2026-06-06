@@ -100,16 +100,16 @@ function WGS:OnEnable()
     self:SetupTooltipHooks()
 end
 
---- Print the standard "this edit is local-only" notice that the
---- correction mutators (RetagLootRow, DeleteLootRow,
---- RebindAttendanceSession, RemoveMemberFromSession,
---- DeleteAttendanceSession) emit after every successful edit. Shared
---- so the string stays consistent across surfaces — and so the day we
---- add cross-officer edit propagation (per-row rev + LWW merge), the
---- swap to the new message is one line.
+--- Print the standard "edit applied" confirmation that the correction
+--- mutators (RetagLootRow, DeleteLootRow, RebindAttendanceSession,
+--- RemoveMemberFromSession, DeleteAttendanceSession) emit after every
+--- successful edit. Shared so the string stays consistent across
+--- surfaces. The cross-officer edit-propagation work (per-row rev
+--- counter + LWW merge) closed the "local-only" gap — edits now
+--- broadcast through the same PeerSync channel as captures, so this
+--- print is a confirmation rather than a limitation warning.
 function WGS:PrintCorrectionHint()
-    self:Print("Local change saved. Other officers will need to apply " ..
-        "the same correction or re-import from the platform.")
+    self:Print("Correction applied — propagating to other officers.")
 end
 
 --- Internal: fire a public event on the callback registry. Tolerant of

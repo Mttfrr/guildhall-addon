@@ -709,6 +709,7 @@ function WGS:RebindAttendanceSession(sessionIndex, eventId, eventTitle)
 
     session.eventId    = eventId or nil
     session.eventTitle = eventTitle or nil
+    session.rev        = (tonumber(session.rev) or 0) + 1
 
     forEachCompSnapshotAt(session.startedAt, function(snap)
         snap.eventId    = eventId or nil
@@ -740,6 +741,8 @@ function WGS:RemoveMemberFromSession(sessionIndex, memberName)
         end
     end
     if not found then return false end
+
+    session.rev = (tonumber(session.rev) or 0) + 1
 
     forEachCompSnapshotAt(session.startedAt, function(snap)
         if type(snap.slots) ~= "table" then return end
@@ -773,8 +776,17 @@ function WGS:DeleteAttendanceSession(sessionIndex)
         table.remove(comps, i)
     end)
 
+    -- Tombstone: same natural key (startedAt, startedBy) so peers can
+    -- find the session to remove, with a bumped rev for LWW. Peers'
+    -- mergeAttendance cascades into their local raidCompResults too.
+    local tombstone = {
+        startedAt = removed.startedAt,
+        startedBy = removed.startedBy,
+        rev       = (tonumber(removed.rev) or 0) + 1,
+        _deleted  = true,
+    }
     self:FireEvent("WGS_ATTENDANCE_EDITED",
-        { index = sessionIndex, session = removed, kind = "delete" })
+        { index = sessionIndex, session = tombstone, kind = "delete" })
     self:PrintCorrectionHint()
     return true
 end
