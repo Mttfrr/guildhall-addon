@@ -347,6 +347,32 @@ local function CreateMainFrame()
         end)
     end
 
+    -- Live UI refresh dispatcher. Each of these events changes what
+    -- the visible tab should render — wire them once here so adding
+    -- a new tab doesn't require remembering to re-subscribe. Each
+    -- tab's `refresh` fn no-ops when its frame isn't visible, so
+    -- off-screen events don't pay the cost.
+    --
+    -- WGS_LOOT_EDITED / WGS_ATTENDANCE_EDITED are intentionally NOT
+    -- listed: the Logs sub-views own those subscriptions directly
+    -- (sv-scoped refresh, sharper than tab-level). Listing them here
+    -- would just double-render. Everything else lives here.
+    if WGS.RegisterCallback then
+        local refreshEvents = {
+            "WGS_SIGNUP_EDITED",       -- Events Roster Mark-status
+            "WGS_SESSION_STARTED",     -- live-raid badges + Teams RosterCheck
+            "WGS_SESSION_ENDED",       -- new attendance row + post-raid state
+            "WGS_LOOT_RECORDED",       -- new drop appears in Logs → Loot
+            "WGS_ENCOUNTER_RECORDED",  -- boss tag column on recent loot rows
+            "WGS_RAID_COMP_SNAPSHOT",  -- Events planned-vs-actual diff
+        }
+        for _, ev in ipairs(refreshEvents) do
+            WGS.RegisterCallback(f, ev, function()
+                if f:IsShown() then RefreshCurrentTab(f) end
+            end)
+        end
+    end
+
     -- Status bar
     f.statusBar = CreateFrame("Frame", nil, f)
     f.statusBar:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 10)
