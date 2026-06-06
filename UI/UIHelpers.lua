@@ -275,15 +275,31 @@ local function ShortName(name)
     return name:match("^([^%-]+)") or name
 end
 
+-- Resolve a StaticPopup dialog's EditBox child. Tries the modern
+-- direct field first, then the legacy global-name pattern. Both have
+-- been observed across retail patches; on some clients .editBox is
+-- nil while _G[parent:GetName() .. "EditBox"] resolves, and vice
+-- versa. Returns nil only when neither path works.
+local function GetPopupEditBox(popup)
+    if not popup then return nil end
+    if popup.editBox then return popup.editBox end
+    if popup.GetName then
+        local n = popup:GetName()
+        if n then
+            local eb = _G[n .. "EditBox"]
+            if eb then return eb end
+        end
+    end
+    return nil
+end
+
 -- StaticPopup for the copy-to-clipboard flow. Registered once at file
 -- scope (addon is single-instance per character; re-register is a
--- no-op). Text gets set on the editBox by ShowCopyPopup AFTER
--- StaticPopup_Show returns — see the comment there. Keeping the
--- dialog body itself simple (no OnShow, no data plumbing) sidesteps
--- the retail-version-specific lifecycle quirks we hit earlier:
--- passing data via the 4th arg worked in tests but not in live
--- retail (the editBox configuration after OnShow appears to clobber
--- the data-driven SetText on some retail builds).
+-- no-op). Belt-and-braces population: OnShow sets the text from data,
+-- ShowCopyPopup also sets it post-return, AND a C_Timer.After(0)
+-- retry catches the case where Blizzard's setup re-clears the editBox
+-- after OnShow on some retail builds. At least one of the three paths
+-- has to stick.
 StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
     text         = "%s",  -- replaced by the format arg below
     button1      = "Close",
@@ -293,21 +309,47 @@ StaticPopupDialogs["GUILDHALL_COPY_STRING"] = {
     whileDead    = true,
     hideOnEscape = true,
     EnterClicksFirstButton = true,
+    OnShow = function(self, data)
+        if not data or not data.value then return end
+        local eb = GetPopupEditBox(self)
+        if eb then
+            eb:SetText(data.value)
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end,
+    EditBoxOnEnterPressed  = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 }
 
--- Open the copy popup with `value` pre-selected. The text is set
--- DIRECTLY on the returned dialog's editBox rather than via the
--- info.data/OnShow path: Blizzard's StaticPopup setup runs its own
--- editBox:SetText("") during dialog configuration, and on retail
--- 11.0+ that clear happens AFTER our OnShow on some clients —
--- leaving the field empty even though data was passed correctly.
--- Setting on the returned popup is post-setup, so it sticks.
 local function ShowCopyPopup(prompt, value)
-    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt)
-    if popup and popup.editBox then
-        popup.editBox:SetText(value or "")
-        popup.editBox:HighlightText()
-        popup.editBox:SetFocus()
+    local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", prompt, nil, { value = value })
+    if not popup then return end
+
+    -- Path 2: post-return SetText. Runs after OnShow synchronously
+    -- completes, so it stomps any cleanup that happened during setup.
+    local eb = GetPopupEditBox(popup)
+    if eb then
+        eb:SetText(value or "")
+        eb:HighlightText()
+        eb:SetFocus()
+    end
+
+    -- Path 3: next-frame retry. Some retail builds defer editBox
+    -- configuration past the current synchronous frame, so even the
+    -- post-return SetText above can be wiped. C_Timer.After(0, ...)
+    -- queues to the very next frame tick, which is after all that.
+    if C_Timer and C_Timer.After and value then
+        C_Timer.After(0, function()
+            if popup.IsShown and popup:IsShown() then
+                local eb2 = GetPopupEditBox(popup)
+                if eb2 then
+                    eb2:SetText(value)
+                    eb2:HighlightText()
+                    eb2:SetFocus()
+                end
+            end
+        end)
     end
 end
 

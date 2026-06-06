@@ -283,6 +283,34 @@ local SLASH_HANDLERS = {
         end
         self:Print("No team matching: " .. arg)
     end,
+
+    -- Diagnostic for the Copy popup empty-field bug: opens the popup
+    -- with a sentinel value and reports what each editBox lookup
+    -- returns. If the popup field is still empty after this, the
+    -- output here pinpoints exactly which retail-specific path broke.
+    debugpopup = function(self)
+        if not StaticPopup_Show then
+            self:Print("StaticPopup_Show is nil — no popup framework available.")
+            return
+        end
+        local popup = StaticPopup_Show("GUILDHALL_COPY_STRING", "Debug:", nil, { value = "DEBUG_VALUE_123" })
+        if not popup then
+            self:Print("StaticPopup_Show returned nil — popup didn't open.")
+            return
+        end
+        local name = popup.GetName and popup:GetName() or "(no GetName)"
+        self:Print("popup frame: " .. tostring(name))
+        self:Print("popup.editBox = " .. tostring(popup.editBox))
+        if name then
+            local eb = _G[name .. "EditBox"]
+            self:Print("_G[name..\"EditBox\"] = " .. tostring(eb))
+        end
+        local eb = popup.editBox or (name and _G[name .. "EditBox"])
+        if eb and eb.GetText then
+            self:Print("editBox current text: |cffaaaaaa\"" ..
+                tostring(eb:GetText() or "") .. "\"|r")
+        end
+    end,
 }
 
 local SLASH_ALIASES = {
