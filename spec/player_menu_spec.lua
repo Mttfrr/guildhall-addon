@@ -46,13 +46,27 @@ describe("ui.BuildPlayerMenuItems", function()
         end
     end)
 
-    it("Invite calls InviteUnit with the short name", function()
+    it("Invite calls C_PartyInfo.InviteUnit with the FULL Name-Realm form", function()
+        -- Cross-realm raids fail silently when InviteUnit is called
+        -- with a bare short name — Blizzard treats it as same-realm.
+        -- The fix passes the full form (the original `name` arg) and
+        -- uses the modern C_PartyInfo API (matches AutoInvite path).
         local invitedWith
-        _G.InviteUnit = function(name) invitedWith = name end
+        _G.C_PartyInfo = { InviteUnit = function(name) invitedWith = name end }
         local items = ui.BuildPlayerMenuItems("Foo-Realm", "WARRIOR")
         items[2].func()   -- Invite
-        assert.are.equal("Foo", invitedWith,
-            "Invite should pass the short name (Blizzard's API takes either form but UI uses short)")
+        assert.are.equal("Foo-Realm", invitedWith,
+            "Invite must pass the full Name-Realm form so cross-realm invites resolve")
+        _G.C_PartyInfo = nil
+    end)
+
+    it("Invite falls back to legacy InviteUnit when C_PartyInfo is missing", function()
+        local invitedWith
+        _G.C_PartyInfo = nil
+        _G.InviteUnit = function(name) invitedWith = name end
+        local items = ui.BuildPlayerMenuItems("Foo-Realm", "WARRIOR")
+        items[2].func()
+        assert.are.equal("Foo-Realm", invitedWith)
         _G.InviteUnit = nil
     end)
 
@@ -143,16 +157,16 @@ describe("ui.OpenPlayerContextMenu", function()
 
     it("button callbacks fire when invoked through the captured menu", function()
         local invitedWith
-        _G.InviteUnit = function(name) invitedWith = name end
+        _G.C_PartyInfo = { InviteUnit = function(name) invitedWith = name end }
         WGS.db.global.characterIds = nil
         ui.OpenPlayerContextMenu("Foo-Realm", "WARRIOR")
         local root = _G._capturedMenus[1]
         -- root._children[3] is "Invite" (1=title, 2=Whisper, 3=Invite)
         assert.are.equal("Invite", root._children[3].label)
         root._children[3].func()
-        assert.are.equal("Foo", invitedWith,
-            "the captured button.func must be the one that calls InviteUnit")
-        _G.InviteUnit = nil
+        assert.are.equal("Foo-Realm", invitedWith,
+            "Invite must pass the full Name-Realm form for cross-realm support")
+        _G.C_PartyInfo = nil
     end)
 
     it("no-op when name is nil — must not call MenuUtil with an empty menu", function()

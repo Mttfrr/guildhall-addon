@@ -63,6 +63,30 @@ describe("GetEventInviteList source preference", function()
         assert.are.equal("signups", source)
     end)
 
+    -- Regression for the "marked Bench but Invite still picked them up"
+    -- bug. The invite path defaults to excluding Bench — semantically
+    -- Bench = "available if needed", not "actively going". The split
+    -- button's arrow dropdown opts back in via includeBench=true.
+    it("EXCLUDES bench signups by default (opts.includeBench unset)", function()
+        WGS.db.global.signups = {
+            { eventId = 99, characterName = "Present",  status = "P" },
+            { eventId = 99, characterName = "Benched",  status = "B" },
+        }
+        local names = WGS:GetEventInviteList({ id = 99 })
+        assert.same({ "Present" }, names,
+            "primary Invite must not pull in Bench-status signups")
+    end)
+
+    it("INCLUDES bench when opts.includeBench=true (split-button dropdown)", function()
+        WGS.db.global.signups = {
+            { eventId = 99, characterName = "Present",  status = "P" },
+            { eventId = 99, characterName = "Benched",  status = "B" },
+        }
+        local names = WGS:GetEventInviteList({ id = 99 }, { includeBench = true })
+        table.sort(names)
+        assert.same({ "Benched", "Present" }, names)
+    end)
+
     it("falls back to raid comp when signups exist but none are committed", function()
         WGS.db.global.signups = {
             -- Only tentative — filtered out by GetEventSignups

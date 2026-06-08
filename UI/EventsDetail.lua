@@ -315,7 +315,10 @@ local function PopulateRosterSection(content, anchor, roster, width, frame)
                         },
                         { text = "", isTitle = true, notCheckable = true },
                     }
-                    for _, item in ipairs(ui.BuildPlayerMenuItems(row.short, classFile)) do
+                    -- Pass fullName (not short) so the menu's Invite
+                    -- item gets the Name-Realm form for cross-realm
+                    -- invites — see UIHelpers.lua's BuildPlayerMenuItems.
+                    for _, item in ipairs(ui.BuildPlayerMenuItems(row.fullName or row.short, classFile)) do
                         menu[#menu + 1] = item
                     end
                     ui.OpenContextMenu(menu)

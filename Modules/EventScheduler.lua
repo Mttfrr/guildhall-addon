@@ -168,8 +168,17 @@ function WGS:GetEventInviteList(event, opts)
     -- 1. Event signups — primary source. If the web has signups for this
     -- event, that's what officers actually committed to. Comp slots may
     -- be stale or speculative; team roster pulls in benched players.
+    --
+    -- Invite path defaults to EXCLUDING bench — Bench = "available if
+    -- needed", not "actively going." Marking a Present player as Bench
+    -- then hitting Invite shouldn't pull them in. The split button's
+    -- arrow dropdown opts back in via opts.includeBench = true.
+    -- (Note: GetEventSignups's nil-default is true to preserve legacy
+    -- non-invite callers like the export pipeline; the invite path has
+    -- to be explicit.)
     if eventId then
-        local signupNames = self:GetEventSignups(eventId, opts.includeBench)
+        local includeBench = opts.includeBench == true
+        local signupNames = self:GetEventSignups(eventId, includeBench)
         if #signupNames > 0 then
             return signupNames, "signups"
         end

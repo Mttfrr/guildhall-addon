@@ -425,7 +425,21 @@ function ui.BuildPlayerMenuItems(name, class)
         {
             text = "Invite",
             notCheckable = true,
-            func = function() if InviteUnit then InviteUnit(short) end end,
+            -- Use the full Name-Realm form when available so cross-realm
+            -- invites resolve correctly — InviteUnit / C_PartyInfo.InviteUnit
+            -- defaults to the player's own realm when given a bare short
+            -- name, which silently no-ops for cross-realm characters.
+            -- C_PartyInfo.InviteUnit is the modern API (matches the
+            -- AutoInvite path in Modules/EventScheduler.lua); InviteUnit
+            -- kept as a fallback for any client missing C_PartyInfo.
+            func = function()
+                local target = (name and name ~= "") and name or short
+                if C_PartyInfo and C_PartyInfo.InviteUnit then
+                    C_PartyInfo.InviteUnit(target)
+                elseif InviteUnit then
+                    InviteUnit(target)
+                end
+            end,
         },
         {
             text = "Copy name",
