@@ -110,10 +110,8 @@ local function Populate(tab)
 
     local wishlists = WGS.db.global.wishlists or {}
     if #wishlists == 0 then
-        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noData:SetText("No wishlists imported. Import from web app first.")
-        tab.content:SetHeight(30)
+        ui.CreateImportHint(tab.content, "No wishlists imported yet.", 5, -5)
+        tab.content:SetHeight(72)
         return
     end
 

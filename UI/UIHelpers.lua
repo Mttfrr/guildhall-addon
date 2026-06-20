@@ -64,6 +64,24 @@ function ui.CreateScrollContent(parent)
     return sf, content
 end
 
+-- Consistent "you haven't imported yet" empty state for the read-only
+-- consumer tabs (Events, Teams, Wishlists). The addon only shows web
+-- data after an officer pastes the export string, so a blank tab should
+-- never look broken — it should say what's missing AND point at the fix
+-- (the Sync tab / `/gh import`). One builder so every tab reads the same.
+--
+-- `primary` is the tab-specific line ("No events imported yet."); the
+-- gold action line is shared. x/y default to the common TOPLEFT inset.
+function ui.CreateImportHint(parent, primary, x, y)
+    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 6, y or -10)
+    fs:SetJustifyH("LEFT")
+    fs:SetWidth(560)
+    fs:SetText((primary or "Nothing imported yet.") ..
+        "\n\n|cffffd100Open the Sync tab and paste your export string from the web app — or type /gh import.|r")
+    return fs
+end
+
 -- Sub-nav visual states. The active tab gets a gold underline + bright
 -- label; inactives are dimmed; hover splits the difference. Kept here
 -- so the colors are tweakable in one place and read alongside the
