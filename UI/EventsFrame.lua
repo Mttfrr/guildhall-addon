@@ -282,10 +282,8 @@ local function PopulateRail(frame, decoratedEvents, selectedId)
     for _, region in ipairs({ content:GetRegions() }) do region:Hide() end
 
     if #decoratedEvents == 0 then
-        local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        empty:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -10)
-        empty:SetText("No events imported.")
-        content:SetHeight(40)
+        ui.CreateImportHint(content, "No events imported yet.", 6, -10)
+        content:SetHeight(72)
         return
     end
 

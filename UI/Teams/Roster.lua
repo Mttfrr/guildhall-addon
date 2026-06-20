@@ -291,10 +291,8 @@ local function Populate(tab)
 
     local teams = WGS.db.global.teams
     if not teams or #teams == 0 then
-        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noData:SetText("No teams imported yet. Use the Sync tab to import data.")
-        tab.content:SetHeight(30)
+        ui.CreateImportHint(tab.content, "No teams imported yet.", 5, -5)
+        tab.content:SetHeight(72)
         return
     end
 
