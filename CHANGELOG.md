@@ -2,6 +2,21 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [0.7.7-beta] — 2026-07-26
+
+Raid-forming tools: invite as often as you like, see who's actually in the
+raid at a glance, and drop raiders into their planned comp groups.
+
+### What's New
+
+- **Raid Status snapshot on the Events detail panel.** While you're in a group, a new "Raid Status" section shows every expected raider bucketed by live state — **In raid** (accepted), **Invited (waiting)** (invite fired, not joined yet), **Not invited** (online, no invite sent), and **Offline** — with a one-line count summary (`18 in · 2 waiting · 0 to invite · 3 offline`). No more eyeballing 20 unit frames against the roster to see who still needs chasing. Names are class-coloured; it re-renders live as people accept/join/leave (new internal `WGS_GROUP_ROSTER_CHANGED` refresh signal). Data comes from `WGS:BuildInviteSnapshot`. The section renders nothing pre-raid, so the panel is unchanged when you're not grouped.
+- **"Organize Groups" button.** In the Raid Status section (shown in a raid when the event has a planned comp), one click sorts everyone into the subgroups your platform raid comp assigns — the base64-imported comp is the source of truth. Wraps the existing `/gh sortgroups` logic; `WGS:SortRaidGroups` now takes an event override so the button targets the event you're viewing rather than whatever "today" resolves to.
+- **Auto-sort into comp groups as raiders accept.** New setting **Auto-Sort Into Comp Groups** (on by default): while tracking a raid, each newcomer is dropped into their planned comp subgroup the moment they join. Targeted to fresh joiners only, so it never reshuffles anyone you positioned by hand; no-ops when the event has no comp with group assignments (bare joins stay where they land). The "Organize Groups" button is the manual, sort-everyone counterpart.
+
+### Changed
+
+- **Mass invite no longer has any cooldown — press it as often as you want.** 0.7.6-beta fixed the "invite only works once" bug with a 30-second re-invite cooldown; that still made you wait. Gone: the *only* thing Invite skips now is people already in the group, so every press (re-)invites everyone online who isn't in yet — declined, reconnected, or just slow to accept. The record of who's been invited is kept purely to drive the Raid Status snapshot's "waiting" vs "to invite" split (`WGS:HasInvited`), and clears when you drop to solo. 4 new specs; `BuildInviteSnapshot` + `SortRaidGroups` override + `PlaceRaiderInCompGroup` covered by 10 more.
+
 ## [0.7.6-beta] — 2026-07-26
 
 Two raid-night quality-of-life fixes: a nudge to start attendance tracking

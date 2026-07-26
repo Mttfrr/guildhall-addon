@@ -24,6 +24,24 @@ function WGS:IsInAnyGroup()
     return false
 end
 
+--- Set of short character names currently in the player's group (raid or
+--- party), including the local player. Empty table when solo. Reuses
+--- GetRaidMembers (the canonical roster read) and strips each name to its
+--- short form so callers can cross-reference against the guild roster /
+--- invite list. Used by the raid-status snapshot to mark who's already in.
+function WGS:GetCurrentGroupShortNames()
+    local set = {}
+    if not self:IsInAnyGroup() then return set end
+    local ok, members = pcall(self.GetRaidMembers, self)
+    if ok and type(members) == "table" then
+        for fullName in pairs(members) do
+            local short = fullName:match("^([^%-]+)") or fullName
+            set[short] = true
+        end
+    end
+    return set
+end
+
 --- Does the local player have lead-or-assist on the current group?
 ---
 --- Returns (ok, reason):

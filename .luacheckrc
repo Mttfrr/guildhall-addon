@@ -106,7 +106,7 @@ read_globals = {
     "NotifyInspect", "ClearInspectPlayer", "CanInspect",
 
     -- Timer / hook / callback
-    "C_Timer", "hooksecurefunc", "GetTime",
+    "C_Timer", "hooksecurefunc",
 
     -- Quality / class colors
     "ITEM_QUALITY_COLORS", "RAID_CLASS_COLORS", "CLASS_ICON_TCOORDS",

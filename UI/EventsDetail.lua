@@ -337,6 +337,92 @@ local function PopulateRosterSection(content, anchor, roster, width, frame)
 end
 
 ---------------------------------------------------------------------------
+-- Raid Status section — live who's-here + Organize Groups
+--
+-- Only rendered while in a group. Answers, at a glance, the question the
+-- officer used to solve by eyeballing 20 unit frames against the roster:
+-- who's already in, who has a pending invite, who's online but not yet
+-- invited, and who's offline. The "Organize Groups" button (shown in a
+-- raid when the event has a planned comp) sorts everyone into their comp
+-- subgroups in one click. Data comes from WGS:BuildInviteSnapshot.
+---------------------------------------------------------------------------
+
+-- Bucket render order: gaps the officer can act on come first, "in raid"
+-- (done) last. label + colour per live-state.
+local RAID_STATUS_BUCKETS = {
+    { key = "not-invited", label = "Not invited",       color = "ffffd100" },
+    { key = "invited",     label = "Invited (waiting)", color = "ffffa040" },
+    { key = "offline",     label = "Offline",           color = "ffff5555" },
+    { key = "in-raid",     label = "In raid",           color = "ff55dd55" },
+}
+
+local function PopulateRaidStatusSection(content, anchor, ev, width)
+    if not WGS:IsInAnyGroup() then return anchor end
+    local snap = WGS.BuildInviteSnapshot and WGS:BuildInviteSnapshot(ev) or nil
+    if not snap or snap.counts.total == 0 then return anchor end
+
+    local header = BuildSectionHeader(content, anchor, "Raid Status", width)
+
+    local c = snap.counts
+    local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    summary:SetPoint("LEFT", header, "RIGHT", 12, 0)
+    summary:SetText(string.format(
+        "|cff55dd55%d in|r \194\183 |cffffa040%d waiting|r \194\183 |cffffd100%d to invite|r \194\183 |cffff5555%d offline|r",
+        c.inRaid, c.invited, c.notInvited, c.offline))
+
+    -- Bucket the rows by live-state.
+    local byBucket = {}
+    for _, b in ipairs(RAID_STATUS_BUCKETS) do byBucket[b.key] = {} end
+    for _, r in ipairs(snap.rows) do
+        local bucket = byBucket[r.live]
+        if bucket then bucket[#bucket + 1] = r end
+    end
+
+    local last = header
+    for _, b in ipairs(RAID_STATUS_BUCKETS) do
+        local rows = byBucket[b.key]
+        if #rows > 0 then
+            local hdr = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            hdr:SetPoint("TOPLEFT", last, "BOTTOMLEFT", (last == header) and 0 or -12, -4)
+            hdr:SetText(string.format("|c%s%s (%d)|r", b.color, b.label, #rows))
+            last = hdr
+
+            local labels = {}
+            for _, r in ipairs(rows) do
+                local classFile = WGS:NormalizeClassFile(r.class or "")
+                local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
+                labels[#labels + 1] = "|c" .. colorHex .. r.short .. "|r"
+            end
+            local namesFs = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            namesFs:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 12, -2)
+            namesFs:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+            namesFs:SetJustifyH("LEFT")
+            namesFs:SetWordWrap(true)
+            namesFs:SetText(table.concat(labels, ", "))
+            last = namesFs
+        end
+    end
+
+    -- Organize Groups: one-click sort of the current raid into the event's
+    -- planned comp subgroups. Only in a raid (party has no subgroups) and
+    -- only when the event actually has a comp to sort against — otherwise
+    -- there's nothing to organize and people stay where they landed.
+    local hasComp = FindRaidCompForEvent(ev.id) ~= nil
+    if IsInRaid() and hasComp then
+        local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+        btn:SetSize(150, 22)
+        btn:SetPoint("TOPLEFT", last, "BOTTOMLEFT", (last == header) and 0 or -12, -8)
+        btn:SetText("Organize Groups")
+        btn:SetScript("OnClick", function()
+            if WGS.SortRaidGroups then WGS:SortRaidGroups(ev) end
+        end)
+        last = btn
+    end
+
+    return last
+end
+
+---------------------------------------------------------------------------
 -- Raid Comp section
 ---------------------------------------------------------------------------
 
@@ -1012,6 +1098,10 @@ local function PopulateDetail(frame, ev)
     local roster = BuildEventRoster(ev.id)
     lastAnchor = PopulateRosterSection(content, lastAnchor, roster, sectionW, frame)
 
+    -- Live who's-here + Organize Groups. Renders nothing (returns the same
+    -- anchor) when we're not in a group, so the layout is unchanged pre-raid.
+    lastAnchor = PopulateRaidStatusSection(content, lastAnchor, ev, sectionW)
+
     local comp = FindRaidCompForEvent(ev.id)
     lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
 
@@ -1028,6 +1118,10 @@ local function PopulateDetail(frame, ev)
     local approxHeight = 60
         + (#roster.rows * 19)
         + (comp and (40 + #(comp.assignments or comp.members or {}) * 18) or 30)
+        -- Raid Status section (only when in a group): header + 4 possible
+        -- bucket blocks + the Organize Groups button. Roughly one row per
+        -- signup plus fixed chrome; generous so nothing clips.
+        + (WGS:IsInAnyGroup() and (80 + #roster.rows * 8) or 0)
     content:SetHeight(approxHeight)
 end
 

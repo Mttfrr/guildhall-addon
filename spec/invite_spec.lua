@@ -132,24 +132,20 @@ end)
 -- Regression for the "mass invite only works once" bug. The invited set
 -- used to be a permanent boolean, so a second Invite reported "all in"
 -- and re-invited nobody — even when people declined the first invite or
--- reconnected. It's now a per-character timestamp with a re-invite
--- cooldown: a follow-up invite inside the cooldown is a no-op (swallows
--- accidental double-clicks), but once the cooldown lapses the stragglers
--- get invited again.
-describe("AutoInvite re-invite cooldown", function()
+-- reconnected. There's now NO cooldown at all: pressing Invite always
+-- (re-)invites everyone online who isn't already in the group, and the
+-- invited-set is kept purely so the raid-status snapshot can distinguish
+-- "invite sent, waiting" from "not invited yet."
+describe("AutoInvite re-invites on demand (no cooldown)", function()
     local WGS
     local invited
-    local fakeNow
 
     local EVENT = { id = 1, title = "Raid" }
 
     before_each(function()
         WGS = helpers.setup()
         invited = {}
-        fakeNow = 1000
 
-        -- Controllable frame clock so we can advance past the cooldown.
-        _G.GetTime = function() return fakeNow end
         _G.IsInGuild = function() return true end
         _G.IsInRaid = function() return false end       -- solo → lead check passes,
         _G.IsInGroup = function() return false end       -- IsInCurrentGroup → false
@@ -174,25 +170,16 @@ describe("AutoInvite re-invite cooldown", function()
         assert.same({ "Alpha-Realm", "Bravo-Realm" }, invited)
     end)
 
-    it("does NOT re-invite within the cooldown (anti double-click)", function()
-        WGS:AutoInvite(EVENT)
-        fakeNow = fakeNow + 5    -- 5s later, well inside the 30s cooldown
-        WGS:AutoInvite(EVENT)
-        assert.are.equal(2, #invited,
-            "a second invite inside the cooldown must be a no-op")
-    end)
-
-    it("re-invites people not in the group once the cooldown lapses", function()
+    it("re-invites everyone not in the group again on the very next call", function()
         WGS:AutoInvite(EVENT)
         assert.are.equal(2, #invited)
-        fakeNow = fakeNow + 31   -- past the 30s cooldown
-        WGS:AutoInvite(EVENT)
+        WGS:AutoInvite(EVENT)   -- immediately again — no waiting
         assert.are.equal(4, #invited,
-            "after the cooldown, a follow-up mass-invite reaches the stragglers again")
+            "a repeat invite reaches the stragglers again, no cooldown")
     end)
 
     it("invites a freshly-reconnected member who was offline on the first pass", function()
-        -- Bravo is offline for the first invite, so they're never marked.
+        -- Bravo is offline for the first invite → not invited that pass.
         WGS.GetGuildRosterLookup = function()
             return {
                 Alpha = { online = true,  fullName = "Alpha-Realm" },
@@ -202,18 +189,27 @@ describe("AutoInvite re-invite cooldown", function()
         WGS:AutoInvite(EVENT)
         assert.same({ "Alpha-Realm" }, invited)
 
-        -- Bravo reconnects; re-invite immediately (no cooldown ever recorded).
+        -- Bravo reconnects → next Invite reaches them (and re-pings Alpha).
         WGS.GetGuildRosterLookup = function()
             return {
                 Alpha = { online = true, fullName = "Alpha-Realm" },
                 Bravo = { online = true, fullName = "Bravo-Realm" },
             }
         end
-        fakeNow = fakeNow + 2    -- still inside Alpha's cooldown
         WGS:AutoInvite(EVENT)
-        table.sort(invited)
-        assert.same({ "Alpha-Realm", "Bravo-Realm" }, invited,
-            "reconnected member is invited even though Alpha is still on cooldown")
+        local sawBravo = false
+        for _, n in ipairs(invited) do if n == "Bravo-Realm" then sawBravo = true end end
+        assert.is_true(sawBravo, "reconnected member gets invited on the next press")
+    end)
+
+    it("records invited characters for the snapshot (HasInvited) and resets when solo", function()
+        WGS:AutoInvite(EVENT)
+        assert.is_true(WGS:HasInvited("Alpha"))
+        assert.is_true(WGS:HasInvited("Bravo"))
+        assert.is_false(WGS:HasInvited("Nobody"))
+
+        WGS:ResetInviteTracking()
+        assert.is_false(WGS:HasInvited("Alpha"))
     end)
 end)
 

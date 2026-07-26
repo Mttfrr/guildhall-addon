@@ -17,32 +17,38 @@ local COMMITTED_SIGNUP_STATUSES = { P = true, L = true, B = true, LT = true }
 -- in the raid so calling it too early is a no-op.
 local SORT_AFTER_INVITE_DELAY = 5
 
--- Re-invite cooldown (seconds). We remember when each character was last
--- invited so a rapid double-click doesn't fire a second invite popup at
--- everyone. But the memory MUST expire: once the cooldown lapses, hitting
--- Invite again re-invites anyone who still isn't in the group — the
--- common "3 people were reconnecting / declined the first invite, invite
--- them again" flow. Before this, the marker was a permanent boolean so
--- the second mass-invite reported "all in" and silently invited nobody.
--- 30s is long enough to swallow an accidental double-click yet short
--- enough that a deliberate "grab the stragglers" re-invite lands promptly.
-local INVITE_REINVITE_COOLDOWN = 30
+-- Who we've fired an invite at this group session (short name → true).
+-- This is NOT a gate on re-inviting — pressing Invite always re-invites
+-- anyone who isn't already in the group, so stragglers who declined or
+-- reconnected get pulled in whenever the officer clicks (no cooldown, no
+-- "all invited" dead end). It's kept purely so the raid-status snapshot
+-- can tell "invite sent, waiting on them" apart from "not invited yet."
+-- Wiped when the officer drops to solo (a fresh group starts clean).
+local invitedThisSession = {}
 
--- character short-name → GetTime() timestamp of the last invite we fired.
-local lastInviteAt = {}
+--- Read-only view of who's been invited this group session. Used by the
+--- raid-status snapshot (WGS:BuildInviteSnapshot) to mark pending invites.
+function WGS:HasInvited(shortName)
+    return shortName ~= nil and invitedThisSession[shortName] == true
+end
 
--- Monotonic clock for the re-invite cooldown. GetTime() is the frame
--- timer (seconds since client start) — monotonic and immune to the
--- system clock, exactly what a cooldown wants. Falls back to time() when
--- GetTime is unavailable (never in-game; keeps the module loadable under
--- the test harness, which doesn't stub GetTime).
-local function inviteClock()
-    if GetTime then return GetTime() end
-    return time()
+--- Clear the invited-this-session set. Called when the group disbands so
+--- the next raid's snapshot doesn't show stale "pending" markers.
+function WGS:ResetInviteTracking()
+    invitedThisSession = {}
 end
 
 function module:OnEnable()
     self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
+    self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
+end
+
+-- Drop the invited-set the moment we're no longer in any group, so the
+-- next group we form starts with a clean "nobody invited yet" snapshot.
+function module:OnGroupRosterUpdate()
+    if not WGS:IsInAnyGroup() then
+        WGS:ResetInviteTracking()
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -300,21 +306,19 @@ function WGS:AutoInvite(eventOverride, opts)
     -- Fire invites in a single tick. The previous 3s-per-invite stagger
     -- meant a 25-person raid took 75 seconds to start; WoW handles a
     -- burst of InviteUnit calls fine in practice.
-    local nowClock = inviteClock()
+    --
+    -- The ONLY skip is "already in the group" — there's no cooldown. Press
+    -- Invite as often as you like: everyone online who isn't in the group
+    -- yet gets (re-)invited, so people who declined the first invite or
+    -- disconnected-and-came-back are pulled in the moment you click again.
     for _, name in ipairs(names) do
         local short = name:match("^([^%-]+)")
-        -- Skip only if we invited this character within the cooldown —
-        -- an expired (or missing) marker means they're fair game again,
-        -- so a follow-up mass-invite reaches people who reconnected or
-        -- let the first invite lapse.
-        local lastAt = short and lastInviteAt[short]
-        local onCooldown = lastAt and (nowClock - lastAt) < INVITE_REINVITE_COOLDOWN
-        if short and not onCooldown then
+        if short then
             local gi = roster[short]
             if gi and gi.online and gi.fullName ~= myKey then
                 -- Skip if already in group
                 if not module:IsInCurrentGroup(gi.fullName) then
-                    lastInviteAt[short] = nowClock
+                    invitedThisSession[short] = true
                     invited = invited + 1
                     C_PartyInfo.InviteUnit(gi.fullName)
                 end
@@ -354,7 +358,11 @@ end
 -- /gh sortgroups — assign raid subgroups from comp
 ---------------------------------------------------------------------------
 
-function WGS:SortRaidGroups()
+-- eventOverride lets the "Organize Groups" button (UI/EventsDetail.lua)
+-- sort against the specific event the officer is viewing, instead of
+-- whichever one FindTodayEventForTeam resolves. The no-arg /gh sortgroups
+-- + the auto-sort-after-invite path keep the today-resolution fallback.
+function WGS:SortRaidGroups(eventOverride)
     if not IsInRaid() then
         self:Print(L["ERR_NEED_RAID_TO_SORT"])
         return
@@ -365,7 +373,7 @@ function WGS:SortRaidGroups()
         return
     end
 
-    local event = self:FindTodayEventForTeam(nil)
+    local event = eventOverride or self:FindTodayEventForTeam(nil)
     if not event then
         self:Print(L["NO_EVENT_TODAY"])
         return
@@ -426,6 +434,114 @@ function WGS:SortRaidGroups()
     else
         self:Print(L["SORT_NONE"])
     end
+end
+
+--- Place a single raider into their planned comp subgroup, if the comp
+--- for `eventId` assigns them one and they aren't already in it. Returns
+--- true when a move happened. No-op (false) when there's no comp, the
+--- raider has no group assignment, we lack raid lead/assist, or they're
+--- already in the right group. Powers the auto-place-on-accept flow so a
+--- raider lands in their group the moment they join, WITHOUT reshuffling
+--- anyone already placed (that's what SortRaidGroups is for).
+function WGS:PlaceRaiderInCompGroup(shortName, eventId)
+    if not shortName or not eventId then return false end
+    if not IsInRaid() then return false end
+    if not self:HasGroupLeadOrAssist() then return false end
+
+    local comp = self:GetRaidComp(eventId)
+    if not comp or not comp.assignments then return false end
+
+    local wanted = shortName:lower()
+    local target
+    for _, a in ipairs(comp.assignments) do
+        if a.group and a.name then
+            local sh = (a.name:match("^([^%-]+)") or a.name):lower()
+            if sh == wanted then target = tonumber(a.group); break end
+        end
+    end
+    if not target then return false end
+
+    for i = 1, GetNumGroupMembers() do
+        local name, _, subgroup = GetRaidRosterInfo(i)
+        if name then
+            local sh = (name:match("^([^%-]+)") or name):lower()
+            if sh == wanted then
+                if subgroup ~= target then
+                    SetRaidSubgroup(i, target)
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
+---------------------------------------------------------------------------
+-- Raid-status snapshot — who's in / pending / not-invited / offline
+---------------------------------------------------------------------------
+
+--- Live who's-here snapshot for an event. For each character on the
+--- invite list, classify their current state so the officer can see at a
+--- glance who still needs chasing rather than eyeballing 20 unit frames.
+---
+--- row.live ∈:
+---   "in-raid"     — already in the group (accepted the invite / was here)
+---   "invited"     — an invite was fired this session, still not in group
+---   "not-invited" — online + in the guild, no invite fired yet
+---   "offline"     — not online per the guild roster
+---
+--- Returns { rows = { { short, fullName, class, status, live }, ... },
+---           counts = { inRaid, invited, notInvited, offline, total } }.
+--- `status` is the character's signup code (P/L/T/B/…) when known.
+--- opts is forwarded to GetEventInviteList (includeBench / sourceOverride).
+function WGS:BuildInviteSnapshot(event, opts)
+    local out = { rows = {}, counts = { inRaid = 0, invited = 0, notInvited = 0, offline = 0, total = 0 } }
+    if not event then return out end
+
+    local names = self:GetEventInviteList(event, opts) or {}
+    local roster = self:GetGuildRosterLookup() or {}
+    local groupSet = self:GetCurrentGroupShortNames()
+    local myShort = (self:GetPlayerKey() or ""):match("^([^%-]+)")
+
+    -- Signup status per short name (so a "Late" signup who's now in the
+    -- raid can show both dimensions).
+    local eventId = event.id or event.eventId
+    local statusByShort = {}
+    for _, s in ipairs(self.db.global.signups or {}) do
+        if s.eventId == eventId and s.characterName then
+            local sh = s.characterName:match("^([^%-]+)") or s.characterName
+            statusByShort[sh] = s.status
+        end
+    end
+
+    local seen = {}
+    for _, name in ipairs(names) do
+        local short = name:match("^([^%-]+)") or name
+        if short and not seen[short] then
+            seen[short] = true
+            local gi = roster[short]
+            local live
+            if groupSet[short] or short == myShort then
+                live = "in-raid";     out.counts.inRaid     = out.counts.inRaid + 1
+            elseif not (gi and gi.online) then
+                live = "offline";     out.counts.offline    = out.counts.offline + 1
+            elseif invitedThisSession[short] then
+                live = "invited";     out.counts.invited    = out.counts.invited + 1
+            else
+                live = "not-invited"; out.counts.notInvited = out.counts.notInvited + 1
+            end
+            out.counts.total = out.counts.total + 1
+            out.rows[#out.rows + 1] = {
+                short    = short,
+                fullName = (gi and gi.fullName) or name,
+                class    = gi and gi.class or nil,
+                status   = statusByShort[short],
+                live     = live,
+            }
+        end
+    end
+    return out
 end
 
 ---------------------------------------------------------------------------

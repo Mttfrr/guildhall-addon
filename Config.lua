@@ -43,6 +43,15 @@ local options = {
                     get = function() return WGS.db.profile.promptRaidTracking end,
                     set = function(_, val) WGS.db.profile.promptRaidTracking = val end,
                 },
+                autoSortGroups = {
+                    order = 11.7,
+                    type = "toggle",
+                    name = "Auto-Sort Into Comp Groups",
+                    desc = "As raiders accept and join a tracked raid, automatically move each newcomer into the subgroup your platform raid comp assigns them. Only touches fresh joiners (never reshuffles people you've moved by hand), and does nothing when the event has no comp with group assignments. The Events tab's \"Organize Groups\" button is the manual, sort-everyone version.",
+                    width = "full",
+                    get = function() return WGS.db.profile.autoSortGroups end,
+                    set = function(_, val) WGS.db.profile.autoSortGroups = val end,
+                },
                 autoTrackLoot = {
                     order = 12,
                     type = "toggle",

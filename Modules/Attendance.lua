@@ -150,6 +150,11 @@ function module:OnGroupRosterUpdate()
     -- fire while isTracking is still false.
     maybePromptRaidTracking()
 
+    -- Let any open Events tab re-render its live raid-status snapshot as
+    -- people accept invites / join / leave. Fired unconditionally (even
+    -- before tracking starts) since the snapshot is a forming-up tool.
+    WGS:FireEvent("WGS_GROUP_ROSTER_CHANGED")
+
     if not isTracking or not currentSession then return end
 
     local ok, members = pcall(WGS.GetRaidMembers, WGS)
@@ -177,6 +182,15 @@ function module:OnGroupRosterUpdate()
                 present = true,
                 late = isLate,
             }
+            -- Auto-place this fresh joiner into their planned comp group
+            -- (opt-in). Targeted to the new member only, so it never
+            -- reshuffles anyone the officer positioned by hand. No-ops
+            -- when there's no comp/group for them — bare joins fall back
+            -- to wherever WoW dropped them.
+            if WGS.db.profile.autoSortGroups and currentSession.eventId and WGS.PlaceRaiderInCompGroup then
+                local short = name:match("^([^%-]+)") or name
+                WGS:PlaceRaiderInCompGroup(short, currentSession.eventId)
+            end
         else
             currentSession.members[name].present = true
             currentSession.members[name].leftAt = nil
