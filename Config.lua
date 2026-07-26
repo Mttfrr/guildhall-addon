@@ -34,6 +34,15 @@ local options = {
                     get = function() return WGS.db.profile.autoTrackAttendance end,
                     set = function(_, val) WGS.db.profile.autoTrackAttendance = val end,
                 },
+                promptRaidTracking = {
+                    order = 11.5,
+                    type = "toggle",
+                    name = "Prompt to Track Scheduled Raids",
+                    desc = "When you join a raid group around a scheduled event's start time, pop a window asking whether to start attendance tracking. Only appears when a scheduled event matches.",
+                    width = "full",
+                    get = function() return WGS.db.profile.promptRaidTracking end,
+                    set = function(_, val) WGS.db.profile.promptRaidTracking = val end,
+                },
                 autoTrackLoot = {
                     order = 12,
                     type = "toggle",

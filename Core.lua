@@ -12,13 +12,20 @@ _G["GuildHall"] = WGS
 -- minAddonVersion check); the TOC field drives the packager + Wago
 -- listing. Diverging the two was a real bug in past releases — the
 -- TOC said 0.7.3 while runtime reported 0.7.0-beta.
-WGS.version = "0.7.5-beta"
+WGS.version = "0.7.6-beta"
 
 local dbDefaults = {
     profile = {
         minimap = { hide = false },
         autoTrackAttendance = true,
         autoTrackLoot = true,
+        -- Pop a "you're about to raid — start tracking?" window when you
+        -- form/join a raid group that lines up with a scheduled event.
+        -- A prompt, not the silent auto-start above: fires earlier (at
+        -- group formation, before you zone into the instance) and lets
+        -- officers who keep silent auto-track off still start with one
+        -- click. Dismissable; only shows when a scheduled event matches.
+        promptRaidTracking = true,
         guildGroupsOnly = true,
         guildWebId = "",
         showLootDistHelper = true,

@@ -129,6 +129,94 @@ describe("GetEventInviteList source preference", function()
     end)
 end)
 
+-- Regression for the "mass invite only works once" bug. The invited set
+-- used to be a permanent boolean, so a second Invite reported "all in"
+-- and re-invited nobody — even when people declined the first invite or
+-- reconnected. It's now a per-character timestamp with a re-invite
+-- cooldown: a follow-up invite inside the cooldown is a no-op (swallows
+-- accidental double-clicks), but once the cooldown lapses the stragglers
+-- get invited again.
+describe("AutoInvite re-invite cooldown", function()
+    local WGS
+    local invited
+    local fakeNow
+
+    local EVENT = { id = 1, title = "Raid" }
+
+    before_each(function()
+        WGS = helpers.setup()
+        invited = {}
+        fakeNow = 1000
+
+        -- Controllable frame clock so we can advance past the cooldown.
+        _G.GetTime = function() return fakeNow end
+        _G.IsInGuild = function() return true end
+        _G.IsInRaid = function() return false end       -- solo → lead check passes,
+        _G.IsInGroup = function() return false end       -- IsInCurrentGroup → false
+        _G.C_PartyInfo = { InviteUnit = function(name) table.insert(invited, name) end }
+
+        WGS.IsGuildOfficer = function() return true end
+        WGS.HasGroupLeadOrAssist = function() return true, nil end
+        WGS.GetPlayerKey = function() return "Me-Realm" end
+        WGS.GetRaidComp = function() return nil end       -- no comp → no auto-sort
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true, fullName = "Alpha-Realm" },
+                Bravo = { online = true, fullName = "Bravo-Realm" },
+            }
+        end
+        WGS.GetEventInviteList = function() return { "Alpha", "Bravo" }, "signups" end
+    end)
+
+    it("invites everyone on the first call", function()
+        WGS:AutoInvite(EVENT)
+        table.sort(invited)
+        assert.same({ "Alpha-Realm", "Bravo-Realm" }, invited)
+    end)
+
+    it("does NOT re-invite within the cooldown (anti double-click)", function()
+        WGS:AutoInvite(EVENT)
+        fakeNow = fakeNow + 5    -- 5s later, well inside the 30s cooldown
+        WGS:AutoInvite(EVENT)
+        assert.are.equal(2, #invited,
+            "a second invite inside the cooldown must be a no-op")
+    end)
+
+    it("re-invites people not in the group once the cooldown lapses", function()
+        WGS:AutoInvite(EVENT)
+        assert.are.equal(2, #invited)
+        fakeNow = fakeNow + 31   -- past the 30s cooldown
+        WGS:AutoInvite(EVENT)
+        assert.are.equal(4, #invited,
+            "after the cooldown, a follow-up mass-invite reaches the stragglers again")
+    end)
+
+    it("invites a freshly-reconnected member who was offline on the first pass", function()
+        -- Bravo is offline for the first invite, so they're never marked.
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true,  fullName = "Alpha-Realm" },
+                Bravo = { online = false, fullName = "Bravo-Realm" },
+            }
+        end
+        WGS:AutoInvite(EVENT)
+        assert.same({ "Alpha-Realm" }, invited)
+
+        -- Bravo reconnects; re-invite immediately (no cooldown ever recorded).
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true, fullName = "Alpha-Realm" },
+                Bravo = { online = true, fullName = "Bravo-Realm" },
+            }
+        end
+        fakeNow = fakeNow + 2    -- still inside Alpha's cooldown
+        WGS:AutoInvite(EVENT)
+        table.sort(invited)
+        assert.same({ "Alpha-Realm", "Bravo-Realm" }, invited,
+            "reconnected member is invited even though Alpha is still on cooldown")
+    end)
+end)
+
 describe("Import: signups roundtrip into db.global", function()
     local WGS
 

@@ -37,4 +37,10 @@ L["SORT_NONE"]         = "All players already in correct groups."
 L["ATTENDANCE_NOT_RECORDING"] = "Attendance: not recording."
 L["ATTENDANCE_RECORDING"]     = "Attendance: recording since %s (%s)."
 
+-- "You're about to raid — start tracking?" prompt (UI/RaidTrackingPrompt).
+-- %s is the scheduled event's title.
+L["TRACK_PROMPT_TEXT"]    = "You're about to raid |cffffd100%s|r.\nStart attendance tracking?"
+L["TRACK_PROMPT_ACCEPT"]  = "Start Tracking"
+L["TRACK_PROMPT_DECLINE"] = "Not Now"
+
 GuildHall_L = L

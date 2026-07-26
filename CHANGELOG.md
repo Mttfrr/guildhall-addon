@@ -2,7 +2,19 @@
 
 All notable changes to GuildHall will be documented in this file.
 
-## [0.7.5-beta] — 2026-06-06
+## [0.7.6-beta] — 2026-07-26
+
+Two raid-night quality-of-life fixes: a nudge to start attendance tracking
+when a scheduled raid is about to begin, and a fix for the mass-invite
+button silently refusing to re-invite stragglers.
+
+### What's New
+
+- **"You're about to raid — start tracking?" prompt.** When you form or join a raid group whose start time lines up with a scheduled event, a small window now pops up offering to start attendance tracking with one click. It fires at **group formation** — earlier than the existing silent auto-start, which only kicks in when you actually zone into the raid instance — so officers who keep silent auto-track off get a low-friction way in, and everyone gets a visible confirmation that tracking is (about to be) live. Only appears when exactly one scheduled event falls inside the auto window (`FindActiveScheduledEvent`), so it never nags on ad-hoc runs; respects `Guild Groups Only`; shows once per raid (re-arms when you leave). Accepting routes through the same `StartAttendanceAutoTagged` path as the silent auto-start, so the session is tagged to the event identically. New toggle **Settings → Prompt to Track Scheduled Raids** (on by default). Decision logic lives in `WGS:ShouldPromptRaidTracking`; the popup in `UI/RaidTrackingPrompt.lua`. 10 new specs cover the predicate + the once-per-raid dedup/re-arm glue.
+
+### Fixed
+
+- **Mass invite now re-invites people who declined or reconnected.** The Invite button worked once, then reported *"All members are already in group or offline"* and quietly invited nobody on the second press — so raiders who declined the first invite, let it expire, or disconnected-and-reconnected could never be pulled in without a `/reload`. Root cause: the invited-set in `Modules/EventScheduler.lua` was a **permanent boolean** — once a character was invited, they were marked forever. It's now a per-character **timestamp with a 30-second re-invite cooldown**: a second press inside the cooldown is still a no-op (so an accidental double-click doesn't fire 25 duplicate invite popups), but once the cooldown lapses, pressing Invite again reaches everyone who still isn't in the group. Members who were offline on the first pass were never marked, so they're invited the instant they reconnect. 4 new specs lock the first-invite, in-cooldown no-op, post-cooldown re-invite, and reconnect paths.
 
 Post-feedback follow-up to 0.7.4-beta. Critical right-click menu bug fixes
 (the EasyMenu → MenuUtil migration in 0.7.4-beta opened menus correctly

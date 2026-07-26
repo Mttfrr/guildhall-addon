@@ -17,7 +17,29 @@ local COMMITTED_SIGNUP_STATUSES = { P = true, L = true, B = true, LT = true }
 -- in the raid so calling it too early is a no-op.
 local SORT_AFTER_INVITE_DELAY = 5
 
-local invitedThisSession = {}
+-- Re-invite cooldown (seconds). We remember when each character was last
+-- invited so a rapid double-click doesn't fire a second invite popup at
+-- everyone. But the memory MUST expire: once the cooldown lapses, hitting
+-- Invite again re-invites anyone who still isn't in the group — the
+-- common "3 people were reconnecting / declined the first invite, invite
+-- them again" flow. Before this, the marker was a permanent boolean so
+-- the second mass-invite reported "all in" and silently invited nobody.
+-- 30s is long enough to swallow an accidental double-click yet short
+-- enough that a deliberate "grab the stragglers" re-invite lands promptly.
+local INVITE_REINVITE_COOLDOWN = 30
+
+-- character short-name → GetTime() timestamp of the last invite we fired.
+local lastInviteAt = {}
+
+-- Monotonic clock for the re-invite cooldown. GetTime() is the frame
+-- timer (seconds since client start) — monotonic and immune to the
+-- system clock, exactly what a cooldown wants. Falls back to time() when
+-- GetTime is unavailable (never in-game; keeps the module loadable under
+-- the test harness, which doesn't stub GetTime).
+local function inviteClock()
+    if GetTime then return GetTime() end
+    return time()
+end
 
 function module:OnEnable()
     self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
@@ -278,14 +300,21 @@ function WGS:AutoInvite(eventOverride, opts)
     -- Fire invites in a single tick. The previous 3s-per-invite stagger
     -- meant a 25-person raid took 75 seconds to start; WoW handles a
     -- burst of InviteUnit calls fine in practice.
+    local nowClock = inviteClock()
     for _, name in ipairs(names) do
         local short = name:match("^([^%-]+)")
-        if short and not invitedThisSession[short] then
+        -- Skip only if we invited this character within the cooldown —
+        -- an expired (or missing) marker means they're fair game again,
+        -- so a follow-up mass-invite reaches people who reconnected or
+        -- let the first invite lapse.
+        local lastAt = short and lastInviteAt[short]
+        local onCooldown = lastAt and (nowClock - lastAt) < INVITE_REINVITE_COOLDOWN
+        if short and not onCooldown then
             local gi = roster[short]
             if gi and gi.online and gi.fullName ~= myKey then
                 -- Skip if already in group
                 if not module:IsInCurrentGroup(gi.fullName) then
-                    invitedThisSession[short] = true
+                    lastInviteAt[short] = nowClock
                     invited = invited + 1
                     C_PartyInfo.InviteUnit(gi.fullName)
                 end
