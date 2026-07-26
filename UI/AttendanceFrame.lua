@@ -8,60 +8,17 @@ local WGS = GuildHall
 -- is what's left — still useful as the one end-of-raid prompt that
 -- nudges the officer to paste the export string into the web app.
 --
+-- The popup chrome itself lives in the shared WGS:ShowActionDialog
+-- builder (UI/UIHelpers.lua) so this reminder and the raid-start
+-- tracking prompt read identically — one panel style for every
+-- GuildHall nudge.
+--
 -- File name kept (`AttendanceFrame.lua`) instead of renamed to
 -- `ExportReminder.lua` to avoid churning UI.xml + the .toc.
 
 ---------------------------------------------------------------------------
 -- Export Reminder popup (shown at end of raid)
 ---------------------------------------------------------------------------
-local reminderFrame = nil
-
-local function CreateExportReminder()
-    local f = CreateFrame("Frame", "GuildHallExportReminder", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(340, 200)
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
-
-    f.TitleBg:SetHeight(30)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
-    f.title:SetText("|cffffd100GuildHall: Raid Over!|r")
-
-    -- Summary text
-    f.summary = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    f.summary:SetPoint("TOPLEFT", f, "TOPLEFT", 15, -40)
-    f.summary:SetPoint("TOPRIGHT", f, "TOPRIGHT", -15, -40)
-    f.summary:SetJustifyH("LEFT")
-    f.summary:SetJustifyV("TOP")
-    f.summary:SetWordWrap(true)
-
-    -- Export Now button
-    local btnExport = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnExport:SetSize(140, 30)
-    btnExport:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 15, 12)
-    btnExport:SetText("Export Now")
-    btnExport:SetScript("OnClick", function()
-        f:Hide()
-        WGS:ShowExportFrame()
-    end)
-
-    -- Dismiss button
-    local btnDismiss = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnDismiss:SetSize(140, 30)
-    btnDismiss:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -15, 12)
-    btnDismiss:SetText("Later")
-    btnDismiss:SetScript("OnClick", function()
-        f:Hide()
-    end)
-
-    f:Hide()
-    return f
-end
 
 function WGS:ShowExportReminder()
     local db = self.db.global
@@ -74,10 +31,6 @@ function WGS:ShowExportReminder()
 
     if lootCount == 0 and attendCount == 0 and txCount == 0 and goldChanges == 0 then
         return -- nothing to export
-    end
-
-    if not reminderFrame then
-        reminderFrame = CreateExportReminder()
     end
 
     -- Build summary
@@ -100,6 +53,12 @@ function WGS:ShowExportReminder()
     table.insert(lines, " ")
     table.insert(lines, "Export now so your guild web app stays up to date!")
 
-    reminderFrame.summary:SetText(table.concat(lines, "\n"))
-    reminderFrame:Show()
+    self:ShowActionDialog({
+        key         = "export",
+        title       = "|cffffd100GuildHall: Raid Over!|r",
+        body        = table.concat(lines, "\n"),
+        acceptText  = "Export Now",
+        onAccept    = function() WGS:ShowExportFrame() end,
+        declineText = "Later",
+    })
 end
