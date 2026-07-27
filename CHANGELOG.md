@@ -16,6 +16,7 @@ raid at a glance, and drop raiders into their planned comp groups.
 ### Changed
 
 - **Mass invite no longer has any cooldown — press it as often as you want.** 0.7.6-beta fixed the "invite only works once" bug with a 30-second re-invite cooldown; that still made you wait. Gone: the *only* thing Invite skips now is people already in the group, so every press (re-)invites everyone online who isn't in yet — declined, reconnected, or just slow to accept. The record of who's been invited is kept purely to drive the Raid Status snapshot's "waiting" vs "to invite" split (`WGS:HasInvited`), and clears when you drop to solo. 4 new specs; `BuildInviteSnapshot` + `SortRaidGroups` override + `PlaceRaiderInCompGroup` covered by 10 more.
+- **Localized the new + touched prompt strings.** The Raid Status section (header, status buckets, count summary), the Organize Groups button, the raid-start prompt title/fallback, and the end-of-raid Export reminder (title, buttons, body lines) all route through `Locales/enUS.lua` now instead of hardcoded English — so translators have a single place to add other locales. (Config option labels remain inline, matching the rest of `Config.lua`.)
 
 ## [0.7.6-beta] — 2026-07-26
 

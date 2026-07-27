@@ -1,5 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
+local L = GuildHall_L
 local ui = WGS._ui
 
 -- Events detail panel: right-hand side of the master-detail Events tab.
@@ -350,10 +351,10 @@ end
 -- Bucket render order: gaps the officer can act on come first, "in raid"
 -- (done) last. label + colour per live-state.
 local RAID_STATUS_BUCKETS = {
-    { key = "not-invited", label = "Not invited",       color = "ffffd100" },
-    { key = "invited",     label = "Invited (waiting)", color = "ffffa040" },
-    { key = "offline",     label = "Offline",           color = "ffff5555" },
-    { key = "in-raid",     label = "In raid",           color = "ff55dd55" },
+    { key = "not-invited", label = L["RAID_STATUS_NOT_INVITED"], color = "ffffd100" },
+    { key = "invited",     label = L["RAID_STATUS_INVITED"],     color = "ffffa040" },
+    { key = "offline",     label = L["RAID_STATUS_OFFLINE"],     color = "ffff5555" },
+    { key = "in-raid",     label = L["RAID_STATUS_IN_RAID"],     color = "ff55dd55" },
 }
 
 local function PopulateRaidStatusSection(content, anchor, ev, width)
@@ -361,13 +362,12 @@ local function PopulateRaidStatusSection(content, anchor, ev, width)
     local snap = WGS.BuildInviteSnapshot and WGS:BuildInviteSnapshot(ev) or nil
     if not snap or snap.counts.total == 0 then return anchor end
 
-    local header = BuildSectionHeader(content, anchor, "Raid Status", width)
+    local header = BuildSectionHeader(content, anchor, L["RAID_STATUS_HEADER"], width)
 
     local c = snap.counts
     local summary = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     summary:SetPoint("LEFT", header, "RIGHT", 12, 0)
-    summary:SetText(string.format(
-        "|cff55dd55%d in|r \194\183 |cffffa040%d waiting|r \194\183 |cffffd100%d to invite|r \194\183 |cffff5555%d offline|r",
+    summary:SetText(string.format(L["RAID_STATUS_SUMMARY"],
         c.inRaid, c.invited, c.notInvited, c.offline))
 
     -- Bucket the rows by live-state.
@@ -412,7 +412,7 @@ local function PopulateRaidStatusSection(content, anchor, ev, width)
         local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
         btn:SetSize(150, 22)
         btn:SetPoint("TOPLEFT", last, "BOTTOMLEFT", (last == header) and 0 or -12, -8)
-        btn:SetText("Organize Groups")
+        btn:SetText(L["ORGANIZE_GROUPS"])
         btn:SetScript("OnClick", function()
             if WGS.SortRaidGroups then WGS:SortRaidGroups(ev) end
         end)

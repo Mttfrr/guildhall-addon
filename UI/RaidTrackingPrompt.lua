@@ -19,10 +19,10 @@ local L = GuildHall_L
 -- the decision to call it lives in Attendance.lua.
 function WGS:ShowRaidTrackingPrompt(event)
     local title = (event and event.title and event.title ~= "" and event.title)
-        or "your scheduled raid"
+        or L["TRACK_PROMPT_FALLBACK"]
     self:ShowActionDialog({
         key         = "raidtrack",
-        title       = "|cffffd100GuildHall: Raid Starting|r",
+        title       = L["TRACK_PROMPT_TITLE"],
         body        = string.format(L["TRACK_PROMPT_TEXT"], title),
         acceptText  = L["TRACK_PROMPT_ACCEPT"],
         -- Same entry point as the silent auto-start, so the session is

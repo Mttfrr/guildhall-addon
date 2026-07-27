@@ -1,5 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
+local L = GuildHall_L
 
 -- This file used to hold a 60×180 "Tracking" HUD anchored TOPRIGHT that
 -- showed live member count + raid duration. Attendance capture became
@@ -35,30 +36,31 @@ function WGS:ShowExportReminder()
 
     -- Build summary
     local lines = {}
-    table.insert(lines, "You have unsent data from this raid:")
+    table.insert(lines, L["EXPORT_REMINDER_INTRO"])
     table.insert(lines, " ")
     if lootCount > 0 then
-        table.insert(lines, "|cffffd100Loot:|r " .. lootCount .. " items")
+        table.insert(lines, string.format(L["EXPORT_REMINDER_LOOT"], lootCount))
     end
     if attendCount > 0 then
-        table.insert(lines, "|cffffd100Attendance:|r " .. attendCount .. " session(s)")
+        table.insert(lines, string.format(L["EXPORT_REMINDER_ATTEND"], attendCount))
     end
     if txCount > 0 then
-        table.insert(lines, "|cffffd100Bank Transactions:|r " .. txCount)
+        table.insert(lines, string.format(L["EXPORT_REMINDER_BANK"], txCount))
     end
     if goldChanges > 0 then
         local goldStr = self:GetGuildGoldFormatted()
-        table.insert(lines, "|cffffd100Gold Snapshots:|r " .. goldChanges .. (goldStr and (" (" .. goldStr .. ")") or ""))
+        table.insert(lines, string.format(L["EXPORT_REMINDER_GOLD"],
+            goldChanges, goldStr and (" (" .. goldStr .. ")") or ""))
     end
     table.insert(lines, " ")
-    table.insert(lines, "Export now so your guild web app stays up to date!")
+    table.insert(lines, L["EXPORT_REMINDER_FOOTER"])
 
     self:ShowActionDialog({
         key         = "export",
-        title       = "|cffffd100GuildHall: Raid Over!|r",
+        title       = L["EXPORT_REMINDER_TITLE"],
         body        = table.concat(lines, "\n"),
-        acceptText  = "Export Now",
+        acceptText  = L["EXPORT_NOW"],
         onAccept    = function() WGS:ShowExportFrame() end,
-        declineText = "Later",
+        declineText = L["LATER"],
     })
 end
