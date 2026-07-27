@@ -143,6 +143,22 @@ local function maybePromptRaidTracking()
 end
 WGS._MaybePromptRaidTracking = maybePromptRaidTracking   -- exposed for tests
 
+-- Debounced WGS_GROUP_ROSTER_CHANGED emit. GROUP_ROSTER_UPDATE fires in
+-- bursts — a 25-person invite lands dozens of times in a few seconds —
+-- and every fire drives a full Events-tab re-render on any open frame.
+-- Coalesce to one emit per settle window so the burst is a single
+-- refresh, not thirty. Matches the addon's existing GROUP_ROSTER_UPDATE
+-- debounce convention (Modules/GuildBank.lua, Modules/PeerSync.lua).
+local ROSTER_CHANGED_DEBOUNCE = 0.4
+local pendingRosterChanged = nil
+local function fireRosterChangedDebounced()
+    if pendingRosterChanged then pendingRosterChanged:Cancel() end
+    pendingRosterChanged = C_Timer.NewTimer(ROSTER_CHANGED_DEBOUNCE, function()
+        pendingRosterChanged = nil
+        WGS:FireEvent("WGS_GROUP_ROSTER_CHANGED")
+    end)
+end
+
 function module:OnGroupRosterUpdate()
     -- Nudge: if we just formed/joined a raid that lines up with a
     -- scheduled event and we're not already tracking, offer to start
@@ -153,7 +169,8 @@ function module:OnGroupRosterUpdate()
     -- Let any open Events tab re-render its live raid-status snapshot as
     -- people accept invites / join / leave. Fired unconditionally (even
     -- before tracking starts) since the snapshot is a forming-up tool.
-    WGS:FireEvent("WGS_GROUP_ROSTER_CHANGED")
+    -- Debounced — a burst of joins coalesces into one refresh.
+    fireRosterChangedDebounced()
 
     if not isTracking or not currentSession then return end
 
