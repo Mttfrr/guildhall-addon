@@ -8,6 +8,13 @@ local module = WGS:NewModule("Attendance", "AceEvent-3.0")
 local isTracking = false
 local currentSession = nil
 
+-- Once-per-raid guard for the "you're about to raid — start tracking?"
+-- prompt. GROUP_ROSTER_UPDATE fires on every roster change (each person
+-- who joins), so without this the prompt would re-open on every tick.
+-- Reset when the player is no longer in a raid so the next raid formation
+-- can prompt again.
+local raidTrackingPromptShown = false
+
 -- Maximum age (seconds) for a stashed activeSession to be rehydrated on
 -- addon load. Anything older is treated as orphan — the user almost
 -- certainly logged off mid-raid and only came back the next day, so
@@ -90,7 +97,81 @@ function WGS:StartAttendanceAutoTagged()
     self:StartAttendanceForTeam(teamId, teamName, event)
 end
 
+---------------------------------------------------------------------------
+-- "You're about to raid — start tracking?" prompt
+---------------------------------------------------------------------------
+
+--- Decide whether to offer the start-tracking prompt right now. Returns
+--- the matching scheduled event when every condition holds, or nil.
+---
+--- Conditions:
+---   * The prompt setting is enabled (db.profile.promptRaidTracking).
+---   * We're in a raid (the user "moved to a raid group").
+---   * We're not already tracking — nothing to prompt for.
+---   * guildGroupsOnly is respected, same as the silent auto-start.
+---   * Exactly one scheduled event falls in the auto window (reuses
+---     FindActiveScheduledEvent, so ambiguous/no match → no prompt).
+---
+--- Pure enough to unit-test: pass `now` to pin the window.
+function WGS:ShouldPromptRaidTracking(now)
+    if not self.db.profile.promptRaidTracking then return nil end
+    if not IsInRaid() then return nil end
+    if self:IsTrackingAttendance() then return nil end
+    if self.db.profile.guildGroupsOnly and not self:IsGuildGroup() then return nil end
+    return self:FindActiveScheduledEvent(now)
+end
+
+-- Glue: enforce the once-per-raid guard, then hand off to the UI popup
+-- (UI/RaidTrackingPrompt.lua). The display call is nil-guarded so the
+-- module stays loadable/testable without the UI layer — same pattern as
+-- the other module→UI hand-offs (WGS.AutoInvite, WGS.ShowExportReminder).
+-- Exposed as WGS._MaybePromptRaidTracking for the test harness.
+local function maybePromptRaidTracking()
+    if not IsInRaid() then
+        raidTrackingPromptShown = false   -- left the raid — re-arm
+        return
+    end
+    if raidTrackingPromptShown then return end
+
+    local event = WGS:ShouldPromptRaidTracking()
+    if not event then return end
+
+    raidTrackingPromptShown = true
+    if WGS.ShowRaidTrackingPrompt then
+        WGS:ShowRaidTrackingPrompt(event)
+    end
+end
+WGS._MaybePromptRaidTracking = maybePromptRaidTracking   -- exposed for tests
+
+-- Debounced WGS_GROUP_ROSTER_CHANGED emit. GROUP_ROSTER_UPDATE fires in
+-- bursts — a 25-person invite lands dozens of times in a few seconds —
+-- and every fire drives a full Events-tab re-render on any open frame.
+-- Coalesce to one emit per settle window so the burst is a single
+-- refresh, not thirty. Matches the addon's existing GROUP_ROSTER_UPDATE
+-- debounce convention (Modules/GuildBank.lua, Modules/PeerSync.lua).
+local ROSTER_CHANGED_DEBOUNCE = 0.4
+local pendingRosterChanged = nil
+local function fireRosterChangedDebounced()
+    if pendingRosterChanged then pendingRosterChanged:Cancel() end
+    pendingRosterChanged = C_Timer.NewTimer(ROSTER_CHANGED_DEBOUNCE, function()
+        pendingRosterChanged = nil
+        WGS:FireEvent("WGS_GROUP_ROSTER_CHANGED")
+    end)
+end
+
 function module:OnGroupRosterUpdate()
+    -- Nudge: if we just formed/joined a raid that lines up with a
+    -- scheduled event and we're not already tracking, offer to start
+    -- tracking. Runs before the tracking early-return so the prompt can
+    -- fire while isTracking is still false.
+    maybePromptRaidTracking()
+
+    -- Let any open Events tab re-render its live raid-status snapshot as
+    -- people accept invites / join / leave. Fired unconditionally (even
+    -- before tracking starts) since the snapshot is a forming-up tool.
+    -- Debounced — a burst of joins coalesces into one refresh.
+    fireRosterChangedDebounced()
+
     if not isTracking or not currentSession then return end
 
     local ok, members = pcall(WGS.GetRaidMembers, WGS)
@@ -118,6 +199,15 @@ function module:OnGroupRosterUpdate()
                 present = true,
                 late = isLate,
             }
+            -- Auto-place this fresh joiner into their planned comp group
+            -- (opt-in). Targeted to the new member only, so it never
+            -- reshuffles anyone the officer positioned by hand. No-ops
+            -- when there's no comp/group for them — bare joins fall back
+            -- to wherever WoW dropped them.
+            if WGS.db.profile.autoSortGroups and currentSession.eventId and WGS.PlaceRaiderInCompGroup then
+                local short = name:match("^([^%-]+)") or name
+                WGS:PlaceRaiderInCompGroup(short, currentSession.eventId)
+            end
         else
             currentSession.members[name].present = true
             currentSession.members[name].leftAt = nil

@@ -2,7 +2,39 @@
 
 All notable changes to GuildHall will be documented in this file.
 
-## [0.7.5-beta] — 2026-06-06
+## [0.7.7-beta] — 2026-07-26
+
+Raid-forming tools: invite as often as you like, see who's actually in the
+raid at a glance, and drop raiders into their planned comp groups.
+
+### What's New
+
+- **Raid Status snapshot on the Events detail panel.** While you're in a group, a new "Raid Status" section shows every expected raider bucketed by live state — **In raid** (accepted), **Invited (waiting)** (invite fired, not joined yet), **Not invited** (online, no invite sent), and **Offline** — with a one-line count summary (`18 in · 2 waiting · 0 to invite · 3 offline`). No more eyeballing 20 unit frames against the roster to see who still needs chasing. Names are class-coloured; it re-renders live as people accept/join/leave (new internal `WGS_GROUP_ROSTER_CHANGED` refresh signal, debounced ~0.4s so a burst of invites coalesces into a single refresh — same `GROUP_ROSTER_UPDATE` storm-guard the bank/peer-sync modules already use). Data comes from `WGS:BuildInviteSnapshot`. The section renders nothing pre-raid, so the panel is unchanged when you're not grouped.
+- **"Organize Groups" button.** In the Raid Status section (shown in a raid when the event has a planned comp), one click sorts everyone into the subgroups your platform raid comp assigns — the base64-imported comp is the source of truth. Wraps the existing `/gh sortgroups` logic; `WGS:SortRaidGroups` now takes an event override so the button targets the event you're viewing rather than whatever "today" resolves to.
+- **Auto-sort into comp groups as raiders accept.** New setting **Auto-Sort Into Comp Groups** (on by default): while tracking a raid, each newcomer is dropped into their planned comp subgroup the moment they join. Targeted to fresh joiners only, so it never reshuffles anyone you positioned by hand; no-ops when the event has no comp with group assignments (bare joins stay where they land). The "Organize Groups" button is the manual, sort-everyone counterpart.
+
+### Changed
+
+- **Mass invite no longer has any cooldown — press it as often as you want.** 0.7.6-beta fixed the "invite only works once" bug with a 30-second re-invite cooldown; that still made you wait. Gone: the *only* thing Invite skips now is people already in the group, so every press (re-)invites everyone online who isn't in yet — declined, reconnected, or just slow to accept. The record of who's been invited is kept purely to drive the Raid Status snapshot's "waiting" vs "to invite" split (`WGS:HasInvited`), and clears when you drop to solo. 4 new specs; `BuildInviteSnapshot` + `SortRaidGroups` override + `PlaceRaiderInCompGroup` covered by 10 more.
+- **Localized the new + touched prompt strings.** The Raid Status section (header, status buckets, count summary), the Organize Groups button, the raid-start prompt title/fallback, and the end-of-raid Export reminder (title, buttons, body lines) all route through `Locales/enUS.lua` now instead of hardcoded English — so translators have a single place to add other locales. (Config option labels remain inline, matching the rest of `Config.lua`.)
+
+## [0.7.6-beta] — 2026-07-26
+
+Two raid-night quality-of-life fixes: a nudge to start attendance tracking
+when a scheduled raid is about to begin, and a fix for the mass-invite
+button silently refusing to re-invite stragglers.
+
+### What's New
+
+- **"You're about to raid — start tracking?" prompt.** When you form or join a raid group whose start time lines up with a scheduled event, a small window now pops up offering to start attendance tracking with one click. It fires at **group formation** — earlier than the existing silent auto-start, which only kicks in when you actually zone into the raid instance — so officers who keep silent auto-track off get a low-friction way in, and everyone gets a visible confirmation that tracking is (about to be) live. Only appears when exactly one scheduled event falls inside the auto window (`FindActiveScheduledEvent`), so it never nags on ad-hoc runs; respects `Guild Groups Only`; shows once per raid (re-arms when you leave). Accepting routes through the same `StartAttendanceAutoTagged` path as the silent auto-start, so the session is tagged to the event identically. New toggle **Settings → Prompt to Track Scheduled Raids** (on by default). The window uses the **same panel as the end-of-raid "Export Now" reminder** (see below), so every GuildHall prompt reads consistently. Decision logic lives in `WGS:ShouldPromptRaidTracking`; the popup in `UI/RaidTrackingPrompt.lua`. 10 new specs cover the predicate + the once-per-raid dedup/re-arm glue.
+
+### Changed
+
+- **Shared "nudge" dialog for one-off prompts.** Extracted the end-of-raid **Export Now** reminder's panel into a reusable `WGS:ShowActionDialog{ key, title, body, acceptText, onAccept, declineText, onDecline }` builder (`UI/UIHelpers.lua`) — a movable framed panel with a gold title, wrapped body, primary action bottom-left and dismiss bottom-right. The export reminder and the new raid-start tracking prompt both render through it, so they're visually identical instead of the prompt being a bespoke `StaticPopup`. Future one-off prompts should reach for this instead of hand-rolling a frame. 4 new specs lock both consumers to the shared builder.
+
+### Fixed
+
+- **Mass invite now re-invites people who declined or reconnected.** The Invite button worked once, then reported *"All members are already in group or offline"* and quietly invited nobody on the second press — so raiders who declined the first invite, let it expire, or disconnected-and-reconnected could never be pulled in without a `/reload`. Root cause: the invited-set in `Modules/EventScheduler.lua` was a **permanent boolean** — once a character was invited, they were marked forever. It's now a per-character **timestamp with a 30-second re-invite cooldown**: a second press inside the cooldown is still a no-op (so an accidental double-click doesn't fire 25 duplicate invite popups), but once the cooldown lapses, pressing Invite again reaches everyone who still isn't in the group. Members who were offline on the first pass were never marked, so they're invited the instant they reconnect. 4 new specs lock the first-invite, in-cooldown no-op, post-cooldown re-invite, and reconnect paths.
 
 Post-feedback follow-up to 0.7.4-beta. Critical right-click menu bug fixes
 (the EasyMenu → MenuUtil migration in 0.7.4-beta opened menus correctly

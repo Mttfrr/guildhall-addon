@@ -461,3 +461,103 @@ describe("attendance /reload survival", function()
         assert.are.equal(0, #WGS._printed)
     end)
 end)
+
+-- "You're about to raid — start tracking?" prompt. Fires when the player
+-- moves into a raid group that lines up with a scheduled event, offering
+-- one-click attendance tracking. The decision lives in
+-- WGS:ShouldPromptRaidTracking; the once-per-raid dedup + UI hand-off in
+-- the WGS._MaybePromptRaidTracking glue.
+describe("WGS:ShouldPromptRaidTracking", function()
+    local WGS
+    local NOW = 1700000000
+
+    before_each(function()
+        WGS = helpers.setup()
+        WGS.db.profile.promptRaidTracking = true
+        _G.IsInRaid = function() return true end
+        WGS.IsGuildGroup = function() return true end
+        WGS.db.global.events = {
+            { id = 5, team_id = 9, title = "Tuesday", start_ts = NOW },  -- starts now
+        }
+    end)
+
+    it("returns the matching event when every condition holds", function()
+        local ev = WGS:ShouldPromptRaidTracking(NOW)
+        assert.is_not_nil(ev)
+        assert.are.equal(5, ev.id)
+    end)
+
+    it("returns nil when the setting is off", function()
+        WGS.db.profile.promptRaidTracking = false
+        assert.is_nil(WGS:ShouldPromptRaidTracking(NOW))
+    end)
+
+    it("returns nil when not in a raid", function()
+        _G.IsInRaid = function() return false end
+        assert.is_nil(WGS:ShouldPromptRaidTracking(NOW))
+    end)
+
+    it("returns nil when attendance is already being tracked", function()
+        WGS.IsTrackingAttendance = function() return true end
+        assert.is_nil(WGS:ShouldPromptRaidTracking(NOW))
+    end)
+
+    it("returns nil when no scheduled event is inside the window", function()
+        WGS.db.global.events = {
+            { id = 6, title = "Way later", start_ts = NOW + 3 * 60 * 60 },
+        }
+        assert.is_nil(WGS:ShouldPromptRaidTracking(NOW))
+    end)
+
+    it("returns nil for a non-guild group when guildGroupsOnly is set", function()
+        WGS.db.profile.guildGroupsOnly = true
+        WGS.IsGuildGroup = function() return false end
+        assert.is_nil(WGS:ShouldPromptRaidTracking(NOW))
+    end)
+end)
+
+describe("raid-tracking prompt glue (_MaybePromptRaidTracking)", function()
+    local WGS
+    local shownFor
+
+    before_each(function()
+        WGS = helpers.setup()
+        WGS.db.profile.promptRaidTracking = true
+        shownFor = {}
+        WGS.ShowRaidTrackingPrompt = function(_, ev) table.insert(shownFor, ev) end
+        _G.IsInRaid = function() return true end
+        WGS.IsGuildGroup = function() return true end
+        WGS.db.global.events = {
+            { id = 5, title = "Tuesday", start_ts = os.time() },   -- starts now
+        }
+    end)
+
+    it("shows the prompt once when a raid forms near a scheduled event", function()
+        WGS:_MaybePromptRaidTracking()
+        assert.are.equal(1, #shownFor)
+        assert.are.equal(5, shownFor[1].id)
+    end)
+
+    it("does not re-show on subsequent roster updates (once-per-raid)", function()
+        WGS:_MaybePromptRaidTracking()
+        WGS:_MaybePromptRaidTracking()
+        WGS:_MaybePromptRaidTracking()
+        assert.are.equal(1, #shownFor, "prompt must show only once per raid")
+    end)
+
+    it("re-arms after the player leaves the raid", function()
+        WGS:_MaybePromptRaidTracking()
+        assert.are.equal(1, #shownFor)
+        _G.IsInRaid = function() return false end   -- leave the raid → guard resets
+        WGS:_MaybePromptRaidTracking()
+        _G.IsInRaid = function() return true end    -- new raid formation
+        WGS:_MaybePromptRaidTracking()
+        assert.are.equal(2, #shownFor, "a fresh raid formation should prompt again")
+    end)
+
+    it("shows nothing when the setting is off", function()
+        WGS.db.profile.promptRaidTracking = false
+        WGS:_MaybePromptRaidTracking()
+        assert.are.equal(0, #shownFor)
+    end)
+end)

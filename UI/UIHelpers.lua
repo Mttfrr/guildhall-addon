@@ -82,6 +82,92 @@ function ui.CreateImportHint(parent, primary, x, y)
     return fs
 end
 
+---------------------------------------------------------------------------
+-- Reusable action dialog — the shared "nudge" panel
+---------------------------------------------------------------------------
+--
+-- One chrome for every "here's something — want to act on it?" popup so
+-- they all read identically: a movable BasicFrameTemplateWithInset panel
+-- with a gold title, a wrapped body, a primary action button bottom-left
+-- and a dismiss button bottom-right. Consumers: the end-of-raid export
+-- reminder (UI/AttendanceFrame.lua) and the raid-start tracking prompt
+-- (UI/RaidTrackingPrompt.lua). Add future one-off prompts here instead of
+-- hand-rolling another frame or reaching for the plain StaticPopup — that
+-- keeps every GuildHall pop-up visually consistent.
+
+local function createActionDialogFrame(name)
+    local f = CreateFrame("Frame", name, UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(340, 200)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+
+    f.TitleBg:SetHeight(30)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    f.title:SetPoint("TOPLEFT", f.TitleBg, "TOPLEFT", 5, -3)
+
+    f.body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.body:SetPoint("TOPLEFT", f, "TOPLEFT", 15, -40)
+    f.body:SetPoint("TOPRIGHT", f, "TOPRIGHT", -15, -40)
+    f.body:SetJustifyH("LEFT")
+    f.body:SetJustifyV("TOP")
+    f.body:SetWordWrap(true)
+
+    f.primary = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.primary:SetSize(140, 30)
+    f.primary:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 15, 12)
+
+    f.secondary = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.secondary:SetSize(140, 30)
+    f.secondary:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -15, 12)
+
+    f:Hide()
+    return f
+end
+
+-- key → frame singleton. Same key reuses the frame across shows (these
+-- prompts re-open many times over a session; one frame each).
+local actionDialogs = {}
+
+--- Show a shared action dialog. opts:
+---   key         (string, required) — singleton id; identifies the frame
+---   title       (string)           — title-bar text (colour it yourself)
+---   body        (string)           — wrapped body text
+---   acceptText  (string)           — primary button label
+---   onAccept    (function|nil)     — primary click (frame hides first)
+---   declineText (string)           — dismiss button label (default "Later")
+---   onDecline   (function|nil)     — dismiss click (frame hides first)
+--- Returns the frame so a caller can tweak it if it must.
+function WGS:ShowActionDialog(opts)
+    local f = actionDialogs[opts.key]
+    if not f then
+        f = createActionDialogFrame("GuildHallActionDialog_" .. opts.key)
+        actionDialogs[opts.key] = f
+    end
+
+    f.title:SetText(opts.title or "GuildHall")
+    f.body:SetText(opts.body or "")
+
+    f.primary:SetText(opts.acceptText or "OK")
+    f.primary:SetScript("OnClick", function()
+        f:Hide()
+        if opts.onAccept then opts.onAccept() end
+    end)
+
+    f.secondary:SetText(opts.declineText or "Later")
+    f.secondary:SetScript("OnClick", function()
+        f:Hide()
+        if opts.onDecline then opts.onDecline() end
+    end)
+
+    f:Show()
+    return f
+end
+
 -- Sub-nav visual states. The active tab gets a gold underline + bright
 -- label; inactives are dimmed; hover splits the difference. Kept here
 -- so the colors are tweakable in one place and read alongside the

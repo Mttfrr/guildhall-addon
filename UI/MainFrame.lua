@@ -362,6 +362,7 @@ local function CreateMainFrame()
             "WGS_LOOT_RECORDED",       -- new drop appears in Logs → Loot
             "WGS_ENCOUNTER_RECORDED",  -- boss tag column on recent loot rows
             "WGS_RAID_COMP_SNAPSHOT",  -- Events planned-vs-actual diff
+            "WGS_GROUP_ROSTER_CHANGED",-- Events live raid-status snapshot
         }
         for _, ev in ipairs(refreshEvents) do
             WGS.RegisterCallback(f, ev, function()

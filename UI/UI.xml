@@ -16,5 +16,6 @@
     <Script file="EventsDetail.lua"/>
     <Script file="EventsFrame.lua"/>
     <Script file="LootDistHelper.lua"/>
+    <Script file="RaidTrackingPrompt.lua"/>
     <Script file="WhatsNew.lua"/>
 </Ui>

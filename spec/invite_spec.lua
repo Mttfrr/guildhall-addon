@@ -129,6 +129,90 @@ describe("GetEventInviteList source preference", function()
     end)
 end)
 
+-- Regression for the "mass invite only works once" bug. The invited set
+-- used to be a permanent boolean, so a second Invite reported "all in"
+-- and re-invited nobody — even when people declined the first invite or
+-- reconnected. There's now NO cooldown at all: pressing Invite always
+-- (re-)invites everyone online who isn't already in the group, and the
+-- invited-set is kept purely so the raid-status snapshot can distinguish
+-- "invite sent, waiting" from "not invited yet."
+describe("AutoInvite re-invites on demand (no cooldown)", function()
+    local WGS
+    local invited
+
+    local EVENT = { id = 1, title = "Raid" }
+
+    before_each(function()
+        WGS = helpers.setup()
+        invited = {}
+
+        _G.IsInGuild = function() return true end
+        _G.IsInRaid = function() return false end       -- solo → lead check passes,
+        _G.IsInGroup = function() return false end       -- IsInCurrentGroup → false
+        _G.C_PartyInfo = { InviteUnit = function(name) table.insert(invited, name) end }
+
+        WGS.IsGuildOfficer = function() return true end
+        WGS.HasGroupLeadOrAssist = function() return true, nil end
+        WGS.GetPlayerKey = function() return "Me-Realm" end
+        WGS.GetRaidComp = function() return nil end       -- no comp → no auto-sort
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true, fullName = "Alpha-Realm" },
+                Bravo = { online = true, fullName = "Bravo-Realm" },
+            }
+        end
+        WGS.GetEventInviteList = function() return { "Alpha", "Bravo" }, "signups" end
+    end)
+
+    it("invites everyone on the first call", function()
+        WGS:AutoInvite(EVENT)
+        table.sort(invited)
+        assert.same({ "Alpha-Realm", "Bravo-Realm" }, invited)
+    end)
+
+    it("re-invites everyone not in the group again on the very next call", function()
+        WGS:AutoInvite(EVENT)
+        assert.are.equal(2, #invited)
+        WGS:AutoInvite(EVENT)   -- immediately again — no waiting
+        assert.are.equal(4, #invited,
+            "a repeat invite reaches the stragglers again, no cooldown")
+    end)
+
+    it("invites a freshly-reconnected member who was offline on the first pass", function()
+        -- Bravo is offline for the first invite → not invited that pass.
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true,  fullName = "Alpha-Realm" },
+                Bravo = { online = false, fullName = "Bravo-Realm" },
+            }
+        end
+        WGS:AutoInvite(EVENT)
+        assert.same({ "Alpha-Realm" }, invited)
+
+        -- Bravo reconnects → next Invite reaches them (and re-pings Alpha).
+        WGS.GetGuildRosterLookup = function()
+            return {
+                Alpha = { online = true, fullName = "Alpha-Realm" },
+                Bravo = { online = true, fullName = "Bravo-Realm" },
+            }
+        end
+        WGS:AutoInvite(EVENT)
+        local sawBravo = false
+        for _, n in ipairs(invited) do if n == "Bravo-Realm" then sawBravo = true end end
+        assert.is_true(sawBravo, "reconnected member gets invited on the next press")
+    end)
+
+    it("records invited characters for the snapshot (HasInvited) and resets when solo", function()
+        WGS:AutoInvite(EVENT)
+        assert.is_true(WGS:HasInvited("Alpha"))
+        assert.is_true(WGS:HasInvited("Bravo"))
+        assert.is_false(WGS:HasInvited("Nobody"))
+
+        WGS:ResetInviteTracking()
+        assert.is_false(WGS:HasInvited("Alpha"))
+    end)
+end)
+
 describe("Import: signups roundtrip into db.global", function()
     local WGS
 
