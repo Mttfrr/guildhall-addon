@@ -75,6 +75,9 @@ local PRELOAD_BATCH = 50
 local function importWishlists(self, data)
     if not data.wishlists then return 0 end
     self.db.global.wishlists = data.wishlists
+    -- Freshness stamp for the RCLC gh_wish share (Modules/RCLC.lua):
+    -- lets a peer with an older import defer to ours per item.
+    self.db.global.wishlistImportedAt = self:GetTimestamp()
 
     if not (C_Item and C_Item.RequestLoadItemDataByID) then
         return #data.wishlists

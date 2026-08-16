@@ -411,7 +411,9 @@ end
 --- index is out of range. Re-importable from MRT (if MRT/NSRT is
 --- loaded and the row was within ENCOUNTER_RECENT_WINDOW), so no
 --- confirmation popup at the UI layer.
-function WGS:DeleteLootRow(rowIndex)
+-- opts.silent suppresses the correction chat line — used by automatic
+-- cleanups (RCLC trade-flow holder retirement) where no officer acted.
+function WGS:DeleteLootRow(rowIndex, opts)
     local loot = self.db and self.db.global and self.db.global.loot
     if type(loot) ~= "table" then return false end
     if not loot[rowIndex] then return false end
@@ -426,6 +428,8 @@ function WGS:DeleteLootRow(rowIndex)
         _deleted  = true,
     }
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = tombstone, kind = "delete" })
-    self:PrintCorrectionApplied()
+    if not (opts and opts.silent) then
+        self:PrintCorrectionApplied()
+    end
     return true
 end

@@ -77,7 +77,7 @@ read_globals = {
     "EJ_GetInstanceForMap",
 
     -- Calendar / scheduled events
-    "C_Calendar", "C_DateAndTime",
+    "C_Calendar", "C_DateAndTime", "GetServerTime",
 
     -- Money / guild bank
     "GetMoney", "GetCoinTextureString", "GetCoinIcon",

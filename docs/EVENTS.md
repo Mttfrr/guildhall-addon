@@ -189,6 +189,34 @@ future — a richer source like MRT). Payload: the loot row itself:
 Plus any future fields. Treat unknown keys as forward-compat — read
 what you need, ignore the rest.
 
+### `WGS_LOOT_EDITED`
+
+Fires when an already-recorded loot row is corrected or enriched after
+the fact. PeerSync broadcasts the payload's `row` on the loot channel;
+its merge fn is rev-aware (LWW), so every edit bumps `row.rev`.
+Payload:
+
+| Field | Type | Notes |
+|---|---|---|
+| `index` | integer | the row's index in `db.global.loot` at edit time (pre-removal index for deletes) |
+| `row` | table | the edited row — see per-kind notes below |
+| `kind` | string | `"retag"`, `"delete"`, or `"award"` |
+
+Kinds:
+
+- **`"retag"`** — an officer re-bound the row's `eventId` / `teamId`
+  (`WGS:RetagLootRow`). `row` is the live loot row.
+- **`"delete"`** — the row was removed (`WGS:DeleteLootRow`, also
+  reached by RCLC's `delete_history` comm). `row` is a tombstone:
+  the natural key (`itemID`, `player`, `timestamp`) plus `_deleted =
+  true` and the bumped `rev`, so peers find their copy and remove it.
+- **`"award"`** — RCLootCouncil award data landed on the row
+  (`Modules/RCLC.lua`): a council decision upgraded an existing
+  chat/MRT-captured row, or a history response edit revised it. `row`
+  is a snapshot copy of the row carrying the award fields
+  (`awardResponse`, `awardResponseId`, `awardIsReason`, `awardVotes`,
+  `rclcId`).
+
 ### `WGS_CURRENT_TEAM_CHANGED`
 
 Fires when the user changes the global current-team picker (via the

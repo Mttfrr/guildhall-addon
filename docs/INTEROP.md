@@ -1,9 +1,10 @@
 # Cross-addon Interop Contract
 
-GuildHall integrates opportunistically with two third-party addons:
+GuildHall integrates opportunistically with three third-party addons:
 
 - **MRT** — Method Raid Tools by ykiigor (a.k.a. ExRT, Exorsus Raid Tools)
 - **NSRT** — Northern Sky Raid Tools by Reloe
+- **RCLC** — RCLootCouncil by Potdisc
 
 This document pins the **verified** saved-variable shapes and public
 APIs we read from / write to. Verified against the canonical upstream
@@ -189,6 +190,140 @@ its own signup-resolution pipeline.
 
 ---
 
+## RCLootCouncil (`RCLootCouncil`)
+
+**Detection:** `WGS:GetRCLC()` / `WGS:HasRCLC()` (Util/Interop.lua) — a
+silent `LibStub("AceAddon-3.0"):GetAddon("RCLootCouncil", true)` probe,
+accepted only when the object exposes `Require` (RCLC's class-system
+entry point, the surface we consume). Cached per session.
+
+**Bridge module:** `Modules/RCLC.lua`. Two surfaces, each behind a
+profile toggle: award capture (`rclcCapture`) and wishlist injection
+(`rclcWishlistColumn`). Diagnostics: `/gh interop` (or `/gh rclc`);
+bulk backfill: `/gh rclc import`.
+
+### Award capture — the `"RCLC"` comm prefix
+
+RCLC's comms layer is `RCLootCouncil.Require("Services.Comms")`
+(Classes/Services/Comms.lua). Subscriptions are RxLua subjects and
+**additive** — `Comms:BulkSubscribe(prefix, { command = fn })` never
+interferes with RCLC's own handlers. Receiver signature is
+`fn(data, sender, command, distri)` where `data` is the raw arg array
+(`unpack(data)` to get the command's payload).
+
+We subscribe to two commands on `RCLootCouncil.PREFIXES.MAIN`
+(`"RCLC"`, Core/Constants.lua):
+
+| Command | Payload | Sent when |
+|---|---|---|
+| `history` | `(winner, history_table)` | The ML awards an item (ml_core.lua `TrackAndLogLoot`), broadcast to the whole raid **iff the ML's `db.sendHistory` is on** (default on). Every GuildHall user in the raid records it — not just the ML. |
+| `delete_history` | `(id)` | The ML retracts an award (`UnTrackAndLogLoot`). |
+
+**Sharp edges** (all verified against RCLC 3.23.0):
+
+- **`sendHistory` gate.** With the ML's `sendHistory` off, `history` is
+  only whisper-sent to the ML themself — nobody else receives it. We
+  additionally register the `RCMLLootHistorySend` AceEvent message
+  (fires on the ML's client regardless, args
+  `(history_table, winner, responseID, boss, reason, session, candData)`
+  — table FIRST) as an ML-side fallback. With `sendHistory` on, both
+  paths fire on the ML; `rclcId` idempotency absorbs the duplicate.
+- **`reason.log == false` awards are never tracked or broadcast** —
+  `TrackAndLogLoot` early-returns. Award reasons configured not to log
+  simply don't exist for us.
+- **`entry.date` uses SLASHES**, `"YYYY/MM/DD"`, and both `date` and
+  `time` (`"HH:MM:SS"`) are **UTC**. The authoritative clock is the
+  `entry.id` epoch prefix (`"<serverTime>-<counter>"`, ML-local counter
+  — unique only per ML, which is why our dedup key is
+  `winner .. "@" .. id`).
+- **`entry.instance` is `"InstanceName-DifficultyName"` concatenated**
+  with a bare hyphen — split on the LAST hyphen; difficulty names never
+  contain one, instance names can.
+- **`responseID` is only a plain button index for real responses.** For
+  award reasons it's `reason.sort - 400`, and RCLC's personal-loot modes
+  ship strings (`"PL"`, `"BONUS_ROLL"`). The response **text** is the
+  durable label; treat `awardResponseId` as opaque unless
+  `awardIsReason` disambiguates.
+- **`Comms:OnDisable` wipes ALL subscriptions** (ours included). We
+  `hooksecurefunc` RCLC's `OnEnable` to re-install; the installers drop
+  their previous subscription handles first so re-wiring can't stack
+  double deliveries.
+- **`owner` may differ from `winner`** — owner is who physically looted;
+  we attribute to the winner.
+
+### HistoryEntry → loot row mapping
+
+| HistoryEntry field | Loot row field | Notes |
+|---|---|---|
+| `id` epoch prefix | `timestamp` | fallback: `date`+`time` parse, then now |
+| *(winner arg)* | `player` | realm suffix appended when missing |
+| `lootWon` | `itemLink`, `itemID`, `itemName`/`itemQuality`/`itemLevel` | item info `""`/`0` when uncached (web hydrates from itemID) |
+| `instance` | `instance` | last-hyphen split, name part |
+| `difficultyID` | `difficulty` | |
+| `boss` | `boss` | |
+| `response` | `awardResponse` | display text — the durable label |
+| `responseID` | `awardResponseId` | opaque, see above |
+| `isAwardReason` | `awardIsReason` | `true` or omitted |
+| `votes` | `awardVotes` | number or omitted |
+| *(winner + id)* | `rclcId` | `"<winner>@<id>"`, exact-dedup key |
+| — | `source` | `"rclc"` |
+
+The award-field names are a **wire contract with the platform** —
+`Sync/Encoder.lua#CleanLootForExport` copies every field except
+`itemLink`, so they flow into the export unchanged.
+
+**Dedup rules** (order matters, `WGS:RecordRCLCAward`):
+
+1. Same `rclcId` already stored → skip (idempotent).
+2. An unclaimed row with the same `itemID` + short player name within
+   **±15 minutes** (councils deliberate; the award lags the drop) →
+   **upgrade in place**: award fields + `rclcId` land on the existing
+   chat/MRT row, `source` stays as-is, `rev` bumps, and
+   `WGS_LOOT_EDITED` (kind `"award"`) rides PeerSync so peers converge.
+3. Otherwise insert fresh (Epic+ floor when quality is cached), firing
+   `WGS_LOOT_RECORDED`.
+
+`delete_history` finds the row by `rclcId` suffix (`"@<id>"`, any
+winner) and routes through the standard `DeleteLootRow` tombstone path.
+History-UI response edits (`RCHistory_ResponseEdit` AceEvent message,
+Modules/History/lootHistory.lua:1438-1540 — payload is the lib-st row;
+`cols[3].args.id` is the entry id, `cols[6].args` the post-edit
+`{response, responseID}`) update the matching row the same rev-bumped
+way. `RCHistory_NameEdit` (award moved to another player) is **not**
+handled — the row keeps the original winner until re-imported.
+
+**Bulk backfill:** `WGS:ImportRCLCHistory()` walks
+`RCLootCouncil:GetHistoryDB()` (`lootDB.factionrealm` =
+`{ ["Name-Realm"] = { entry, ... } }`) through the same map + dedup
+path, with no event/team stamp. Pre-2.7 entries without an `id` get a
+timestamp-derived stand-in so re-runs stay idempotent.
+
+### Wishlist injection
+
+- **Voting-frame column** via the official Column API (3.23+):
+  `RCVotingFrame:AddColumn(spec, "response", "after")`, colName
+  `guildhall_wish`. The cell shows the candidate's imported wish
+  priority for the current session's item (LootDistHelper colors);
+  `comparesort` orders BiS=4 > High=3 > Medium=2 > Low=1 > absent=0.
+  The voting frame builds its columns inside RCLC's `OnInitialize`, so
+  the install poll-retries (1s, ≤30 tries) like the wowaudit plugin.
+- **Roll-window note**: `hooksecurefunc` on
+  `RCLootFrame.EntryManager.GetEntry` + per-entry `Update` post-hooks
+  append the player's own wish (`GH: BiS`) to the entry's `itemLvl`
+  line. `Update` rebuilds that text each call, so the append can't
+  stack.
+- **Freshness share** on our own `"GHall"` prefix
+  (`Comms:GetSender("GHall")` auto-registers it — the sender MUST be
+  created before `BulkSubscribe`, which asserts the prefix is known).
+  On `RCMLAddItem` (ML added an item to a session) we broadcast
+  `gh_wish (itemID, wishes, importedAt)` where `importedAt` is
+  `db.global.wishlistImportedAt` (stamped by
+  `Modules/Import.lua#importWishlists`). Receivers keep a session-local
+  overlay per item, used by the column/roll lookups only when strictly
+  newer than their own import. Not persisted.
+
+---
+
 ## Provenance
 
 These contracts were extracted from:
@@ -204,6 +339,19 @@ These contracts were extracted from:
   - `NorthernSkyRaidTools.toc` — SavedVariables
   - `NickNames.lua` — nickname store + public API
   - `SetupManager.lua` — invite-list consumer
+- **RCLC**: `https://github.com/evil-morfar/RCLootCouncil2` @ 3.23.0.
+  Files inspected:
+  - `Core/Constants.lua` — `PREFIXES.MAIN = "RCLC"`
+  - `Classes/Services/Comms.lua` — BulkSubscribe / GetSender / OnDisable wipe
+  - `ml_core.lua` — `TrackAndLogLoot` (HistoryEntry shape, `history` /
+    `delete_history` sends, `RCMLLootHistorySend` / `RCMLAddItem` messages)
+  - `Modules/History/lootHistory.lua` — `RCHistory_ResponseEdit` /
+    `RCHistory_NameEdit` payloads, `GetHistoryDB` consumer paths
+  - `Modules/VotingFrame/ColumnAPI.lua` + `VotingFrame.lua` — `AddColumn`
+    spec + default colNames
+  - `Modules/lootFrame.lua` — EntryManager `GetEntry` / `Update` hooks
+  - Plus the `RCLootCouncil_wowaudit` plugin as the reference consumer
+    of the same surfaces.
 
 Last verification: 2026-05-24. No breaking drift from the prior pass;
 tightened four sibling-field/shape gaps (Attendance siblings + `alts`,
@@ -231,5 +379,6 @@ bump this date.
   gear/enchant/gem/ilvl/tier checks instead of GuildHall's own
   Readiness panel.
 
-Neither addon exposes a master-loot / loot-council surface — confirmed
-in this pass.
+Neither MRT nor NSRT exposes a master-loot / loot-council surface —
+confirmed in this pass. Loot-council data comes from the RCLootCouncil
+bridge above instead.
