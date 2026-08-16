@@ -33,6 +33,7 @@ local RELEASE_NOTES = {
                 "New toggles under Settings → RCLootCouncil — both on by default, and completely inert without RCLC installed",
             } },
             { heading = "Changed", items = {
+                "Redesigned Wishlists browser — events-style rows with class icons, wishers ranked BiS-first, and items grouped under the boss each wish actually names (with loot-history fallback for older imports)",
                 "Wishlist imports are tier-scoped — a retired tier's wishes no longer show on tooltips or in RCLC frames",
                 "Wishlist items added from Discord (/wishlist add) reach the addon on your next import — no website visit needed",
             } },
