@@ -45,7 +45,9 @@ local AWARD_MATCH_WINDOW = 900
 local GH_PREFIX = "GHall"
 
 -- Priority label → chrome/weight. Labels are the platform's wishlist
--- vocabulary; colors kept in lockstep with UI/LootDistHelper.lua.
+-- vocabulary; colors kept in lockstep with UI/UIHelpers.lua's
+-- ui.PRIORITY_COLORS (the canonical table — Modules load before UI/,
+-- so this file can't reach it at file scope and keeps a private copy).
 local PRIORITY_COLORS = {
     BiS    = "|cffff8000",
     High   = "|cffa335ee",

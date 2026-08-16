@@ -1,16 +1,13 @@
 ---@type GuildHall
 local WGS = GuildHall
+local ui = WGS._ui
 
 local helperFrame = nil
 local POPUP_DURATION = 30  -- auto-hide after 30 seconds if no action
 
-local priorityColors = {
-    BiS    = "|cffff8000",
-    High   = "|cffa335ee",
-    Medium = "|cff0070dd",
-    Low    = "|cff1eff00",
-}
-local priorityOrder = { BiS = 1, High = 2, Medium = 3, Low = 4 }
+-- Priority rank + colours are the shared vocabulary in UI/UIHelpers.lua
+-- (ui.PRIORITY_ORDER / ui.PRIORITY_COLORS) — one source for every
+-- wishlist-priority surface.
 
 local function CreateHelperFrame()
     local f = CreateFrame("Frame", "GuildHallLootDistHelper", UIParent, "BasicFrameTemplateWithInset")
@@ -82,7 +79,7 @@ local function ShowLootHelper(itemLink, itemID, player, wishEntries)
 
     -- Sort wish entries by priority
     table.sort(wishEntries, function(a, b)
-        return (priorityOrder[a.priority] or 99) < (priorityOrder[b.priority] or 99)
+        return (ui.PRIORITY_ORDER[a.priority] or 99) < (ui.PRIORITY_ORDER[b.priority] or 99)
     end)
 
     -- Build wish lines
@@ -98,7 +95,7 @@ local function ShowLootHelper(itemLink, itemID, player, wishEntries)
         line:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", (i == 1 and 4 or 0), -2)
         anchorTo = line
 
-        local color = priorityColors[entry.priority] or "|cffffffff"
+        local color = "|c" .. (ui.PRIORITY_COLORS[entry.priority] or "ffffffff")
         local text = "  " .. (entry.playerName or "?") .. " — " .. color .. (entry.priority or "?") .. "|r"
         if entry.note and entry.note ~= "" then
             text = text .. " |cff888888(" .. entry.note .. ")|r"

@@ -1,5 +1,6 @@
 ---@type GuildHall
 local WGS = GuildHall
+local ui = WGS._ui
 
 -- Hook item tooltips to show wishlist information from imported web data
 -- Modern API passes (tooltip, data); legacy OnTooltipSetItem passes (tooltip) only
@@ -25,21 +26,13 @@ local function OnTooltipSetItem(tooltip, data)
     tooltip:AddLine(" ")
     tooltip:AddLine("|cffffd100GuildHall Wishlists:|r")
 
-    -- Sort by priority
-    local priorityOrder = { BiS = 1, High = 2, Medium = 3, Low = 4 }
+    -- Sort by priority — shared rank/colour vocabulary from UIHelpers
     table.sort(wishEntries, function(a, b)
-        return (priorityOrder[a.priority] or 99) < (priorityOrder[b.priority] or 99)
+        return (ui.PRIORITY_ORDER[a.priority] or 99) < (ui.PRIORITY_ORDER[b.priority] or 99)
     end)
 
-    local priorityColors = {
-        BiS = "|cffff8000",    -- Orange
-        High = "|cffa335ee",   -- Purple
-        Medium = "|cff0070dd", -- Blue
-        Low = "|cff1eff00",   -- Green
-    }
-
     for _, entry in ipairs(wishEntries) do
-        local color = priorityColors[entry.priority] or "|cffffffff"
+        local color = "|c" .. (ui.PRIORITY_COLORS[entry.priority] or "ffffffff")
         local line = "  " .. (entry.playerName or "Unknown") .. " - " .. color .. (entry.priority or "?") .. "|r"
         if entry.note and entry.note ~= "" then
             line = line .. " (" .. entry.note .. ")"

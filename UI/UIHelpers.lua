@@ -37,6 +37,31 @@ ui.LOGS_SUB_COUNT      = 3
 ui.LOGS_SUB_NAMES      = { "Loot", "Bank", "Attendance" }
 
 ---------------------------------------------------------------------------
+-- Wishlist priority vocabulary
+--
+-- The platform's wish priorities (BiS / High / Medium / Low) render on
+-- several surfaces — the Teams → Wishlists browser, the loot-distribution
+-- helper popup, and the item-tooltip enrichment. One canonical rank +
+-- colour table here so the surfaces can't drift on hue or sort order.
+--
+-- Colours are bare "AARRGGBB" hex — call sites compose
+-- "|c" .. hex .. text .. "|r" themselves (same convention as
+-- WGS.CLASS_COLORS).
+--
+-- NOTE: Modules/RCLC.lua keeps a private copy of the colours — Modules
+-- load before UI/, so it can't reach this table at file scope. Keep the
+-- two in lockstep when touching either.
+---------------------------------------------------------------------------
+
+ui.PRIORITY_ORDER = { BiS = 1, High = 2, Medium = 3, Low = 4 }
+ui.PRIORITY_COLORS = {
+    BiS    = "ffff8000",   -- legendary orange
+    High   = "ffa335ee",   -- epic purple
+    Medium = "ff0070dd",   -- rare blue
+    Low    = "ff1eff00",   -- uncommon green
+}
+
+---------------------------------------------------------------------------
 -- Shared frame helpers
 ---------------------------------------------------------------------------
 
