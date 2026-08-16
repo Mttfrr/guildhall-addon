@@ -38,6 +38,7 @@ local function makeHistoryEntry(t)
         groupSize    = 20,
         class        = t.class or "WARRIOR",
         id           = t.id or FAKE_ID,
+        owner        = t.owner,
     }
     if t.noId then entry.id = nil end
     return entry
@@ -232,6 +233,50 @@ describe("Modules/RCLC.lua", function()
         assert.are.equal("Mainspec", fired.row.awardResponse)
         assert.is_not.equal(row, fired.row,
             "the event payload is a snapshot copy, not the live row")
+    end)
+
+    it("retires the holder's chat row when the council awards to someone else", function()
+        -- Retail trade flow: the drop landed on Holder (chat-captured),
+        -- the council awarded it to Winner. One row must survive: the
+        -- winner's award row; the holder's row exits via a quiet
+        -- tombstone so peers drop it too.
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 120,
+            player    = "Holder-TestRealm",
+            itemID    = 212425,
+            itemLink  = "|cffa335ee|Hitem:212425|h[Sword]|h|r",
+        })
+
+        local action = WGS:RecordRCLCAward("Winner-TestRealm",
+            makeHistoryEntry{ owner = "Holder-TestRealm" })
+        assert.are.equal("added", action)
+        assert.are.equal(1, #WGS.db.global.loot, "holder row retired, winner row added")
+
+        local row = WGS.db.global.loot[1]
+        assert.are.equal("Winner-TestRealm", row.player)
+        assert.are.equal("Mainspec", row.awardResponse)
+
+        local fired = lastFired("WGS_LOOT_EDITED")
+        assert.is_table(fired)
+        assert.are.equal("delete", fired.kind, "holder removal rides the tombstone path")
+        assert.are.equal("Holder-TestRealm", fired.row.player)
+        assert.is_true(fired.row._deleted)
+    end)
+
+    it("keeps the holder's row when the award goes back to the holder themselves", function()
+        -- owner == winner is the plain upgrade path, not a retirement.
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 120,
+            player    = "Winner-TestRealm",
+            itemID    = 212425,
+            itemLink  = "|cffa335ee|Hitem:212425|h[Sword]|h|r",
+        })
+
+        local action = WGS:RecordRCLCAward("Winner-TestRealm",
+            makeHistoryEntry{ owner = "Winner-TestRealm" })
+        assert.are.equal("updated", action)
+        assert.are.equal(1, #WGS.db.global.loot)
+        assert.are.equal("Mainspec", WGS.db.global.loot[1].awardResponse)
     end)
 
     it("matches upgrades on short player name across realm-suffix drift", function()

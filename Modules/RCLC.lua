@@ -219,6 +219,27 @@ function WGS:RecordRCLCAward(winner, entry, opts)
         end
     end
 
+    -- Retail council flow: the boss drop lands on a random raider, the
+    -- council votes, the holder trades the item to the winner. The chat
+    -- capture recorded the HOLDER (entry.owner) — once the award names
+    -- someone else, that row is a false ledger attribution: retire it
+    -- through the tombstone path (quietly — no officer acted) so peers
+    -- drop it too, and the winner's award row below stays the only one.
+    local owner = entry.owner
+    if type(owner) == "string" and owner ~= "" and shortName(owner) ~= short then
+        local ownerShort = shortName(owner)
+        for i, row in ipairs(loot) do
+            if not row.rclcId
+               and row.itemID == mapped.itemID
+               and shortName(row.player) == ownerShort
+               and math.abs((row.timestamp or 0) - mapped.timestamp) <= AWARD_MATCH_WINDOW
+            then
+                self:DeleteLootRow(i, { silent = true })
+                break
+            end
+        end
+    end
+
     if mapped.itemQuality > 0 and mapped.itemQuality < QUALITY_THRESHOLD then
         return "skipped"
     end
