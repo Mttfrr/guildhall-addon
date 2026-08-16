@@ -39,6 +39,12 @@ local dbDefaults = {
         -- nil = "use officer default" (on for officers, off otherwise).
         -- Explicit true/false from the user takes precedence.
         peerSyncEnabled = nil,
+        -- RCLootCouncil bridge (Modules/RCLC.lua). Capture records the
+        -- council's award decisions into the loot log; the wishlist
+        -- toggle injects platform wishlists into RCLC's voting/roll
+        -- frames. Both are zero-cost no-ops when RCLC isn't loaded.
+        rclcCapture = true,
+        rclcWishlistColumn = true,
         -- Dev-only: when true, every PeerSync broadcast is also re-fed
         -- through the local dispatch path so the encode → decode →
         -- merge round-trip can be exercised from a single client (no
@@ -73,6 +79,7 @@ local dbDefaults = {
         lastKnownGold = nil,
         teams = {},
         wishlists = {},
+        wishlistImportedAt = 0, -- stamped by importWishlists; drives the RCLC gh_wish freshness share
         bossNotes = {},
         raidComps = {},
         events = {},
@@ -191,11 +198,31 @@ local SLASH_HANDLERS = {
     -- the 60s debounce so it always does something visible.
     sync = function(self) self:PeerSync_ManualCatchup() end,
 
-    -- /gh interop — read-only MRT/NSRT integration diagnostic. Prints
-    -- which addons are loaded, VMRT/NSRT global presence, gap-fill
-    -- loot count, sessions with bossAttendance, MRT note size +
-    -- which public API surface fetched it. Safe to run anywhere.
+    -- /gh interop — read-only MRT/NSRT/RCLC integration diagnostic.
+    -- Prints which addons are loaded, VMRT/NSRT global presence,
+    -- gap-fill loot count, sessions with bossAttendance, MRT note size
+    -- + which public API surface fetched it, RCLC capture state. Safe
+    -- to run anywhere.
     interop = function(self) self:PrintInteropStatus() end,
+
+    -- /gh rclc import — bulk-import RCLootCouncil's saved award
+    -- history into the loot ledger (idempotent — rclcId dedup makes a
+    -- re-run a no-op). Runs regardless of the rclcCapture toggle: the
+    -- command is explicit user intent. Bare /gh rclc prints the
+    -- interop status, which includes the RCLC block. Hidden from
+    -- SLASH_HELP like interop.
+    rclc = function(self, input)
+        local _, sub = self:GetArgs(input, 2)
+        if sub == "import" then
+            if not self:HasRCLC() then
+                self:Print(L["RCLC_NOT_AVAILABLE"])
+                return
+            end
+            self:Print(string.format(L["RCLC_IMPORT_RESULT"], self:ImportRCLCHistory()))
+            return
+        end
+        self:PrintInteropStatus()
+    end,
 
     -- /gh diag — print a one-screen health-check of db.global. Row
     -- counts per telemetry table, last-import timestamp, addon

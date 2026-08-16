@@ -2,6 +2,18 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [Unreleased]
+
+RCLootCouncil integration: the council's actual decisions land in the
+loot ledger, and the platform's wishlists show up where the council
+votes.
+
+### What's New
+
+- **RCLootCouncil award capture.** New bridge module (`Modules/RCLC.lua`) that subscribes to RCLC's own award broadcast (the `history` / `delete_history` comms on its `"RCLC"` prefix) — so when the master looter awards an item, **every raider running GuildHall records the council's verdict**, not just the ML: response ("Mainspec", "Minor Upgrade", …), vote count, and award reasons (Disenchant / Bank), as new `awardResponse` / `awardResponseId` / `awardIsReason` / `awardVotes` fields on the loot row. A drop already captured from `CHAT_MSG_LOOT` or the MRT gap-fill is **upgraded in place** (award fields + rev bump, propagated to other officers via the existing PeerSync edit channel as `WGS_LOOT_EDITED` kind `"award"`) — the ledger keeps one row per drop with the richest attribution available. Awards retracted in RCLC delete the row through the standard tombstone path; response edits in RCLC's history UI (`RCHistory_ResponseEdit`) follow into the matching row. Dedup is anchored on a new `rclcId` (`winner@<RCLC entry id>`) so re-deliveries, the ML's local double-fire, and re-imports are all no-ops. All new fields flow to the platform export automatically (`CleanLootForExport` copies everything but `itemLink`). New toggle **Settings → RCLootCouncil → Capture RCLC Awards** (on by default; inert without RCLC).
+- **`/gh rclc import` — backfill from RCLC's saved history.** Walks `RCLootCouncil:GetHistoryDB()` (every award the addon has ever stored, per player) through the same map + dedup path and reports how many rows were new. Idempotent — run it twice, get zero the second time. `/gh interop` now shows an RCLC block (loaded, capture on/off, rows tagged `source="rclc"`).
+- **Wishlists inside RCLC's frames.** With a platform wishlist import in the addon, the council now sees it where the vote happens: a **"GuildHall" column on the voting frame** (official RCLC 3.23+ Column API, inserted after Response) shows each candidate's wish priority for the item on the table — BiS/High/Medium/Low in the standard colors, sortable, "-" when absent — and the **roll window** appends your own wish (`GH: BiS`) to the item line. When the ML adds an item to a session, GuildHall clients also share that item's wishes over a private `"GHall"` comm stamped with their import time, so the whole council sees the **newest** import in the raid even if the ML's own paste is stale. New toggle **Settings → RCLootCouncil → Wishlists in RCLC Frames** (on by default). 24 new specs cover the mapping, dedup/upgrade ordering, delete/edit paths, backfill idempotency, quality gate, absent-RCLC no-ops, the column contract (always writes the sortable cell value), and overlay freshness; `docs/INTEROP.md` gains the full verified RCLC contract (HistoryEntry shape, `sendHistory` gate, UTC slash-dates, instance-string split, responseID semantics).
+
 ## [0.7.7-beta] — 2026-07-26
 
 Raid-forming tools: invite as often as you like, see who's actually in the

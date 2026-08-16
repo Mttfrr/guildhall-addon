@@ -35,11 +35,45 @@ function WGS:HasAddon(name)
     return loaded
 end
 
+-- RCLootCouncil probe result. nil = not probed yet, false = probed and
+-- absent, otherwise the addon object itself. Same per-session caching
+-- rationale as presenceCache.
+local rclcProbe
+
 --- Test-only: drop the presence cache. Production code should not need
 --- this — addon presence is fixed for the session. Exposed so busted
 --- specs can flip _G.IsAddOnLoaded between cases without leaking state.
 function WGS:_ResetAddonCache()
     presenceCache = {}
+    rclcProbe = nil
+end
+
+--- The RCLootCouncil addon object, or nil when it isn't available.
+---
+--- Probes the AceAddon registry directly (silent) rather than trusting
+--- the folder name — a renamed install still registers as
+--- "RCLootCouncil". The result is only accepted when it exposes the
+--- surface the bridge consumes (`Require`, RCLC's class-system entry
+--- point), so a foreign addon squatting the name degrades to "absent"
+--- instead of a crash inside Modules/RCLC.lua.
+function WGS:GetRCLC()
+    if rclcProbe ~= nil then return rclcProbe or nil end
+    local found
+    local ok, aceAddon = pcall(LibStub, "AceAddon-3.0", true)
+    if ok and type(aceAddon) == "table" and type(aceAddon.GetAddon) == "function" then
+        local ok2, addon = pcall(aceAddon.GetAddon, aceAddon, "RCLootCouncil", true)
+        if ok2 then found = addon end
+    end
+    if type(found) ~= "table" or type(found.Require) ~= "function" then
+        found = nil
+    end
+    rclcProbe = found or false
+    return found
+end
+
+--- Is RCLootCouncil available right now?
+function WGS:HasRCLC()
+    return self:GetRCLC() ~= nil
 end
 
 --- True if any addon that exposes the VMRT global is available — covers
@@ -71,17 +105,22 @@ function WGS:InteropStatus()
     local vmrt       = _G.VMRT
     local nsrt       = _G.NSRT
 
-    -- Count loot rows that came from the MRT gap-fill path (Modules/
-    -- Loot.lua tags them with source = "mrt"). Lifetime count, not
-    -- "since reload" — gives the user a sense of whether the gap-fill
-    -- has ever fired.
+    -- Count loot rows per bridge source (Modules/Loot.lua tags MRT
+    -- gap-fill rows source = "mrt"; Modules/RCLC.lua tags award rows
+    -- source = "rclc"). Lifetime counts, not "since reload" — gives the
+    -- user a sense of whether each bridge has ever fired.
     local loot = self.db and self.db.global and self.db.global.loot or {}
     local mrtLootCount, mrtLootLast = 0, nil
+    local rclcLootCount, rclcLootLast = 0, nil
     for _, row in ipairs(loot) do
         if row.source == "mrt" then
             mrtLootCount = mrtLootCount + 1
             local ts = tonumber(row.timestamp) or 0
             if not mrtLootLast or ts > mrtLootLast then mrtLootLast = ts end
+        elseif row.source == "rclc" then
+            rclcLootCount = rclcLootCount + 1
+            local ts = tonumber(row.timestamp) or 0
+            if not rclcLootLast or ts > rclcLootLast then rclcLootLast = ts end
         end
     end
 
@@ -136,6 +175,12 @@ function WGS:InteropStatus()
         noteText        = noteText,
         noteSize        = noteText and #noteText or 0,
         noteAPIUsed     = noteAPIUsed,
+        rclcLoaded      = self:HasRCLC(),
+        -- ~= false so a fresh test db (no AceDB defaults) reads the
+        -- same as the runtime default (on).
+        rclcCaptureOn   = (self.db and self.db.profile and self.db.profile.rclcCapture) ~= false,
+        rclcLootCount   = rclcLootCount,
+        rclcLootLast    = rclcLootLast,
     }
 end
 
@@ -177,5 +222,14 @@ function WGS:PrintInteropStatus()
     else
         self:Print(
             "|cff888888  No MRT/NSRT data available — bridge code stays dormant.|r")
+    end
+
+    self:Print(string.format("  RCLC loaded:       %s", yesno(s.rclcLoaded)))
+    if s.rclcLoaded then
+        self:Print("|cffffd100  RCLC award capture|r")
+        self:Print(string.format("    capture: %s   rows tagged source=rclc: %d / %d total  (last: %s)",
+            s.rclcCaptureOn and "|cff00ff00on|r" or "|cff888888off|r",
+            s.rclcLootCount, s.mrtLootTotal, ago(s.rclcLootLast)))
+        self:Print("    |cff888888/gh rclc import pulls RCLC's saved history into the loot log|r")
     end
 end

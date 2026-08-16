@@ -9,6 +9,11 @@ L["IMPORT_FAILED"] = "Import failed: invalid or corrupted data."
 L["ATTENDANCE_START"] = "Attendance tracking started for this raid."
 L["ATTENDANCE_STOP"] = "Attendance tracking stopped. %d members recorded."
 L["LOOT_RECORDED"] = "%s looted by %s."
+
+-- RCLootCouncil bridge (Modules/RCLC.lua).
+L["RCLC_AWARD_RECORDED"] = "%s awarded to %s by loot council."
+L["RCLC_IMPORT_RESULT"]  = "RCLootCouncil history import: %d new award(s) added to the loot log."
+L["RCLC_NOT_AVAILABLE"]  = "RCLootCouncil is not loaded."
 L["BANK_SCANNED"] = "Guild bank scanned: %d items across %d tabs."
 L["GOLD_CHANGE"] = "Guild bank gold changed: %s"
 L["NO_GUILD"] = "You are not in a guild."
