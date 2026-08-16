@@ -2,7 +2,7 @@
 
 All notable changes to GuildHall will be documented in this file.
 
-## [0.7.8-beta] — 2026-08-16
+## [0.8.0-beta] — 2026-08-16
 
 RCLootCouncil integration: the council's actual decisions land in the
 loot ledger, and the platform's wishlists show up where the council

@@ -22,6 +22,23 @@ local WGS = GuildHall
 -- them stacked in one dialog (newest version on top).
 local RELEASE_NOTES = {
     {
+        version = "0.8.0-beta",
+        title = "RCLootCouncil integration",
+        sections = {
+            { heading = "Added", items = {
+                "Run RCLootCouncil? The council's decisions now land in the loot log — response (Mainspec / Offspec / …), vote count, and award reasons — captured by every raider running GuildHall, not just the loot master",
+                "Your GuildHall wishlists show up where the council votes: a sortable GuildHall column in RCLC's voting frame, plus your own wish on the roll window",
+                "Trade-flow accuracy: when a drop lands on one raider and the council awards it to another, the log keeps one row — the winner's",
+                "/gh rclc import backfills your entire RCLC loot history into GuildHall in one pass (safe to re-run)",
+                "New toggles under Settings → RCLootCouncil — both on by default, and completely inert without RCLC installed",
+            } },
+            { heading = "Changed", items = {
+                "Wishlist imports are tier-scoped — a retired tier's wishes no longer show on tooltips or in RCLC frames",
+                "Wishlist items added from Discord (/wishlist add) reach the addon on your next import — no website visit needed",
+            } },
+        },
+    },
+    {
         version = "0.7.3",
         title = "Contextual menus everywhere + /reload survival",
         sections = {
