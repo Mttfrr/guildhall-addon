@@ -361,6 +361,26 @@ describe("WGS:PeerSync per-table merge fns", function()
             assert.are.equal(0, #WGS.db.global.loot)
         end)
 
+        it("records a PLATFORM tombstone for our copy on peer-driven delete", function()
+            -- The receiving client may have exported ITS OWN capture of
+            -- the drop (timestamps drift a few seconds between clients),
+            -- so the platform deletion must travel under this client's
+            -- key — the local row's timestamp, not the tombstone's.
+            dofile("Modules/Loot.lua")   -- owns RecordLootTombstone
+            WGS.db.global.loot[1] = {
+                itemID = 7, player = "X-Realm", timestamp = 1005, rev = 0,
+            }
+            assert.are.equal("deleted", WGS._PeerSync_MergeLoot({
+                itemID = 7, player = "X-Realm", timestamp = 1000,   -- sender's ts
+                rev = 1, _deleted = true,
+            }))
+            local tombs = WGS.db.global.lootTombstones
+            assert.are.equal(1, #tombs)
+            assert.are.equal(1005, tombs[1].timestamp,
+                "OUR row's timestamp — the key our export used")
+            assert.are.equal(7, tombs[1].itemID)
+        end)
+
         it("ignores a tombstone with no matching local row", function()
             -- Edge case: officer B already imported a cleaned dataset
             -- and doesn't have the row that officer A is deleting.

@@ -470,9 +470,72 @@ function WGS:DeleteLootRow(rowIndex, opts)
         rev       = (tonumber(removed.rev) or 0) + 1,
         _deleted  = true,
     }
+    -- Platform tombstone too: if an earlier export already carried this
+    -- row to the web app, the next export must carry its deletion.
+    self:RecordLootTombstone(removed)
     self:FireEvent("WGS_LOOT_EDITED", { index = rowIndex, row = tombstone, kind = "delete" })
     if not (opts and opts.silent) then
         self:PrintCorrectionApplied()
     end
     return true
+end
+
+---------------------------------------------------------------------------
+-- Platform loot tombstones
+---------------------------------------------------------------------------
+--
+-- The peer tombstone above only travels client↔client. But a deleted row
+-- may ALREADY sit on the platform from an earlier export (the RCLC
+-- trade-flow retirement is the common case: the holder's chat-captured row
+-- was exported, then the council's award moved the item to someone else).
+-- Without telling the platform, that phantom row lives forever.
+--
+-- So every local delete also records a persistent platform tombstone —
+-- the same natural key the platform dedups on — and Sync/Encoder.lua ships
+-- the list with every export. The platform deletes the matching row,
+-- remembers the tombstone, and refuses to re-create the row from another
+-- client's later export. Deleting is idempotent on both sides, so shipping
+-- the list repeatedly is harmless.
+
+local TOMBSTONE_MAX_AGE = 45 * 24 * 60 * 60   -- older deletions have long
+                                              -- since converged (or never
+                                              -- reached the platform at all)
+local TOMBSTONE_CAP = 200                     -- runaway-guard, oldest dropped
+
+--- Record that a loot row was deleted locally, keyed like the platform
+--- keys loot rows. Deduped on the natural key; pruned by age + cap.
+function WGS:RecordLootTombstone(row)
+    if not (row and row.itemID and row.player and row.timestamp) then return end
+    local list = self.db.global.lootTombstones
+    if type(list) ~= "table" then
+        list = {}
+        self.db.global.lootTombstones = list
+    end
+    for _, t in ipairs(list) do
+        if t.itemID == row.itemID and t.player == row.player
+            and t.timestamp == row.timestamp then
+            return
+        end
+    end
+    list[#list + 1] = {
+        itemID    = row.itemID,
+        player    = row.player,
+        timestamp = row.timestamp,
+        deletedAt = self:GetTimestamp(),
+    }
+    self:PruneLootTombstones()
+end
+
+--- Drop tombstones past the useful window and enforce the cap
+--- (oldest first — the list is append-ordered).
+function WGS:PruneLootTombstones()
+    local list = self.db.global.lootTombstones
+    if type(list) ~= "table" then return end
+    local cutoff = self:GetTimestamp() - TOMBSTONE_MAX_AGE
+    local kept = {}
+    for _, t in ipairs(list) do
+        if (t.deletedAt or 0) >= cutoff then kept[#kept + 1] = t end
+    end
+    while #kept > TOMBSTONE_CAP do table.remove(kept, 1) end
+    self.db.global.lootTombstones = kept
 end

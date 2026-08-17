@@ -617,6 +617,13 @@ local function mergeLoot(row)
                 return "skipped"
             end
             if row._deleted then
+                -- Record OUR copy's key as a platform tombstone before
+                -- removing: this client may have exported its own capture
+                -- of the drop (timestamps differ slightly per client), so
+                -- the deletion has to travel to the platform under the key
+                -- this client's export used. Guarded — Modules/Loot.lua
+                -- owns the recorder and isn't loaded in every spec.
+                if WGS.RecordLootTombstone then WGS:RecordLootTombstone(existing) end
                 table.remove(loot, i)
                 return "deleted"
             end

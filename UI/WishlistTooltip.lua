@@ -34,6 +34,13 @@ local function OnTooltipSetItem(tooltip, data)
     for _, entry in ipairs(wishEntries) do
         local color = "|c" .. (ui.PRIORITY_COLORS[entry.priority] or "ffffffff")
         local line = "  " .. (entry.playerName or "Unknown") .. " - " .. color .. (entry.priority or "?") .. "|r"
+        -- Droptimizer gain per wisher, when their sim covers this item —
+        -- shared formatter with the RCLC voting column.
+        local sim = WGS.FormatWishSimPct and WGS:FormatWishSimPct(entry.simPct)
+        if sim then
+            local simColor = (tonumber(entry.simPct) or 0) > 0 and "|cff44cc66" or "|cff999999"
+            line = line .. " " .. simColor .. sim .. "|r"
+        end
         if entry.note and entry.note ~= "" then
             line = line .. " (" .. entry.note .. ")"
         end

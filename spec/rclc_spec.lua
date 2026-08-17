@@ -457,13 +457,67 @@ describe("Modules/RCLC.lua", function()
             local data = { { name = "Wisher-TestRealm", cols = { [6] = {} } } }
             captured.spec.DoCellUpdate(nil, frame, data, nil, 1, 1, 6, true)
             assert.is_truthy(frame.text.last:find("BiS"))
-            assert.are.equal(4, data[1].cols[6].value, "BiS weighs 4")
+            assert.are.equal(4000, data[1].cols[6].value,
+                "BiS weighs 4 priority bands of 1000")
 
             local data2 = { { name = "NoWish-TestRealm", cols = { [6] = {} } } }
             captured.spec.DoCellUpdate(nil, frame, data2, nil, 1, 1, 6, true)
             assert.are.equal("-", frame.text.last)
             assert.are.equal(0, data2[1].cols[6].value,
                 "value MUST be written even when there is no wish")
+        end)
+
+        it("cell renders the Droptimizer gain and folds it into the sort value", function()
+            WGS.db.global.wishlists = {
+                { playerName = "Wisher", items = {
+                    { itemID = 212425, itemName = "Sword", priority = "BiS", simPct = 2.5 },
+                } },
+            }
+            WGS:_RCLC_InstallVotingColumn(rc)
+            local frame = { text = { SetText = function(self, t) self.last = t end } }
+            local data = { { name = "Wisher-TestRealm", cols = { [6] = {} } } }
+            captured.spec.DoCellUpdate(nil, frame, data, nil, 1, 1, 6, true)
+            assert.is_truthy(frame.text.last:find("BiS"))
+            assert.is_truthy(frame.text.last:find("+2.5%%"),
+                "gain rendered beside the priority")
+            assert.are.equal(4025, data[1].cols[6].value,
+                "priority band 4000 + gain tiebreak 25 (2.5 × 10)")
+        end)
+    end)
+
+    ------------------------------------------------------------------
+    -- Sim-gain formatting + sort weight
+    ------------------------------------------------------------------
+
+    describe("wish sim-gain surface", function()
+        before_each(function()
+            dofile("Modules/RCLC.lua")
+        end)
+
+        it("FormatWishSimPct formats, trims .0, keeps sign; nil for absent", function()
+            assert.are.equal("+2.3%", WGS:FormatWishSimPct(2.3))
+            assert.are.equal("+3%",   WGS:FormatWishSimPct(3))
+            assert.are.equal("-0.4%", WGS:FormatWishSimPct(-0.4))
+            assert.are.equal("+0%",   WGS:FormatWishSimPct(0),
+                "a true zero is information — simmed, worth nothing")
+            assert.is_nil(WGS:FormatWishSimPct(nil))
+            assert.is_nil(WGS:FormatWishSimPct("not a number"))
+        end)
+
+        it("sort weight: priority bands dominate, gain breaks ties, capped", function()
+            local bis    = WGS:_RCLC_WishSortWeight({ priority = "BiS" })
+            local bisSim = WGS:_RCLC_WishSortWeight({ priority = "BiS", simPct = 2.5 })
+            local high   = WGS:_RCLC_WishSortWeight({ priority = "High", simPct = 99 })
+            assert.are.equal(4000, bis)
+            assert.are.equal(4025, bisSim)
+            assert.is_true(bisSim > bis)
+            assert.is_true(bis > high,
+                "a plain BiS still outranks High with any gain — bands never cross")
+            assert.are.equal(3999, WGS:_RCLC_WishSortWeight({ priority = "High", simPct = 500 }),
+                "gain contribution capped below one band step")
+            assert.are.equal(2000, WGS:_RCLC_WishSortWeight({ priority = "Medium", simPct = -3 }),
+                "negative gain never subtracts")
+            assert.are.equal(0, WGS:_RCLC_WishSortWeight(nil))
         end)
     end)
 

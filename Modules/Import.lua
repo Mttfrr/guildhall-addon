@@ -358,9 +358,11 @@ local function buildWishIndex(wishlists)
                         note = item.note,
                         -- Droptimizer gain (% of baseline DPS) from the
                         -- wisher's own sim — additive platform field,
-                        -- rendered by the RCLC voting column / roll
-                        -- annotation. nil when never simmed.
-                        simPct = item.simPct,
+                        -- rendered by the loot tooltip, the RCLC voting
+                        -- column and the roll-window annotation.
+                        -- nil when never simmed; tonumber guards the
+                        -- wire type.
+                        simPct = tonumber(item.simPct),
                     }
                 end
             end

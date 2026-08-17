@@ -168,7 +168,7 @@ end
 ---
 --- wishlists: platform export shape —
 ---   { { playerName, class?, items = { { itemID, itemName?, slot?,
----       priority, note?, source?, location?, armorType? } } }, ... }
+---       priority, note?, source?, location?, armorType?, simPct? } } }, ... }
 --- (class + source + location + armorType are new fields; older
 --- imports lack them.)
 ---
@@ -185,7 +185,7 @@ end
 --- { { key, name, itemCount, wishCount, items = { { itemID, name,
 --- quality?, slot?, slotKey?, location?, locationKey?, armorType?,
 --- armorTypeKey?, wishers = { { playerName, short, class?, priority,
---- note? } } } } } } with:
+--- note?, simPct? } } } } } } with:
 ---   bosses  sorted alphabetically, "Unassigned" always last
 ---   items   sorted by wisher count desc, then name, then itemID
 ---   wishers sorted by priority rank (BiS→Low, unknown last), then name
@@ -247,6 +247,10 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
                         class      = resolveClassFile(entry.class, short, opts),
                         priority   = item.priority,
                         note       = item.note,
+                        -- Droptimizer gain from the wisher's own sim
+                        -- (platform export simPct) — nil for pre-sim
+                        -- imports; rendered beside the priority.
+                        simPct     = tonumber(item.simPct),
                     }
                     local key, disp = textKey(item.source)
                     if key then
@@ -652,8 +656,17 @@ local function BuildWisherRow(content, w, yOff)
     local prio = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     prio:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     prio:SetJustifyH("RIGHT")
-    prio:SetText("|c" .. (ui.PRIORITY_COLORS[w.priority] or "ffffffff")
-        .. (w.priority or "?") .. "|r")
+    local prioText = "|c" .. (ui.PRIORITY_COLORS[w.priority] or "ffffffff")
+        .. (w.priority or "?") .. "|r"
+    -- Droptimizer gain beside the priority ("BiS +2.3%") — the number
+    -- that separates "wants it" from "gains from it". Shared formatter
+    -- with the RCLC voting column (Modules/RCLC.lua).
+    local sim = WGS.FormatWishSimPct and WGS:FormatWishSimPct(w.simPct)
+    if sim then
+        local color = (tonumber(w.simPct) or 0) > 0 and "|cff44cc66" or "|cff999999"
+        prioText = prioText .. " " .. color .. sim .. "|r"
+    end
+    prio:SetText(prioText)
 
     local nameFs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     nameFs:SetPoint("LEFT", row, "LEFT", WISHER_NAME_X, 0)

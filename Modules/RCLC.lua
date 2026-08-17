@@ -526,17 +526,49 @@ local function currentSessionItemID(rc)
     return nil
 end
 
---- Render a wish as "<Priority> +N.N%" — the priority in its canonical
---- colour, the Droptimizer gain (platform's per-wish simPct, when the
---- wisher imported a sim) dimmed-gold beside it. Shared by the voting
---- column cell and the roll-window annotation.
-local function FormatWish(wish)
-    local text = PriorityColorEscape(wish.priority) .. (wish.priority or "?") .. "|r"
-    local pct = tonumber(wish.simPct)
-    if pct then
-        text = text .. string.format(" |cffffd100%+.1f%%|r", pct)
+--- Format a wish's Droptimizer gain for display: "+2.3%" / "+3%" /
+--- "-0.4%". nil when the wish carries no sim data (older imports, no
+--- report) — callers render nothing rather than a misleading zero.
+--- A true 0 renders as "+0%": "simmed, worth nothing" is information.
+function WGS:FormatWishSimPct(pct)
+    pct = tonumber(pct)
+    if not pct then return nil end
+    local s = string.format("%+.1f%%", pct)
+    s = s:gsub("%.0%%", "%%")   -- +3.0% → +3%
+    return s
+end
+
+local SIM_GAIN_COLOR = "|cff44cc66"   -- positive gain
+local SIM_FLAT_COLOR = "|cff999999"   -- zero / negative — "sims worse"
+
+--- Priority + sim gain as one coloured string ("BiS +2.3%"). The shape
+--- every wish-render surface shares (voting cell, roll window). Colour
+--- comes from the canonical ui.PRIORITY_COLORS via PriorityColorEscape
+--- (read at call time — Modules load before UI).
+function WGS:FormatWishLabel(wish)
+    if not wish then return nil end
+    local label = PriorityColorEscape(wish.priority)
+        .. (wish.priority or "?") .. "|r"
+    local sim = self:FormatWishSimPct(wish.simPct)
+    if sim then
+        local color = (tonumber(wish.simPct) or 0) > 0 and SIM_GAIN_COLOR or SIM_FLAT_COLOR
+        label = label .. " " .. color .. sim .. "|r"
     end
-    return text
+    return label
+end
+
+--- Sortable weight for a wish: priority dominates (BiS always outranks
+--- High), positive sim gain breaks ties inside a priority band. Bounded
+--- so a wild sim value can't jump a band: gain contributes at most 999
+--- against the 1000-per-priority step.
+function WGS:_RCLC_WishSortWeight(wish)
+    if not wish then return 0 end
+    local weight = (PRIORITY_WEIGHT[wish.priority] or 0) * 1000
+    local pct = tonumber(wish.simPct) or 0
+    if pct > 0 then
+        weight = weight + math.min(math.floor(pct * 10 + 0.5), 999)
+    end
+    return weight
 end
 
 --- lib-st DoCellUpdate for the "GuildHall" column. MUST always write
@@ -553,8 +585,8 @@ local function WishCellUpdate(rowFrame, frame, data, cols, row, realrow, column,
         local itemID = rc and currentSessionItemID(rc)
         local wish = (candidate and itemID) and WGS:_RCLC_WishForPlayer(itemID, candidate) or nil
         if wish then
-            weight = PRIORITY_WEIGHT[wish.priority] or 0
-            text = FormatWish(wish)
+            weight = WGS:_RCLC_WishSortWeight(wish)
+            text = WGS:FormatWishLabel(wish) or "-"
         end
     end)
     if not ok then
@@ -567,8 +599,9 @@ local function WishCellUpdate(rowFrame, frame, data, cols, row, realrow, column,
     end
 end
 
---- lib-st comparesort (`st` is the ScrollingTable). BiS=4 > High=3 >
---- Medium=2 > Low=1 > absent=0. pcall-guarded — a drifted lib-st
+--- lib-st comparesort (`st` is the ScrollingTable). Priority bands
+--- first (BiS > High > Medium > Low > absent), Droptimizer gain within
+--- a band — see _RCLC_WishSortWeight. pcall-guarded — a drifted lib-st
 --- surface must yield a stable (false) comparison, not break RCLC's
 --- sort pass.
 local function WishCompareSort(st, rowa, rowb, sortbycol)
@@ -579,7 +612,7 @@ local function WishCompareSort(st, rowa, rowb, sortbycol)
             local rowData = st:GetRow(rowIndex)
             local wish = (rowData and rowData.name and itemID)
                 and WGS:_RCLC_WishForPlayer(itemID, rowData.name) or nil
-            return wish and (PRIORITY_WEIGHT[wish.priority] or 0) or 0
+            return WGS:_RCLC_WishSortWeight(wish)
         end
         local a, b = weightOf(rowa), weightOf(rowb)
         if a == b then return false end
@@ -664,7 +697,7 @@ local function AnnotateRollEntry(rc, entry)
         local wish = WGS:_RCLC_WishForPlayer(itemID, WGS:GetPlayerKey())
         if not wish then return end
         local text = entry.itemLvl:GetText() or ""
-        entry.itemLvl:SetText(text .. "  |cffffd100GH:|r " .. FormatWish(wish))
+        entry.itemLvl:SetText(text .. "  |cffffd100GH:|r " .. WGS:FormatWishLabel(wish))
     end)
     if not ok then
         WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.AnnotateRollEntry", error = tostring(err) })
