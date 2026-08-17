@@ -442,7 +442,7 @@ function WGS:PeerSync_Catchup()
 end
 
 -- /gh sync entry point. Same as PeerSync_Catchup but bypasses the
--- 60s debounce — when an officer hits the command, they want
+-- CATCHUP_DEBOUNCE (5 min) — when an officer hits the command, they want
 -- something to happen now. Returns a reason string when the request
 -- is dropped (no officer rank, no channel) so the slash handler can
 -- print it.
@@ -583,9 +583,9 @@ end
 local LOOT_DEDUP_WINDOW = 60      -- seconds
 local ENCOUNTER_DEDUP_WINDOW = 2  -- seconds
 
+-- Thin alias over the canonical strip helper (Util/Roster.lua).
 local function shortName(full)
-    if not full then return nil end
-    return full:match("^([^%-]+)") or full
+    return WGS:ShortName(full)
 end
 
 -- Read the rev counter off a row with a 0 default. Pre-correction-UX

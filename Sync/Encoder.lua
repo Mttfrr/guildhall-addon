@@ -14,15 +14,24 @@ local EXPORT_VERSION = 4
 local EXPORT_HEADER_V3 = "WGS3"
 local EXPORT_HEADER_V4 = "WGS4"
 
--- Lazy-loaded LibDeflate handle. Stored on the WGS namespace (not in
--- a module-local) so the Encoder and Decoder share the same cache and
--- _ResetCompressionCache flushes both at once — important for tests
--- that swap LibStub between cases.
-local function GetLibDeflate()
+-- Lazy-loaded LibDeflate handle, shared by every consumer (Encoder,
+-- Decoder, PeerMessage — this file loads first in Sync/Sync.xml).
+-- Stored on the WGS namespace so all paths share one cache and
+-- _ResetCompressionCache flushes them at once — important for tests
+-- that swap LibStub between cases. The capability check covers the
+-- union of what every call site needs, so a partially-functional
+-- library stub is treated as missing everywhere consistently.
+function WGS:GetLibDeflate()
     if WGS._libDeflate ~= nil then return WGS._libDeflate or nil end
     local ok, lib = pcall(LibStub, "LibDeflate")
-    if ok and lib and type(lib.CompressDeflate) == "function"
-       and type(lib.EncodeForPrint) == "function" then
+    if ok and lib
+       and type(lib.CompressDeflate) == "function"
+       and type(lib.DecompressDeflate) == "function"
+       and type(lib.EncodeForPrint) == "function"
+       and type(lib.DecodeForPrint) == "function"
+       and type(lib.EncodeForWoWAddonChannel) == "function"
+       and type(lib.DecodeForWoWAddonChannel) == "function"
+    then
         WGS._libDeflate = lib
         return lib
     end
@@ -53,7 +62,7 @@ function WGS:Encode(data)
     -- payload's `v` field reflects the envelope ACTUALLY emitted (not
     -- EXPORT_VERSION), so decoders can route on either the envelope
     -- header OR the embedded `v` field consistently.
-    local lib = GetLibDeflate()
+    local lib = self:GetLibDeflate()
     local emitVersion = lib and EXPORT_VERSION or 3
 
     local payload = {
@@ -112,6 +121,48 @@ local function CleanLootForExport(lootEntries)
     return cleaned
 end
 
+-- Re-expand bossAttendance for export. Storage dedupes identical
+-- consecutive per-pull rosters (`sameRosterAsPrev` marker — see
+-- Modules/Attendance.lua BuildBossAttendanceFromMRT) to cap
+-- SavedVariables growth, but the platform's import counts per-pull
+-- roster membership, so the wire format ships every roster in full.
+-- Sessions without markers pass through untouched (no copies).
+local function CleanAttendanceForExport(sessions)
+    local cleaned = {}
+    for _, session in ipairs(sessions) do
+        local ba = session.bossAttendance
+        local needsExpand = false
+        if type(ba) == "table" then
+            for _, row in ipairs(ba) do
+                if type(row) == "table" and row.sameRosterAsPrev then
+                    needsExpand = true
+                    break
+                end
+            end
+        end
+        if needsExpand then
+            local copy = {}
+            for k, v in pairs(session) do copy[k] = v end
+            copy.bossAttendance = WGS:ExpandBossAttendance(ba)
+            cleaned[#cleaned + 1] = copy
+        else
+            cleaned[#cleaned + 1] = session
+        end
+    end
+    return cleaned
+end
+
+-- Per-table export pre-pass dispatch, shared by BuildExportData and
+-- ExportModule so a selective export can't drift from the full one.
+local function CleanTableForExport(mod, stored)
+    if mod == "loot" then
+        return CleanLootForExport(stored)
+    elseif mod == "attendance" then
+        return CleanAttendanceForExport(stored)
+    end
+    return stored
+end
+
 -- Build export data from all captured modules
 function WGS:BuildExportData(modules)
     modules = modules or { "attendance", "loot", "encounters", "raidCompResults", "guildBankMoneyChanges", "guildBankTransactions" }
@@ -120,11 +171,7 @@ function WGS:BuildExportData(modules)
     for _, mod in ipairs(modules) do
         local stored = self.db.global[mod]
         if stored and next(stored) ~= nil then
-            if mod == "loot" then
-                data[mod] = CleanLootForExport(stored)
-            else
-                data[mod] = stored
-            end
+            data[mod] = CleanTableForExport(mod, stored)
         end
     end
 
@@ -165,14 +212,18 @@ function WGS:BuildExportData(modules)
     return data
 end
 
--- Full export: build + encode
+-- Full export: build + encode. Returns the encoded string, or
+-- nil + reason ("empty" — already printed — or "encode-failed") so
+-- the UI can surface encode failures instead of silently no-opping.
 function WGS:ExportAll()
     local data = self:BuildExportData()
     if not data or next(data) == nil then
         self:Print("No data to export.")
-        return nil
+        return nil, "empty"
     end
-    return self:Encode(data)
+    local encoded = self:Encode(data)
+    if not encoded then return nil, "encode-failed" end
+    return encoded
 end
 
 -- Export specific module
@@ -182,11 +233,7 @@ function WGS:ExportModule(moduleName)
         self:Print("No " .. moduleName .. " data to export.")
         return nil
     end
-    local exportData = stored
-    if moduleName == "loot" then
-        exportData = CleanLootForExport(stored)
-    end
-    return self:Encode({ [moduleName] = exportData })
+    return self:Encode({ [moduleName] = CleanTableForExport(moduleName, stored) })
 end
 
 -- Selective tables that /gh export <name> will accept. Listed
@@ -227,26 +274,6 @@ function WGS:ExportTableInteractive(tableName)
         -- (early-init slash invocation in a stripped client).
         self:Print(encoded)
     end
-end
-
--- Export multiple specific modules
-function WGS:ExportModules(moduleNames)
-    local data = {}
-    for _, mod in ipairs(moduleNames) do
-        local stored = self.db.global[mod]
-        if stored and next(stored) ~= nil then
-            if mod == "loot" then
-                data[mod] = CleanLootForExport(stored)
-            else
-                data[mod] = stored
-            end
-        end
-    end
-    if next(data) == nil then
-        self:Print("No data to export for selected modules.")
-        return nil
-    end
-    return self:Encode(data)
 end
 
 --- Test-only: drop the LibDeflate handle cache so specs can flip

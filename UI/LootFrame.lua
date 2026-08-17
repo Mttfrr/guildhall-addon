@@ -10,13 +10,9 @@ StaticPopupDialogs["WGS_CONFIRM_CLEAR_EXPORTED"] = {
     OnAccept = function()
         -- Snapshot first so /gh restore can undo for 24h. Bank gold balance
         -- is left alone because it's a single absolute value, not a journal.
+        -- Key list is the canonical WGS.EXPORTED_DATA_KEYS (Core.lua).
         WGS:SnapshotExportedData()
-        WGS.db.global.loot = {}
-        WGS.db.global.attendance = {}
-        WGS.db.global.encounters = {}
-        WGS.db.global.raidCompResults = {}
-        WGS.db.global.guildBankMoneyChanges = {}
-        WGS.db.global.guildBankTransactions = {}
+        WGS:ClearExportedData()
         WGS:Print("Exported data cleared. Type /gh restore within 24h to undo.")
     end,
     timeout = 0,
@@ -31,6 +27,3 @@ function WGS:ShowExportFrame()
     self:PopulateExportEditBox()
 end
 
-function WGS:ShowImportFrame()
-    self:SelectMainFrameTab(self._ui.TAB_SYNC)
-end

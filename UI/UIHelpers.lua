@@ -399,9 +399,9 @@ local PLATFORM_URL = "https://guildhall.run"
 
 -- Strip "Foo-Realm" → "Foo" since Blizzard's chat / invite APIs take
 -- either form but the short form is what users see in addon UI.
+-- Thin alias over the canonical strip helper (Util/Roster.lua).
 local function ShortName(name)
-    if not name or name == "" then return name end
-    return name:match("^([^%-]+)") or name
+    return WGS:ShortName(name)
 end
 
 -- Resolve a StaticPopup dialog's EditBox child. Tries the modern

@@ -23,3 +23,19 @@ end
 function WGS:GetTimestamp()
     return time()
 end
+
+-- Compact relative-time formatter: "never" / "just now" / "42s ago" /
+-- "3m ago" / "5h ago" / "2d ago". The single source for every ago-style
+-- read-out (Sync tab status line, /gh diag, /gh interop) — previously
+-- three near-identical copies that could drift.
+function WGS:FormatRelativeTime(ts)
+    ts = tonumber(ts)
+    if not ts or ts <= 0 then return "never" end
+    local now = (time and time()) or 0
+    local delta = now - ts
+    if delta < 0 then return "just now" end
+    if delta < 60 then return delta .. "s ago" end
+    if delta < 3600 then return math.floor(delta / 60) .. "m ago" end
+    if delta < 86400 then return math.floor(delta / 3600) .. "h ago" end
+    return math.floor(delta / 86400) .. "d ago"
+end

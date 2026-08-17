@@ -179,4 +179,74 @@ describe("public event contract — docs/EVENTS.md", function()
             assert.are.equal("rebind", capture[1].kind)
         end)
     end)
+    describe("fired-event completeness pin", function()
+        -- The drift the audit found: events were being fired in source
+        -- that docs/EVENTS.md never mentioned, and the spec only pinned
+        -- the documented subset — so the gap was invisible to CI. This
+        -- block closes the loop in both directions: every FireEvent
+        -- literal in shipping source must be documented, and every
+        -- documented event must still have a fire site.
+
+        local function readFile(path)
+            local f = assert(io.open(path, "r"), "cannot open " .. path)
+            local s = f:read("*a")
+            f:close()
+            return s
+        end
+
+        local function documentedEvents()
+            local out = {}
+            for name in readFile("docs/EVENTS.md"):gmatch("### `(WGS_[%u_]+)`") do
+                out[name] = true
+            end
+            return out
+        end
+
+        local function firedEvents()
+            -- Shipping source only — Libs/ is vendored, spec/ is tests
+            -- (WGS_UNIT_TEST_EVENT lives there and is intentionally
+            -- not part of the public contract).
+            local p = assert(io.popen(
+                [[grep -rho 'FireEvent("WGS_[A-Z_]*"' --include='*.lua' ]] ..
+                [[Core.lua Config.lua Modules Sync UI Util 2>/dev/null]]),
+                "io.popen unavailable")
+            local out = {}
+            for line in p:lines() do
+                local name = line:match('(WGS_[%u_]+)')
+                if name then out[name] = true end
+            end
+            p:close()
+            return out
+        end
+
+        it("every event fired in source is documented in docs/EVENTS.md", function()
+            local documented = documentedEvents()
+            local missing = {}
+            for name in pairs(firedEvents()) do
+                if not documented[name] then missing[#missing + 1] = name end
+            end
+            table.sort(missing)
+            assert.same({}, missing,
+                "fired but undocumented — add these to docs/EVENTS.md: "
+                .. table.concat(missing, ", "))
+        end)
+
+        it("every documented event still has a fire site in source", function()
+            local fired = firedEvents()
+            local stale = {}
+            for name in pairs(documentedEvents()) do
+                if not fired[name] then stale[#stale + 1] = name end
+            end
+            table.sort(stale)
+            assert.same({}, stale,
+                "documented but never fired — remove from docs/EVENTS.md or restore the fire site: "
+                .. table.concat(stale, ", "))
+        end)
+
+        it("sanity: the doc scrape actually found the core events", function()
+            local documented = documentedEvents()
+            assert.is_true(documented["WGS_SESSION_STARTED"])
+            assert.is_true(documented["WGS_IMPORT_APPLIED"])
+        end)
+    end)
 end)

@@ -37,21 +37,8 @@ local msgCounter = 0
 -- LibDeflate handle (lazy, shared with Encoder/Decoder via WGS._libDeflate)
 ---------------------------------------------------------------------------
 
-local function GetLibDeflate()
-    if WGS._libDeflate ~= nil then return WGS._libDeflate or nil end
-    local ok, lib = pcall(LibStub, "LibDeflate")
-    if ok and lib
-       and type(lib.CompressDeflate) == "function"
-       and type(lib.DecompressDeflate) == "function"
-       and type(lib.EncodeForWoWAddonChannel) == "function"
-       and type(lib.DecodeForWoWAddonChannel) == "function"
-    then
-        WGS._libDeflate = lib
-        return lib
-    end
-    WGS._libDeflate = false
-    return nil
-end
+-- LibDeflate access goes through the shared WGS:GetLibDeflate()
+-- (defined in Sync/Encoder.lua, which loads first).
 
 ---------------------------------------------------------------------------
 -- Internals
@@ -103,7 +90,7 @@ function WGS:EncodePeerMessage(delta)
         return nil, "delta must be a table"
     end
 
-    local lib = GetLibDeflate()
+    local lib = WGS:GetLibDeflate()
     if not lib then return nil, "LibDeflate not available" end
 
     local json = self:ToJson(delta)
@@ -202,7 +189,7 @@ function WGS:DecodePeerMessage(senderKey, chunkString)
 
     local encoded = table.concat(parts)
 
-    local lib = GetLibDeflate()
+    local lib = WGS:GetLibDeflate()
     if not lib then
         fireError("PeerMessage.Decode", "LibDeflate not available at decode time")
         return nil

@@ -64,6 +64,27 @@ The same threshold gates outgoing broadcasts: if we ourselves aren't an
 officer, `WGS:PeerSync_Broadcast` returns `false, "not officer"`
 without touching the wire.
 
+### Known limitation: rank is the whole trust model
+
+The gate authenticates *rank*, not *content*. Any guild member whose
+rank index is ≤ 2 can broadcast rows — and, via the snapshot path
+(`mergeSnapshot`), an **entire import payload** that wholesale replaces
+another officer's imported teams / events / signups / wishlists the
+moment its stamp is newer than the receiver's `lastImport`. There is no
+per-sender confirmation, no payload signature, and no way to
+distinguish a well-meaning officer with stale data from a compromised
+or malicious officer account: officer rank IS the credential.
+
+Practical blast radius: capture tables merge row-by-row with dedup /
+LWW rules (bounded damage), but a snapshot apply rewrites the imported
+state in one shot. Recovery is a re-import from the web platform (the
+platform stays the source of truth; nothing addon-side writes back to
+it). If your guild hands rank ≤ 2 to people who shouldn't be able to
+rewrite officer addon data, either tighten your rank structure or turn
+Officer Sync off (`/gh config` → Officer Sync). A per-guild
+confirmation on first snapshot-accept from a new sender is a
+possible future hardening — deliberately not implemented yet.
+
 ## Channel selection
 
 `WGS:PeerSync_PreferredChannel()` returns the highest-priority channel
@@ -131,7 +152,7 @@ Knobs:
 
 | Name | Default | What |
 |---|---|---|
-| `CATCHUP_DEBOUNCE` | 60s | minimum gap between probes — keeps GROUP_ROSTER_UPDATE storms cheap |
+| `CATCHUP_DEBOUNCE` | 300s (5 min) | minimum gap between probes (`/gh sync` bypasses it) |
 | `CATCHUP_OFFER_WAIT` | 5s | how long the joiner waits to collect offers before requesting |
 | `CATCHUP_MAX_HISTORY` | 7 days | replay floor — never re-broadcast rows older than this regardless of `since` |
 

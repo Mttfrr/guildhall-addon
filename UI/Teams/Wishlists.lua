@@ -215,7 +215,7 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
         if not allowed then return true end
         if not playerName then return false end
         if allowed[playerName] then return true end
-        local short = playerName:match("^([^%-]+)") or playerName
+        local short = WGS:ShortName(playerName)
         return allowed[short] == true
     end
 
@@ -232,8 +232,8 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
     for _, entry in ipairs(wishlists or {}) do
         if type(entry) == "table" and type(entry.items) == "table"
             and inScope(entry.playerName) then
-            local short = (entry.playerName or ""):match("^([^%-]+)")
-                or entry.playerName or "?"
+            local short = WGS:ShortName(entry.playerName)
+            if short == "" then short = "?" end
             for _, item in ipairs(entry.items) do
                 if item.itemID then
                     local rec = items[item.itemID]
@@ -515,7 +515,7 @@ local function BuildAllowedPlayers()
         if t.id == currentTeamId then
             for _, memberName in ipairs(t.members or {}) do
                 allowed[memberName] = true
-                local short = memberName:match("^([^%-]+)") or memberName
+                local short = WGS:ShortName(memberName)
                 allowed[short] = true
             end
             local chars = WGS.db.global.characters or {}
@@ -524,7 +524,7 @@ local function BuildAllowedPlayers()
                 if info and info.alts then
                     for _, alt in ipairs(info.alts) do
                         allowed[alt] = true
-                        local altShort = alt:match("^([^%-]+)") or alt
+                        local altShort = WGS:ShortName(alt)
                         allowed[altShort] = true
                     end
                 end
@@ -734,6 +734,22 @@ local function BuildFilterDropdown(sv, cfg)
     sv._filterMenus = sv._filterMenus or {}
     sv._filterMenus[#sv._filterMenus + 1] = menu
 
+    -- Dismiss on any click outside the open menu (GLOBAL_MOUSE_DOWN
+    -- fires for every mouse press, anywhere). The opening button is
+    -- excluded: its press would hide the menu here on mouse-down, then
+    -- its OnClick toggle would immediately re-open it on mouse-up.
+    -- Registered only while shown so hidden menus cost nothing. The
+    -- RegisterEvent guard keeps stripped test frames harmless.
+    if menu.RegisterEvent then
+        menu:SetScript("OnShow", function(self) self:RegisterEvent("GLOBAL_MOUSE_DOWN") end)
+        menu:SetScript("OnHide", function(self) self:UnregisterEvent("GLOBAL_MOUSE_DOWN") end)
+        menu:SetScript("OnEvent", function(self)
+            if not self:IsMouseOver() and not btn:IsMouseOver() then
+                self:Hide()
+            end
+        end)
+    end
+
     local menuButtons = {}
     btn:SetScript("OnClick", function()
         if menu:IsShown() then menu:Hide(); return end
@@ -842,6 +858,13 @@ local function Populate(tab)
     if #wishlists == 0 then
         tab._bossGroups, tab._locations, tab._slots, tab._armorTypes =
             {}, {}, {}, {}
+        -- Clear sticky selections too — a filter picked before the
+        -- wishlists were cleared/re-imported would otherwise ghost
+        -- into the next populate with data.
+        ResetStaleFilter(tab, "selectedBossKey",     tab.bossBtn,     {}, ALL_BOSSES)
+        ResetStaleFilter(tab, "selectedLocationKey", tab.locationBtn, {}, ALL_LOCATIONS)
+        ResetStaleFilter(tab, "selectedSlotKey",     tab.slotBtn,     {}, ALL_SLOTS)
+        ResetStaleFilter(tab, "selectedArmorKey",    tab.armorBtn,    {}, ALL_ARMOR)
         ui.CreateImportHint(tab.content, "No wishlists imported yet.", 5, -5)
         tab.content:SetHeight(72)
         return

@@ -65,7 +65,7 @@ local options = {
                     order = 13,
                     type = "toggle",
                     name = "Guild Groups Only",
-                    desc = "Only track loot and attendance when at least half the group are guildmates. Prevents tracking PUG runs.",
+                    desc = "Only track loot and attendance when at least 80% of the group are guildmates. Prevents tracking PUG runs.",
                     width = "full",
                     get = function() return WGS.db.profile.guildGroupsOnly end,
                     set = function(_, val) WGS.db.profile.guildGroupsOnly = val end,
@@ -147,10 +147,14 @@ local options = {
                     get = function() return not WGS.db.profile.minimap.hide end,
                     set = function(_, val)
                         WGS.db.profile.minimap.hide = not val
+                        -- Silent LibStub lookup: a broken/partial Libs
+                        -- install shouldn't error out the settings panel.
+                        local icon = LibStub("LibDBIcon-1.0", true)
+                        if not icon then return end
                         if val then
-                            LibStub("LibDBIcon-1.0"):Show("GuildHall")
+                            icon:Show("GuildHall")
                         else
-                            LibStub("LibDBIcon-1.0"):Hide("GuildHall")
+                            icon:Hide("GuildHall")
                         end
                     end,
                 },
@@ -210,16 +214,7 @@ local options = {
                     confirm = true,
                     confirmText = "Clear all imported web data? You'll need to re-import from the web app.",
                     func = function()
-                        WGS.db.global.teams = {}
-                        WGS.db.global.wishlists = {}
-                        WGS.db.global.wishlistImportedAt = 0
-                        WGS.db.global.bossNotes = {}
-                        WGS.db.global.raidComps = {}
-                        WGS.db.global.events = {}
-                        WGS.db.global.gearAudit = {}
-                        WGS.db.global.characters = {}
-                        WGS.db.global.characterLookup = {}
-                        WGS.db.global.targetIlvl = 0
+                        WGS:ClearImportedData()
                         WGS:Print("Imported web data cleared.")
                     end,
                 },
@@ -231,23 +226,9 @@ local options = {
                     confirm = true,
                     confirmText = "Are you sure you want to clear ALL data? This cannot be undone.",
                     func = function()
-                        WGS.db.global.attendance = {}
-                        WGS.db.global.loot = {}
-                        WGS.db.global.encounters = {}
-                        WGS.db.global.raidCompResults = {}
-                        WGS.db.global.guildBankMoneyChanges = {}
-                        WGS.db.global.guildBankTransactions = {}
+                        WGS:ClearExportedData()
+                        WGS:ClearImportedData()
                         WGS.db.global.lastKnownGold = nil
-                        WGS.db.global.teams = {}
-                        WGS.db.global.wishlists = {}
-                        WGS.db.global.wishlistImportedAt = 0
-                        WGS.db.global.bossNotes = {}
-                        WGS.db.global.raidComps = {}
-                        WGS.db.global.events = {}
-                        WGS.db.global.gearAudit = {}
-                        WGS.db.global.characters = {}
-                        WGS.db.global.characterLookup = {}
-                        WGS.db.global.targetIlvl = 0
                         WGS:Print("All data cleared.")
                     end,
                 },
