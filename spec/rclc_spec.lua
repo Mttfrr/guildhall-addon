@@ -710,7 +710,9 @@ describe("Modules/RCLC.lua", function()
         assert.is_truthy(frame.text.last:find("BiS"))
         assert.is_truthy(frame.text.last:find("+5.3%", 1, true),
             "the Droptimizer gain renders beside the priority")
-        assert.are.equal(4, data[1].cols[6].value, "sort weight stays priority-driven")
+        -- Banded weight: priority band (4 × 1000) + bounded sim tie-break
+        -- (5.3% → 53). Priority still dominates; gain only breaks ties.
+        assert.are.equal(4053, data[1].cols[6].value, "banded sort weight: priority band + sim tie-break")
     end)
 
     it("voting cell survives an RCLC surface drift (pcall guard) and still writes the value", function()
