@@ -35,8 +35,10 @@ local RELEASE_NOTES = {
                 "New toggles under Settings → RCLootCouncil — both on by default, and completely inert without RCLC installed",
             } },
             { heading = "Changed", items = {
-                "Redesigned Wishlists browser — events-style rows with class icons, wishers ranked BiS-first, and items grouped under the boss each wish actually names (with loot-history fallback for older imports)",
-                "Filter the Wishlists browser by Location (where the item drops), Slot and Armor type (Cloth → Plate) alongside Boss — the four combine, and item rows show the armor type and location next to the slot",
+                "Redesigned Wishlists browser — events-style rows with class icons and wishers ranked BiS-first",
+                "Group the Wishlists browser by Boss, Player, Location, Slot or Armor — one dropdown pivots the whole list. Player mode finally answers \"what does this raider still need?\" at a glance",
+                "Search the Wishlists browser across everything at once — item name, boss, location, slot, armor, even wisher names",
+                "Every wishlist section collapses, with item and wish counts on the header, so a long list reads as an index instead of a scroll",
                 "Wishlist imports are tier-scoped — a retired tier's wishes no longer show on tooltips or in RCLC frames",
                 "Wishlist items added from Discord (/wishlist add) reach the addon on your next import — no website visit needed",
             } },
