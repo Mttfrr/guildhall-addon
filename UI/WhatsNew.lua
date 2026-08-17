@@ -28,6 +28,8 @@ local RELEASE_NOTES = {
             { heading = "Added", items = {
                 "Run RCLootCouncil? The council's decisions now land in the loot log — response (Mainspec / Offspec / …), vote count, and award reasons — captured by every raider running GuildHall, not just the loot master",
                 "Your GuildHall wishlists show up where the council votes: a sortable GuildHall column in RCLC's voting frame, plus your own wish on the roll window",
+                "Droptimizer gains ride along — a raider who imported their Raidbots sim on the platform shows as \"BiS +2.3%\" in the voting column, the roll window, the Wishlists browser and the loot tooltip",
+                "Deleting a loot row in-game (or the trade-flow retiring a mis-captured holder) now deletes the platform's copy on your next export — no more phantom rows living on the website forever",
                 "Trade-flow accuracy: when a drop lands on one raider and the council awards it to another, the log keeps one row — the winner's",
                 "/gh rclc import backfills your entire RCLC loot history into GuildHall in one pass (safe to re-run)",
                 "New toggles under Settings → RCLootCouncil — both on by default, and completely inert without RCLC installed",

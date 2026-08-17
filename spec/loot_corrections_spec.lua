@@ -150,3 +150,70 @@ describe("WGS:DeleteLootRow", function()
         assert.are.equal(200, fired.row.timestamp)
     end)
 end)
+
+-- Platform tombstones: every local delete also queues the row's natural
+-- key for the NEXT platform export (Sync/Encoder.lua ships the list),
+-- so a row that reached the web app before its deletion doesn't live
+-- there forever. The RCLC trade-flow holder retirement is the common
+-- producer, but any correction delete qualifies.
+describe("platform loot tombstones", function()
+    local WGS
+    before_each(function()
+        WGS = setup()
+        WGS.db.global.loot = {
+            { itemID = 1, player = "X-Realm", timestamp = 100 },
+            { itemID = 2, player = "Y-Realm", timestamp = 200 },
+        }
+    end)
+
+    it("DeleteLootRow records the deleted row's key", function()
+        WGS:DeleteLootRow(2)
+        local tombs = WGS.db.global.lootTombstones
+        assert.are.equal(1, #tombs)
+        assert.are.equal(2, tombs[1].itemID)
+        assert.are.equal("Y-Realm", tombs[1].player)
+        assert.are.equal(200, tombs[1].timestamp)
+        assert.is_number(tombs[1].deletedAt)
+    end)
+
+    it("dedupes on the natural key", function()
+        WGS:RecordLootTombstone({ itemID = 9, player = "A-R", timestamp = 50 })
+        WGS:RecordLootTombstone({ itemID = 9, player = "A-R", timestamp = 50 })
+        assert.are.equal(1, #WGS.db.global.lootTombstones)
+    end)
+
+    it("ignores rows missing any key component", function()
+        WGS:RecordLootTombstone({ itemID = 9, player = "A-R" })
+        WGS:RecordLootTombstone({ itemID = 9, timestamp = 50 })
+        WGS:RecordLootTombstone(nil)
+        assert.is_nil(WGS.db.global.lootTombstones)
+    end)
+
+    it("prunes by age and caps the list oldest-first", function()
+        local now = WGS:GetTimestamp()
+        local list = {}
+        -- One ancient entry (beyond 45d) + 205 fresh ones.
+        list[1] = { itemID = 1, player = "Old-R", timestamp = 1,
+                    deletedAt = now - (46 * 24 * 60 * 60) }
+        for i = 2, 206 do
+            list[i] = { itemID = i, player = "P-R", timestamp = i, deletedAt = now }
+        end
+        WGS.db.global.lootTombstones = list
+        WGS:PruneLootTombstones()
+        local kept = WGS.db.global.lootTombstones
+        assert.are.equal(200, #kept, "age prune then cap at 200")
+        assert.are.equal(7, kept[1].itemID,
+            "ancient entry gone, then oldest fresh entries dropped to fit the cap")
+    end)
+
+    it("BuildExportData ships the list; empty list ships nothing", function()
+        WGS:DeleteLootRow(1)
+        local data = WGS:BuildExportData()
+        assert.is_table(data.lootTombstones)
+        assert.are.equal(1, data.lootTombstones[1].itemID)
+
+        WGS.db.global.lootTombstones = {}
+        local data2 = WGS:BuildExportData()
+        assert.is_nil(data2.lootTombstones)
+    end)
+end)
