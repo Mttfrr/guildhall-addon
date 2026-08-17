@@ -5,21 +5,60 @@ local L = GuildHall_L
 ---@class WGSLootModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("Loot", "AceEvent-3.0")
 
--- Item quality threshold (only track Epic+ by default)
-local QUALITY_THRESHOLD = 4  -- Epic
+-- Item quality threshold (only track Epic+ by default). WGS-level so
+-- the RCLC bridge (Modules/RCLC.lua, loads after this file in
+-- Modules.xml) applies the SAME floor instead of a drifting private
+-- copy.
+WGS.LOOT_QUALITY_THRESHOLD = 4  -- Epic
+local QUALITY_THRESHOLD = WGS.LOOT_QUALITY_THRESHOLD
+
+-- How far apart a chat/MRT-captured row and an RCLC council award may
+-- sit and still be the same drop. Much wider than the MRT dedup window
+-- (60s) because a council deliberates — the award routinely lands
+-- minutes after the physical loot event. Shared by the RCLC bridge's
+-- upgrade/retire matching AND this file's award-arrived-first chat
+-- dedup, so the two sides of the same heuristic can't drift.
+WGS.RCLC_AWARD_MATCH_WINDOW = 900
 
 -- Boss encounter tracking: stores the name of the last boss killed
 -- so loot picked up shortly after can be attributed to that boss.
 local lastBossName = ""
 local bossNameTimer = nil
 
---- Extract itemID from an item link. Single implementation shared by
---- the CHAT_MSG_LOOT capture path and the MRT reconciliation pass so
---- both compare apples to apples.
-local function ItemIDFromLink(link)
+--- Extract itemID from an item link (or pass a numeric id through).
+--- The single canonical implementation — the CHAT_MSG_LOOT capture
+--- path, the MRT reconciliation pass, and the RCLC bridge all route
+--- here so they compare apples to apples.
+function WGS:ItemIDFromLink(link)
+    if type(link) == "number" then return link end
     if type(link) ~= "string" then return nil end
     local id = link:match("item:(%d+)")
     return id and tonumber(id) or nil
+end
+
+local function ItemIDFromLink(link)
+    return WGS:ItemIDFromLink(link)
+end
+
+--- Is there an RCLC council-award row (rclcId set) already covering
+--- this drop? Same (itemID + short player + window) heuristic as the
+--- RCLC bridge's own matching, restricted to award rows so two genuine
+--- copies of an item both captured by chat are never suppressed. Used
+--- by OnLootMessage to skip the chat insert when the award beat it.
+function WGS:HasRCLCAwardRow(itemID, player, timestamp)
+    local loot = self.db and self.db.global and self.db.global.loot
+    if type(loot) ~= "table" then return false end
+    local short = self:ShortName(player)
+    for _, row in ipairs(loot) do
+        if row.rclcId
+           and row.itemID == itemID
+           and self:ShortName(row.player) == short
+           and math.abs((row.timestamp or 0) - (timestamp or 0)) <= WGS.RCLC_AWARD_MATCH_WINDOW
+        then
+            return true
+        end
+    end
+    return false
 end
 
 -- Build loot message patterns from WoW's global strings (locale-safe)
@@ -148,6 +187,15 @@ function module:OnLootMessage(_, msg, ...)
 
     local itemID = ItemIDFromLink(itemLink)
     if not itemID then return end
+
+    -- RCLC-award-arrived-first dedup. Normally the chat capture lands
+    -- first and the council's award later UPGRADES it in place
+    -- (Modules/RCLC.lua step 2). But on ML flows / laggy chat the
+    -- "history" comm can beat the local CHAT_MSG_LOOT — inserting here
+    -- would then double-record the drop next to the award row.
+    if WGS:HasRCLCAwardRow(itemID, player, WGS:GetTimestamp()) then
+        return
+    end
 
     local playerId = WGS:ResolvePlayerForCharacter(player)
 

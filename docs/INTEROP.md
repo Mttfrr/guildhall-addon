@@ -303,15 +303,18 @@ timestamp-derived stand-in so re-runs stay idempotent.
 - **Voting-frame column** via the official Column API (3.23+):
   `RCVotingFrame:AddColumn(spec, "response", "after")`, colName
   `guildhall_wish`. The cell shows the candidate's imported wish
-  priority for the current session's item (LootDistHelper colors);
-  `comparesort` orders BiS=4 > High=3 > Medium=2 > Low=1 > absent=0.
-  The voting frame builds its columns inside RCLC's `OnInitialize`, so
-  the install poll-retries (1s, ≤30 tries) like the wowaudit plugin.
+  priority for the current session's item (canonical
+  `ui.PRIORITY_COLORS` chrome, read at call time) plus the wish's
+  Droptimizer gain (`simPct`, e.g. `BiS +4.2%`) when the wisher's sim
+  shipped one; `comparesort` orders BiS=4 > High=3 > Medium=2 > Low=1 >
+  absent=0 (gain doesn't affect the sort). The voting frame builds its
+  columns inside RCLC's `OnInitialize`, so the install poll-retries
+  (1s, ≤30 tries) like the wowaudit plugin.
 - **Roll-window note**: `hooksecurefunc` on
   `RCLootFrame.EntryManager.GetEntry` + per-entry `Update` post-hooks
-  append the player's own wish (`GH: BiS`) to the entry's `itemLvl`
-  line. `Update` rebuilds that text each call, so the append can't
-  stack.
+  append the player's own wish (`GH: BiS`, with the `simPct` gain when
+  present) to the entry's `itemLvl` line. `Update` rebuilds that text
+  each call, so the append can't stack.
 - **Freshness share** on our own `"GHall"` prefix
   (`Comms:GetSender("GHall")` auto-registers it — the sender MUST be
   created before `BulkSubscribe`, which asserts the prefix is known).

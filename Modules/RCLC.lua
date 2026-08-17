@@ -29,47 +29,55 @@ local L = GuildHall_L
 ---@class WGSRCLCModule: AceModule, AceEvent-3.0
 local module = WGS:NewModule("RCLC", "AceEvent-3.0")
 
--- Same Epic+ floor as Modules/Loot.lua's QUALITY_THRESHOLD. Only
--- applied on fresh inserts when the item's quality is actually cached —
--- 0 means "uncached", tolerated like the MRT gap-fill path does.
-local QUALITY_THRESHOLD = 4
+-- The shared Epic+ floor (WGS.LOOT_QUALITY_THRESHOLD, declared in
+-- Modules/Loot.lua which loads before this file). Only applied on
+-- fresh inserts when the item's quality is actually cached — 0 means
+-- "uncached", tolerated like the MRT gap-fill path does.
+local QUALITY_THRESHOLD = WGS.LOOT_QUALITY_THRESHOLD or 4
 
--- How far apart a chat/MRT-captured row and the council's award may sit
--- and still be the same drop. Much wider than the MRT dedup window (60s)
+-- Shared "same drop" window (WGS.RCLC_AWARD_MATCH_WINDOW, declared in
+-- Modules/Loot.lua): much wider than the MRT dedup window (60s)
 -- because a council deliberates — the award routinely lands minutes
--- after the physical loot event.
-local AWARD_MATCH_WINDOW = 900
+-- after the physical loot event. Loot.lua's chat capture applies the
+-- same window for its award-arrived-first dedup.
+local AWARD_MATCH_WINDOW = WGS.RCLC_AWARD_MATCH_WINDOW or 900
 
 -- Our own comm prefix on RCLC's transport (Comms:GetSender auto-
 -- registers it). Carries the "gh_wish" per-item wishlist share.
 local GH_PREFIX = "GHall"
 
--- Priority label → chrome/weight. Labels are the platform's wishlist
--- vocabulary; colors kept in lockstep with UI/UIHelpers.lua's
--- ui.PRIORITY_COLORS (the canonical table — Modules load before UI/,
--- so this file can't reach it at file scope and keeps a private copy).
-local PRIORITY_COLORS = {
-    BiS    = "|cffff8000",
-    High   = "|cffa335ee",
-    Medium = "|cff0070dd",
-    Low    = "|cff1eff00",
-}
+-- Priority label → weight. Labels are the platform's wishlist
+-- vocabulary.
 local PRIORITY_WEIGHT = { BiS = 4, High = 3, Medium = 2, Low = 1 }
+
+--- Colour escape ("|cff…") for a priority label, derived at CALL time
+--- from the canonical hex table in UI/UIHelpers.lua
+--- (ui.PRIORITY_COLORS, stored WITHOUT the "|c" prefix). Modules load
+--- before UI/, so the table can't be read at file scope — but every
+--- caller here runs long after load (cell updates, roll windows).
+--- Deriving instead of keeping a private "|cff…" copy is what prevents
+--- the doubled-|c bug a same-form copy-paste across that boundary
+--- produces. White fallback when UI isn't loaded (spec environments).
+local function PriorityColorEscape(priority)
+    local ui = WGS._ui
+    local hex = ui and ui.PRIORITY_COLORS and ui.PRIORITY_COLORS[priority]
+    return hex and ("|c" .. hex) or "|cffffffff"
+end
 
 ---------------------------------------------------------------------------
 -- HistoryEntry mapping
 ---------------------------------------------------------------------------
 
+-- Thin aliases over the canonical helpers (WGS:ShortName in
+-- Util/Roster.lua; WGS:ItemIDFromLink in Modules/Loot.lua — number
+-- pass-through included). Note ShortName returns "" (not nil) for
+-- absent input.
 local function shortName(full)
-    if type(full) ~= "string" then return nil end
-    return full:match("^([^%-]+)") or full
+    return WGS:ShortName(full)
 end
 
 local function ItemIDFromLink(link)
-    if type(link) == "number" then return link end
-    if type(link) ~= "string" then return nil end
-    local id = link:match("item:(%d+)")
-    return id and tonumber(id) or nil
+    return WGS:ItemIDFromLink(link)
 end
 
 --- HistoryEntry.instance is "InstanceName-DifficultyName" concatenated
@@ -221,12 +229,29 @@ function WGS:RecordRCLCAward(winner, entry, opts)
         end
     end
 
+    -- Quality gate BEFORE the holder-row retirement below: a cached
+    -- sub-Epic award used to delete the holder's chat row and then
+    -- skip its own insert — net data loss for an award we weren't
+    -- going to record anyway.
+    if mapped.itemQuality > 0 and mapped.itemQuality < QUALITY_THRESHOLD then
+        return "skipped"
+    end
+
     -- Retail council flow: the boss drop lands on a random raider, the
     -- council votes, the holder trades the item to the winner. The chat
     -- capture recorded the HOLDER (entry.owner) — once the award names
     -- someone else, that row is a false ledger attribution: retire it
     -- through the tombstone path (quietly — no officer acted) so peers
     -- drop it too, and the winner's award row below stays the only one.
+    --
+    -- Owner-absent fallback: RCLC doesn't always populate entry.owner
+    -- (older entries, some flows). The holder's chat row would then
+    -- survive next to the award row. When exactly ONE un-award-tagged
+    -- row for the same item sits in the window under a different
+    -- player, that's the stray holder row — retire it. Two or more
+    -- candidates means multiple copies of the item genuinely dropped;
+    -- guessing which row is the holder's would risk deleting a real
+    -- drop, so ambiguity leaves everything alone.
     local owner = entry.owner
     if type(owner) == "string" and owner ~= "" and shortName(owner) ~= short then
         local ownerShort = shortName(owner)
@@ -240,11 +265,23 @@ function WGS:RecordRCLCAward(winner, entry, opts)
                 break
             end
         end
+    elseif owner == nil then
+        local candidate, candidates = nil, 0
+        for i, row in ipairs(loot) do
+            if not row.rclcId
+               and row.itemID == mapped.itemID
+               and shortName(row.player) ~= short
+               and math.abs((row.timestamp or 0) - mapped.timestamp) <= AWARD_MATCH_WINDOW
+            then
+                candidates = candidates + 1
+                candidate = i
+            end
+        end
+        if candidates == 1 then
+            self:DeleteLootRow(candidate, { silent = true })
+        end
     end
 
-    if mapped.itemQuality > 0 and mapped.itemQuality < QUALITY_THRESHOLD then
-        return "skipped"
-    end
     table.insert(loot, mapped)
     self:FireEvent("WGS_LOOT_RECORDED", mapped)
     if not (opts and opts.backfill) then
@@ -445,7 +482,7 @@ end
 --- wishlist playerName, same rule the loot dedup paths use.
 function WGS:_RCLC_WishForPlayer(itemID, playerName)
     local short = shortName(playerName)
-    if not short or not itemID then return nil end
+    if short == "" or not itemID then return nil end
     local best
     for _, w in ipairs(self:_RCLC_WishesForItem(itemID) or {}) do
         if shortName(w.playerName) == short then
@@ -489,43 +526,73 @@ local function currentSessionItemID(rc)
     return nil
 end
 
+--- Render a wish as "<Priority> +N.N%" — the priority in its canonical
+--- colour, the Droptimizer gain (platform's per-wish simPct, when the
+--- wisher imported a sim) dimmed-gold beside it. Shared by the voting
+--- column cell and the roll-window annotation.
+local function FormatWish(wish)
+    local text = PriorityColorEscape(wish.priority) .. (wish.priority or "?") .. "|r"
+    local pct = tonumber(wish.simPct)
+    if pct then
+        text = text .. string.format(" |cffffd100%+.1f%%|r", pct)
+    end
+    return text
+end
+
 --- lib-st DoCellUpdate for the "GuildHall" column. MUST always write
 --- cols[column].value — lib-st sorts on it even for rows that were
---- never on screen.
+--- never on screen. Body pcall-guarded per the module's contract: an
+--- RCLC surface drift degrades this cell to "-", never a Lua error
+--- inside RCLC's render loop.
 local function WishCellUpdate(rowFrame, frame, data, cols, row, realrow, column, fShow)
-    local rc = WGS:GetRCLC()
-    local rowData = data and data[realrow]
-    local candidate = rowData and rowData.name
-    local itemID = rc and currentSessionItemID(rc)
-    local wish = (candidate and itemID) and WGS:_RCLC_WishForPlayer(itemID, candidate) or nil
     local text, weight = "-", 0
-    if wish then
-        weight = PRIORITY_WEIGHT[wish.priority] or 0
-        text = (PRIORITY_COLORS[wish.priority] or "|cffffffff") .. (wish.priority or "?") .. "|r"
+    local ok, err = pcall(function()
+        local rc = WGS:GetRCLC()
+        local rowData = data and data[realrow]
+        local candidate = rowData and rowData.name
+        local itemID = rc and currentSessionItemID(rc)
+        local wish = (candidate and itemID) and WGS:_RCLC_WishForPlayer(itemID, candidate) or nil
+        if wish then
+            weight = PRIORITY_WEIGHT[wish.priority] or 0
+            text = FormatWish(wish)
+        end
+    end)
+    if not ok then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.WishCellUpdate", error = tostring(err) })
     end
     if frame and frame.text then frame.text:SetText(text) end
+    local rowData = data and data[realrow]
     if rowData and rowData.cols and rowData.cols[column] then
         rowData.cols[column].value = weight
     end
 end
 
 --- lib-st comparesort (`st` is the ScrollingTable). BiS=4 > High=3 >
---- Medium=2 > Low=1 > absent=0.
+--- Medium=2 > Low=1 > absent=0. pcall-guarded — a drifted lib-st
+--- surface must yield a stable (false) comparison, not break RCLC's
+--- sort pass.
 local function WishCompareSort(st, rowa, rowb, sortbycol)
-    local rc = WGS:GetRCLC()
-    local itemID = rc and currentSessionItemID(rc)
-    local function weightOf(rowIndex)
-        local rowData = st:GetRow(rowIndex)
-        local wish = (rowData and rowData.name and itemID)
-            and WGS:_RCLC_WishForPlayer(itemID, rowData.name) or nil
-        return wish and (PRIORITY_WEIGHT[wish.priority] or 0) or 0
+    local ok, result = pcall(function()
+        local rc = WGS:GetRCLC()
+        local itemID = rc and currentSessionItemID(rc)
+        local function weightOf(rowIndex)
+            local rowData = st:GetRow(rowIndex)
+            local wish = (rowData and rowData.name and itemID)
+                and WGS:_RCLC_WishForPlayer(itemID, rowData.name) or nil
+            return wish and (PRIORITY_WEIGHT[wish.priority] or 0) or 0
+        end
+        local a, b = weightOf(rowa), weightOf(rowb)
+        if a == b then return false end
+        local column = st.cols[sortbycol]
+        local direction = column.sort or column.defaultsort or 1
+        if direction == 1 then return a < b end
+        return a > b
+    end)
+    if not ok then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.WishCompareSort", error = tostring(result) })
+        return false
     end
-    local a, b = weightOf(rowa), weightOf(rowb)
-    if a == b then return false end
-    local column = st.cols[sortbycol]
-    local direction = column.sort or column.defaultsort or 1
-    if direction == 1 then return a < b end
-    return a > b
+    return result
 end
 
 --- Install the "GuildHall" column after "response" via RCLC's official
@@ -556,6 +623,12 @@ function WGS:_RCLC_InstallVotingColumn(rc, attempt)
         votingColumnInstalled = true
         return true
     end
+    -- Bounded retry: at most 30 one-second pcall probes, then give up
+    -- for the session. Deliberately NOT cancelled early on a failed
+    -- probe — "voting frame not built yet" and "voting frame never
+    -- coming" are indistinguishable from out here, and 30 cheap pcalls
+    -- is an acceptable worst case for the RCLC-present-but-frame-absent
+    -- corner.
     attempt = (attempt or 0) + 1
     if attempt < 30 and C_Timer and C_Timer.After then
         C_Timer.After(1, function() WGS:_RCLC_InstallVotingColumn(rc, attempt) end)
@@ -571,24 +644,31 @@ local lootFrameHooked = false
 local hookedEntries = {}
 
 --- Append the player's OWN wish for the entry's item to the itemLvl
---- line ("GH: BiS" style). Nothing when absent. Safe against stacking:
---- entry:Update rebuilds the itemLvl text from scratch before our
---- post-hook appends.
+--- line ("GH: BiS +4.2%" style — priority plus the Droptimizer gain
+--- when the player's sim shipped one). Nothing when absent. Safe
+--- against stacking: entry:Update rebuilds the itemLvl text from
+--- scratch before our post-hook appends. pcall-guarded per the
+--- module's contract — a drifted roll-entry shape must no-op, not
+--- error inside RCLC's Update.
 local function AnnotateRollEntry(rc, entry)
-    if not (entry and entry.itemLvl and entry.item) then return end
-    local session = entry.item.sessions and entry.item.sessions[1]
-    local itemID
-    if session then
-        local ok, lt = pcall(rc.GetLootTable, rc)
-        itemID = ok and lt and lt[session] and lt[session].itemID or nil
+    local ok, err = pcall(function()
+        if not (entry and entry.itemLvl and entry.item) then return end
+        local session = entry.item.sessions and entry.item.sessions[1]
+        local itemID
+        if session then
+            local ok2, lt = pcall(rc.GetLootTable, rc)
+            itemID = ok2 and lt and lt[session] and lt[session].itemID or nil
+        end
+        itemID = itemID or ItemIDFromLink(entry.item.link)
+        if not itemID then return end
+        local wish = WGS:_RCLC_WishForPlayer(itemID, WGS:GetPlayerKey())
+        if not wish then return end
+        local text = entry.itemLvl:GetText() or ""
+        entry.itemLvl:SetText(text .. "  |cffffd100GH:|r " .. FormatWish(wish))
+    end)
+    if not ok then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.AnnotateRollEntry", error = tostring(err) })
     end
-    itemID = itemID or ItemIDFromLink(entry.item.link)
-    if not itemID then return end
-    local wish = WGS:_RCLC_WishForPlayer(itemID, WGS:GetPlayerKey())
-    if not wish then return end
-    local color = PRIORITY_COLORS[wish.priority] or "|cffffffff"
-    local text = entry.itemLvl:GetText() or ""
-    entry.itemLvl:SetText(text .. "  |cffffd100GH:|r " .. color .. (wish.priority or "?") .. "|r")
 end
 
 --- Hook the roll window's EntryManager (the wowaudit pattern, via
@@ -646,9 +726,12 @@ function module:OnEnable()
     -- RCLC's Comms:OnDisable wipes EVERY subscription on its transport
     -- (ours included). Re-wire when it comes back; the installs replace
     -- their old handles, so this can't stack double deliveries.
+    -- Re-read db.profile at fire time — capturing the `profile` local
+    -- would resurrect toggles the user has since switched off.
     pcall(hooksecurefunc, rc, "OnEnable", function()
-        if profile.rclcCapture then WGS:_RCLC_InstallAwardComms(rc) end
-        if profile.rclcWishlistColumn then WGS:_RCLC_InstallWishComms(rc) end
+        local p = WGS.db and WGS.db.profile or {}
+        if p.rclcCapture then WGS:_RCLC_InstallAwardComms(rc) end
+        if p.rclcWishlistColumn then WGS:_RCLC_InstallWishComms(rc) end
     end)
 end
 

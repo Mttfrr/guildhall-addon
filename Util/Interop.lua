@@ -146,6 +146,20 @@ function WGS:InteropStatus()
         for _ in pairs(vmrt) do vmrtSubTables = vmrtSubTables + 1 end
     end
 
+    -- RCLC version drift: docs/INTEROP.md's bridge contract was
+    -- verified against RCLootCouncil 3.23.x. A newer RCLC still mostly
+    -- degrades to pcall'd no-ops if its internals moved, but the
+    -- officer should KNOW the bridge is running against an unverified
+    -- surface instead of debugging silently-missing award rows.
+    local rclcVersion, rclcVersionDrifted = nil, false
+    do
+        local rc = self:GetRCLC()
+        if rc and type(rc.version) == "string" and rc.version ~= "" then
+            rclcVersion = rc.version
+            rclcVersionDrifted = self:CompareVersions(rclcVersion, "3.24.0") >= 0
+        end
+    end
+
     -- MRT note text size: GMRT.F:GetNote() or MRT.F.GetNote() if the
     -- public API is available, otherwise VMRT.Note.Text1 fallback.
     local noteText, noteAPIUsed = nil, nil
@@ -181,6 +195,8 @@ function WGS:InteropStatus()
         rclcCaptureOn   = (self.db and self.db.profile and self.db.profile.rclcCapture) ~= false,
         rclcLootCount   = rclcLootCount,
         rclcLootLast    = rclcLootLast,
+        rclcVersion     = rclcVersion,
+        rclcVersionDrifted = rclcVersionDrifted,
     }
 end
 
@@ -220,7 +236,14 @@ function WGS:PrintInteropStatus()
             "|cff888888  No MRT/NSRT data available — bridge code stays dormant.|r")
     end
 
-    self:Print(string.format("  RCLC loaded:       %s", yesno(s.rclcLoaded)))
+    self:Print(string.format("  RCLC loaded:       %s%s", yesno(s.rclcLoaded),
+        s.rclcVersion and ("  (v" .. s.rclcVersion .. ")") or ""))
+    if s.rclcVersionDrifted then
+        self:Print(string.format(
+            "  |cffffaa00RCLC v%s is newer than the verified 3.23.x — the bridge " ..
+            "degrades to no-ops where RCLC's internals moved. Check for a GuildHall update.|r",
+            s.rclcVersion))
+    end
     if s.rclcLoaded then
         self:Print("|cffffd100  RCLC award capture|r")
         self:Print(string.format("    capture: %s   rows tagged source=rclc: %d / %d total  (last: %s)",
