@@ -88,15 +88,23 @@ local UNKNOWN_NAME    = "Unknown"
 -- (the loot-council default — "what drops here, who wants it"), Player
 -- second (the raider question — "what does Bob still need"), then the
 -- three item-attribute pivots.
+-- NOTE the field is `name`, not `label`: these entries are fed straight
+-- to the shared dropdown factory, which renders `o.name`. Shipping
+-- `label` here made every menu row concatenate nil and throw, so the
+-- dropdown looked simply dead — pinned by spec now.
 local GROUP_MODES = {
-    { key = "boss",     label = "Boss" },
-    { key = "player",   label = "Player" },
-    { key = "location", label = "Location" },
-    { key = "slot",     label = "Slot" },
-    { key = "armor",    label = "Armor" },
+    { key = "boss",     name = "Boss" },
+    { key = "player",   name = "Player" },
+    { key = "location", name = "Location" },
+    { key = "slot",     name = "Slot" },
+    { key = "armor",    name = "Armor" },
 }
 local GROUP_MODE_LABEL = {}
-for _, m in ipairs(GROUP_MODES) do GROUP_MODE_LABEL[m.key] = m.label end
+for _, m in ipairs(GROUP_MODES) do GROUP_MODE_LABEL[m.key] = m.name end
+
+-- Exposed so specs can pin the dropdown's option contract against the
+-- pivots BuildWishlistGroups actually accepts.
+WGS.WISHLIST_GROUP_MODES = GROUP_MODES
 
 -- Above this many groups the view opens collapsed — an index you drill
 -- into. At or below it, everything is open, because a handful of groups
@@ -576,8 +584,13 @@ end
 --
 -- In player mode the label carries the class icon + class colour, so the
 -- group reads exactly like a wisher row one level up.
-local CHEVRON_OPEN   = "\226\150\188"   -- ▼
-local CHEVRON_CLOSED = "\226\150\182"   -- ▶
+-- Blizzard's own tree-expander art. The first cut used UTF-8 chevrons
+-- (▼/▶) in a FontString, which render as an empty box: WoW's default
+-- fonts carry no glyph at those codepoints. These two textures are the
+-- collapse idiom the spellbook/tradeskill trees use and have shipped
+-- since vanilla, so they can't go missing.
+local TEX_EXPANDED  = "Interface\\Buttons\\UI-MinusButton-Up"
+local TEX_COLLAPSED = "Interface\\Buttons\\UI-PlusButton-Up"
 
 local function BuildGroupHeader(content, yOff, group, collapsed, onToggle)
     local row = CreateFrame("Button", nil, content)
@@ -594,10 +607,11 @@ local function BuildGroupHeader(content, yOff, group, collapsed, onToggle)
     divider:SetColorTexture(0.3, 0.3, 0.3, 0.6)
 
     local x = 4
-    local chev = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local chev = row:CreateTexture(nil, "ARTWORK")
+    chev:SetSize(14, 14)
     chev:SetPoint("LEFT", row, "LEFT", x, -1)
-    chev:SetText("|cff888888" .. (collapsed and CHEVRON_CLOSED or CHEVRON_OPEN) .. "|r")
-    x = x + 14
+    chev:SetTexture(collapsed and TEX_COLLAPSED or TEX_EXPANDED)
+    x = x + 18
 
     -- Player groups get the class icon, same 16px tile as a wisher row.
     local nameHex = "ffffd100"   -- gold, the section-label colour

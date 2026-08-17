@@ -403,6 +403,40 @@ describe("WGS:BuildWishlistGroups", function()
     -- bucket's placement.
     ------------------------------------------------------------------
 
+    -- The dropdown feeds WGS.WISHLIST_GROUP_MODES straight into the
+    -- shared menu factory, which renders `o.name`. Shipping `label`
+    -- instead made every row concatenate nil and throw, so the menu
+    -- silently refused to open — no error visible, just a dead button.
+    describe("group-mode dropdown contract", function()
+        it("every mode carries the key + name the menu factory renders", function()
+            local modes = WGS.WISHLIST_GROUP_MODES
+            assert.is_table(modes)
+            assert.is_true(#modes >= 5)
+            for _, m in ipairs(modes) do
+                assert.is_string(m.key, "mode needs a key")
+                assert.is_string(m.name,
+                    "mode needs `name` — the dropdown renders o.name, not o.label")
+                assert.not_equal("", m.name)
+                -- The concatenation that used to blow up.
+                assert.has_no.errors(function() return "  " .. m.name end)
+            end
+        end)
+
+        it("offers exactly the pivots the builder accepts, and every one resolves", function()
+            local offered = {}
+            for _, m in ipairs(WGS.WISHLIST_GROUP_MODES) do
+                offered[#offered + 1] = m.key
+                -- Round-trip: picking this option must not silently fall
+                -- back to boss.
+                local result = WGS:BuildWishlistGroups({}, { groupBy = m.key })
+                assert.are.equal(m.key, result.groupBy,
+                    m.key .. " is offered in the dropdown but not honoured by the builder")
+            end
+            table.sort(offered)
+            assert.are.same({ "armor", "boss", "location", "player", "slot" }, offered)
+        end)
+    end)
+
     describe("groupBy pivots", function()
         local DATA = {
             wish("Aly", "MAGE", {
