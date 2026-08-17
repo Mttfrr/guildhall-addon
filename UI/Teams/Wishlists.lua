@@ -2,43 +2,58 @@
 local WGS = GuildHall
 local ui = WGS._ui
 
--- Wishlists sub-view: boss-grouped browser of which characters wishlisted
--- which items. Redesigned to read as a sibling of the Events tab — same
--- row chrome (subtle bg + Listbox highlight), same section-header idiom
--- (thin divider + gold label), same class-icon + class-coloured-name rows
--- as the Events Roster section.
+-- Wishlists sub-view: a PIVOTABLE browser of which characters wishlisted
+-- which items. Reads as a sibling of the Events tab — same row chrome
+-- (subtle bg + Listbox highlight), same class-icon + class-coloured-name
+-- rows as the Events Roster section.
 --
--- Boss grouping comes from the wishlist data itself: the platform's
--- export now carries a per-item `source` (the boss free-text from the
--- platform wishlist) and a per-player `class`. Older imports in the
--- field lack both, so every consumer degrades:
+-- ─── Why this replaced the boss-grouped + four-dropdown design ───
+--
+-- The first cut hardcoded ONE hierarchy (boss → item → wishers) and then
+-- bolted four filter dropdowns on top to compensate. That conflated two
+-- different things: boss was simultaneously the grouping AND a filter,
+-- so "what does Bob want?" was unanswerable no matter how you filtered,
+-- while narrowing to one boss cost a dropdown that duplicated a section
+-- header already on screen.
+--
+-- The fix is to make the hierarchy itself the control:
+--
+--   Group by  Boss | Player | Location | Slot | Armor
+--             — one dropdown pivots the whole tree. Grouping SUBSUMES
+--               filtering for these dimensions: grouping by Location and
+--               collapsing everything is strictly better than a Location
+--               filter, because you keep the other locations one click
+--               away instead of hidden.
+--   Search    — one box narrows across every dimension at once (item
+--               name, player, boss, location, slot, armor). Replaces the
+--               remaining three dropdowns with something strictly more
+--               powerful: "plate" and "Nexus" and "Bob" all work, and
+--               they compose with whatever grouping is active.
+--   Collapse  — every group is collapsible, with counts on the header,
+--               so a 40-item list is a scannable index instead of an
+--               endless scroll. State persists per (groupBy, group).
+--
+-- Two leaf shapes fall out of the pivot, and both are correct:
+--   item modes (Boss/Location/Slot/Armor) → item row + its wisher rows
+--   player mode                           → the player IS the group, so
+--                                            their items are the leaves,
+--                                            priority-sorted, no
+--                                            redundant wisher sub-rows.
+--
+-- ─── Data degradation (unchanged; older imports lack the new fields) ───
 --   source   → majority vote over the item's wish sources, falling back
---              to the loot-history itemID→boss derivation (the old view's
---              only mechanism), else the "Unassigned" bucket.
+--              to the loot-history itemID→boss derivation, else the
+--              "Unassigned" group.
 --   class    → characterDetails / guild-roster lookup; icon omitted when
 --              still unknown.
---   location → newest per-item field (the zone/raid the item drops
---              from). Older exports lack it entirely: an item without
---              one lands in the Location filter's "Unknown" bucket —
---              which only appears when imports are mixed — and a fully
---              location-less import produces an empty location list, so
---              the dropdown offers nothing beyond "All locations".
---   armorType → per-item field ("Cloth"/"Leather"/"Mail"/"Plate", ""
---              when not armor). Same degradation contract as location:
---              blanks/absents land in the Armor filter's "Unknown"
---              bucket only when imports are mixed, and a fully
---              armor-less import produces an empty option list.
+--   location/armorType → per-item fields; items lacking one land in an
+--              "Unknown" group, which only materialises when the import
+--              is MIXED. Group by a dimension no item carries and you
+--              get a single Unknown group rather than a lying empty pane.
 --
--- Four filters sit above the list in two rows — Boss + Location, then
--- Slot + Armor — and they combine (AND). Boss sections emptied by the
--- combination disappear entirely rather than rendering hollow headers.
---
--- The grouping/sorting/fallback logic is pure and lives in
--- WGS:BuildWishlistBossGroups (which also derives the distinct
--- location/slot/armor option lists the dropdowns render); the filter
--- application is equally pure in WGS:FilterWishlistBossGroups. Both are
--- pinned by spec/wishlist_boss_groups_spec.lua without a rendering
--- harness.
+-- The grouping/pivot/search/sort logic is pure and lives in
+-- WGS:BuildWishlistGroups — pinned by spec/wishlist_boss_groups_spec.lua
+-- without a rendering harness.
 
 ui.teams = ui.teams or {}
 
@@ -50,7 +65,7 @@ local ApplyClassIcon = ui.ApplyClassIcon
 ---------------------------------------------------------------------------
 
 local CONTENT_W       = 660
-local SECTION_H       = 26   -- boss section header (divider + gold label)
+local SECTION_H       = 24   -- collapsible group header row
 local ITEM_ROW_H      = 22
 local WISHER_ROW_H    = 18
 local WISHER_ICON_X   = 26   -- left inset of the class icon under an item
@@ -60,18 +75,33 @@ local SECTION_GAP     = 6
 
 local UNASSIGNED_KEY  = "__unassigned"
 local UNASSIGNED_NAME = "Unassigned"
-local ALL_BOSSES      = "All bosses"
-local ALL_LOCATIONS   = "All locations"
-local ALL_SLOTS       = "All slots"
-local ALL_ARMOR       = "All armor"
 
--- Shared "this item doesn't carry the field" bucket for the Location,
--- Slot and Armor filters. Distinct from the boss UNASSIGNED bucket,
--- which is a *group* the browser renders — Unknown is purely a filter
--- concept (item rows never print "Unknown"; they just omit the
--- missing bit).
+-- Shared "this item doesn't carry the field" bucket. In the pivoted
+-- design this is a real GROUP (grouping by Location with half the import
+-- pre-location gives you an honest "Unknown" section), not the filter-
+-- only concept it used to be. Item rows still never print "Unknown" —
+-- they just omit the missing segment.
 local UNKNOWN_KEY     = "__unknown"
 local UNKNOWN_NAME    = "Unknown"
+
+-- The pivot vocabulary. Order here is the dropdown order: Boss first
+-- (the loot-council default — "what drops here, who wants it"), Player
+-- second (the raider question — "what does Bob still need"), then the
+-- three item-attribute pivots.
+local GROUP_MODES = {
+    { key = "boss",     label = "Boss" },
+    { key = "player",   label = "Player" },
+    { key = "location", label = "Location" },
+    { key = "slot",     label = "Slot" },
+    { key = "armor",    label = "Armor" },
+}
+local GROUP_MODE_LABEL = {}
+for _, m in ipairs(GROUP_MODES) do GROUP_MODE_LABEL[m.key] = m.label end
+
+-- Above this many groups the view opens collapsed — an index you drill
+-- into. At or below it, everything is open, because a handful of groups
+-- reads better whole than as a row of closed drawers.
+local AUTO_COLLAPSE_THRESHOLD = 6
 
 -- Canonical equipment-slot order for the Slot filter. The platform's
 -- slot vocabulary is fixed, so the dropdown reads like a character
@@ -162,9 +192,9 @@ local function defaultGetItemInfo(itemID)
     end
 end
 
---- Build the boss-grouped, priority-sorted structure the Wishlists
---- browser renders. Pure with respect to `opts` — no db reads — so specs
---- can pin every fallback path.
+--- Build the grouped, sorted structure the Wishlists browser renders,
+--- pivoted on whichever dimension the user picked. Pure with respect to
+--- `opts` — no db reads — so specs can pin every fallback path.
 ---
 --- wishlists: platform export shape —
 ---   { { playerName, class?, items = { { itemID, itemName?, slot?,
@@ -180,31 +210,40 @@ end
 ---   characterDetails db.global.characterDetails-shaped map (class fallback)
 ---   roster           WGS:GetGuildRosterLookup()-shaped map (class fallback)
 ---   getItemInfo      fn(itemID) → name?, quality? (defaults to C_Item)
+---   groupBy          "boss" (default) | "player" | "location" | "slot"
+---                    | "armor" — the pivot
+---   search           free text; narrows to items matching on ANY of
+---                    item name / boss / location / slot / armor / a
+---                    wisher's name. Case-insensitive substring, applied
+---                    BEFORE grouping so counts and empty groups stay
+---                    honest.
 ---
---- Returns { bosses, locations, slots, armorTypes } where bosses =
---- { { key, name, itemCount, wishCount, items = { { itemID, name,
---- quality?, slot?, slotKey?, location?, locationKey?, armorType?,
---- armorTypeKey?, wishers = { { playerName, short, class?, priority,
---- note?, simPct? } } } } } } with:
----   bosses  sorted alphabetically, "Unassigned" always last
----   items   sorted by wisher count desc, then name, then itemID
----   wishers sorted by priority rank (BiS→Low, unknown last), then name
+--- Returns { groupBy, groups, itemCount, wishCount } where groups =
+--- { { key, name, class?, playerName?, itemCount, wishCount, items } }.
 ---
---- locations/slots/armorTypes are the filter dropdowns' option lists —
---- the distinct values present across the (team-filtered) items, each
---- as { key, name }:
----   locations  sorted alphabetically (first-seen display casing)
----   slots      in SLOT_ORDER, unrecognised values after (alphabetical),
----              recognised values displayed in canonical casing
----   armorTypes in ARMOR_ORDER (Cloth → Plate, only those present),
----              unrecognised values after (alphabetical), recognised
----              values displayed in canonical casing
---- All three grow a trailing Unknown bucket only when the data is MIXED
---- (some items carry the field, some don't); when no item carries it
---- the list stays empty, so the dropdown offers nothing beyond "All" —
---- a filter over a field the import doesn't have would never narrow
---- anything.
-function WGS:BuildWishlistBossGroups(wishlists, opts)
+--- Group ORDER is per-pivot and deliberately not alphabetical-everywhere:
+---   boss      alphabetical, "Unassigned" always last
+---   player    alphabetical by short name
+---   location  alphabetical, "Unknown" last
+---   slot      SLOT_ORDER (character-sheet order), unrecognised values
+---             after alphabetically, "Unknown" last
+---   armor     ARMOR_ORDER (Cloth → Plate), same tail rules
+---
+--- ITEM shape depends on the pivot, because the useful leaf differs:
+---   item modes (boss/location/slot/armor) — the item is the leaf and
+---     carries `wishers` = { { playerName, short, class?, priority,
+---     note?, simPct? } }, sorted by priority rank (BiS→Low, unknown
+---     last) then name. Items sort by demand (wisher count desc), then
+---     name, then itemID.
+---   player mode — the PLAYER is the group, so their wish is folded onto
+---     the item itself (priority/note/simPct) and there are no wisher
+---     sub-rows to repeat the group header. Items sort by priority rank,
+---     then name.
+---
+--- Every item carries itemID, name, quality?, slot?, location?,
+--- armorType?, bossName regardless of pivot, so the row renderer can
+--- show the dimensions that AREN'T the current grouping as meta.
+function WGS:BuildWishlistGroups(wishlists, opts)
     opts = opts or {}
     local allowed = opts.allowed
 
@@ -226,9 +265,7 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
     -- WISH order, so the option lists stay deterministic even though
     -- pass 3 walks the item map in pairs() order.
     local items   = {}   -- [itemID] = { itemID, name?, slot?, wishers, srcTally }
-    local display = {}   -- [mergeKey] = first-seen display casing
-    local locDisplay, slotDisplay = {}, {}   -- ditto, for location / slot
-    local armorDisplay = {}                  -- ditto, for armor type
+    local display = {}   -- [bossMergeKey] = first-seen display casing
     for _, entry in ipairs(wishlists or {}) do
         if type(entry) == "table" and type(entry.items) == "table"
             and inScope(entry.playerName) then
@@ -263,30 +300,21 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
                     if not rec.slot and item.slot and item.slot ~= "" then
                         rec.slot = item.slot
                     end
-                    local sk, sd = textKey(item.slot)
-                    if sk and not slotDisplay[sk] then slotDisplay[sk] = sd end
                     -- location is item metadata, so first-non-blank
                     -- wins — same rule as slot/name. Stored trimmed +
-                    -- keyed for the filter.
+                    -- keyed so the Location pivot can bucket on it.
                     local lk, ld = textKey(item.location)
-                    if lk then
-                        if not locDisplay[lk] then locDisplay[lk] = ld end
-                        if not rec.locationKey then
-                            rec.locationKey, rec.location = lk, ld
-                        end
+                    if lk and not rec.locationKey then
+                        rec.locationKey, rec.location = lk, ld
                     end
                     -- armorType likewise — first non-blank wins, but
                     -- the four known values display in canonical
                     -- casing ("cloth" → "Cloth") since the vocabulary
                     -- is fixed; unrecognised values keep their casing.
                     local ak, ad = textKey(item.armorType)
-                    if ak then
-                        local canonical = ARMOR_RANK[ak]
-                            and ARMOR_ORDER[ARMOR_RANK[ak]] or ad
-                        if not armorDisplay[ak] then armorDisplay[ak] = canonical end
-                        if not rec.armorTypeKey then
-                            rec.armorTypeKey, rec.armorType = ak, canonical
-                        end
+                    if ak and not rec.armorTypeKey then
+                        rec.armorTypeKey = ak
+                        rec.armorType = ARMOR_RANK[ak] and ARMOR_ORDER[ARMOR_RANK[ak]] or ad
                     end
                 end
             end
@@ -311,14 +339,12 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
         end
     end
 
-    -- Pass 3 — resolve each item's name/quality + boss group, sort its
-    -- wishers, and bucket it. Also tallies the distinct location/slot
-    -- values (per ITEM, post-resolution — not per wish) that become the
-    -- filter dropdowns' option lists.
+    -- Pass 3 — resolve each item's name/quality, stamp its boss group
+    -- onto the record, and sort its wishers. No bucketing here any more:
+    -- the record carries every dimension and pass 5 decides which one
+    -- becomes the grouping.
     local getItemInfo = opts.getItemInfo or defaultGetItemInfo
-    local groups = {}
-    local locSeen, slotSeen, armorSeen = {}, {}, {}   -- [key] = true; display casing is pass 1's
-    local anyNoLocation, anyNoSlot, anyNoArmor = false, false, false
+    local records = {}
     for _, rec in pairs(items) do
         if not rec.name then rec.name = lootName[rec.itemID] end
         local ciName, ciQuality = getItemInfo(rec.itemID)
@@ -326,26 +352,17 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
         rec.name = rec.name or ("Item " .. rec.itemID)
         rec.quality = ciQuality
         rec.slotKey = (textKey(rec.slot))
-
-        if rec.locationKey then
-            locSeen[rec.locationKey] = true
-        else
-            anyNoLocation = true
-        end
-        if rec.slotKey then
-            slotSeen[rec.slotKey] = true
-        else
-            anyNoSlot = true
-        end
-        if rec.armorTypeKey then
-            armorSeen[rec.armorTypeKey] = true
-        else
-            anyNoArmor = true
+        -- Canonical slot casing so the Slot pivot's headers read
+        -- "Head" whatever the export sent.
+        if rec.slotKey and SLOT_RANK[rec.slotKey] then
+            rec.slot = SLOT_ORDER[SLOT_RANK[rec.slotKey]]
         end
 
-        local key = majorityKey(rec.srcTally)
+        rec.bossKey = majorityKey(rec.srcTally)
             or majorityKey(lootTally[rec.itemID])
             or UNASSIGNED_KEY
+        rec.bossName = (rec.bossKey == UNASSIGNED_KEY) and UNASSIGNED_NAME
+            or (display[rec.bossKey] or rec.bossKey)
         rec.srcTally = nil
 
         table.sort(rec.wishers, function(a, b)
@@ -357,146 +374,146 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
             return (a.playerName or "") < (b.playerName or "")
         end)
 
-        local g = groups[key]
-        if not g then
-            g = {
-                key  = key,
-                name = (key == UNASSIGNED_KEY) and UNASSIGNED_NAME
-                    or (display[key] or key),
-                items = {},
-            }
-            groups[key] = g
-        end
-        g.items[#g.items + 1] = rec
+        records[#records + 1] = rec
     end
 
-    -- Pass 4 — order items within each boss, tally counts, order bosses.
-    local bosses = {}
-    for _, g in pairs(groups) do
-        table.sort(g.items, function(a, b)
-            if #a.wishers ~= #b.wishers then return #a.wishers > #b.wishers end
-            local na, nb = (a.name or ""):lower(), (b.name or ""):lower()
-            if na ~= nb then return na < nb end
-            return a.itemID < b.itemID
-        end)
-        g.itemCount = #g.items
-        local wishes = 0
-        for _, it in ipairs(g.items) do wishes = wishes + #it.wishers end
-        g.wishCount = wishes
-        bosses[#bosses + 1] = g
-    end
-    table.sort(bosses, function(a, b)
-        if a.key == UNASSIGNED_KEY then return false end
-        if b.key == UNASSIGNED_KEY then return true end
-        return (a.name or ""):lower() < (b.name or ""):lower()
-    end)
-
-    -- Pass 5 — the filter option lists. Unknown only joins a list when
-    -- the data is mixed: an all-or-nothing field either needs no bucket
-    -- or would make the whole dropdown a no-op.
-    local locations = {}
-    for key in pairs(locSeen) do
-        locations[#locations + 1] = { key = key, name = locDisplay[key] or key }
-    end
-    table.sort(locations, function(a, b) return a.key < b.key end)
-    if #locations > 0 and anyNoLocation then
-        locations[#locations + 1] = { key = UNKNOWN_KEY, name = UNKNOWN_NAME }
-    end
-
-    local slots = {}
-    for key in pairs(slotSeen) do
-        local rank = SLOT_RANK[key]
-        slots[#slots + 1] = {
-            key  = key,
-            -- Canonical casing for recognised slots ("head" → "Head");
-            -- first-seen casing for values outside the vocabulary.
-            name = rank and SLOT_ORDER[rank] or slotDisplay[key] or key,
-            rank = rank,
-        }
-    end
-    table.sort(slots, function(a, b)
-        local ra, rb = a.rank or 99, b.rank or 99
-        if ra ~= rb then return ra < rb end
-        return a.key < b.key   -- unrecognised slots: alphabetical
-    end)
-    for _, s in ipairs(slots) do s.rank = nil end
-    if #slots > 0 and anyNoSlot then
-        slots[#slots + 1] = { key = UNKNOWN_KEY, name = UNKNOWN_NAME }
-    end
-
-    local armorTypes = {}
-    for key in pairs(armorSeen) do
-        armorTypes[#armorTypes + 1] = {
-            key  = key,
-            -- Pass 1 already canonicalised recognised values.
-            name = armorDisplay[key] or key,
-            rank = ARMOR_RANK[key],
-        }
-    end
-    table.sort(armorTypes, function(a, b)
-        local ra, rb = a.rank or 99, b.rank or 99
-        if ra ~= rb then return ra < rb end
-        return a.key < b.key   -- unrecognised armor types: alphabetical
-    end)
-    for _, a in ipairs(armorTypes) do a.rank = nil end
-    if #armorTypes > 0 and anyNoArmor then
-        armorTypes[#armorTypes + 1] = { key = UNKNOWN_KEY, name = UNKNOWN_NAME }
-    end
-
-    return {
-        bosses = bosses, locations = locations, slots = slots,
-        armorTypes = armorTypes,
-    }
-end
-
---- Apply the browser's filter selections to a BuildWishlistBossGroups
---- result. Pure and non-mutating: returns a fresh { bosses } view in
---- which the four filters combine (AND). Groups whose items all fail
---- the filters vanish entirely — no hollow section headers — and the
---- surviving groups' item/wish counts are recomputed so the headers
---- stay honest against what's actually listed. Items and wishers are
---- shared by reference with the input, which itself is never touched.
----
---- filters:
----   boss      group key (from result.bosses), or nil for all
----   location  location key (from result.locations) — the Unknown
----             bucket matches items that carry no location — or nil
----   slot      slot key (from result.slots), Unknown likewise, or nil
----   armor     armor-type key (from result.armorTypes), Unknown
----             likewise, or nil
-function WGS:FilterWishlistBossGroups(result, filters)
-    filters = filters or {}
-    local fBoss, fLoc, fSlot, fArmor =
-        filters.boss, filters.location, filters.slot, filters.armor
-    if not (fBoss or fLoc or fSlot or fArmor) then
-        return { bosses = (result and result.bosses) or {} }
-    end
-
-    local bosses = {}
-    for _, g in ipairs((result and result.bosses) or {}) do
-        if not fBoss or g.key == fBoss then
-            local kept = {}
-            for _, it in ipairs(g.items) do
-                if (not fLoc or (it.locationKey or UNKNOWN_KEY) == fLoc)
-                    and (not fSlot or (it.slotKey or UNKNOWN_KEY) == fSlot)
-                    and (not fArmor or (it.armorTypeKey or UNKNOWN_KEY) == fArmor) then
-                    kept[#kept + 1] = it
+    -- Pass 4 — search. Applied to whole records BEFORE grouping so the
+    -- headers' counts describe what's actually listed. A record survives
+    -- if the needle appears in any dimension a user might type: the item
+    -- itself, where it drops, what it is, or who wants it.
+    local needle = type(opts.search) == "string" and trim(opts.search):lower() or ""
+    if needle ~= "" then
+        local kept = {}
+        for _, rec in ipairs(records) do
+            local hay = table.concat({
+                rec.name or "", rec.bossName or "", rec.location or "",
+                rec.slot or "", rec.armorType or "",
+            }, "\1"):lower()
+            local hit = hay:find(needle, 1, true) ~= nil
+            if not hit then
+                for _, w in ipairs(rec.wishers) do
+                    local who = ((w.short or "") .. "\1" .. (w.playerName or "")):lower()
+                    if who:find(needle, 1, true) then hit = true; break end
                 end
             end
-            if #kept > 0 then
-                local wishes = 0
-                for _, it in ipairs(kept) do wishes = wishes + #it.wishers end
-                bosses[#bosses + 1] = {
-                    key       = g.key,
-                    name      = g.name,
-                    items     = kept,
-                    itemCount = #kept,
-                    wishCount = wishes,
+            if hit then kept[#kept + 1] = rec end
+        end
+        records = kept
+    end
+
+    -- Pass 5 — pivot. Player mode inverts the tree (the player becomes
+    -- the group and their wish folds onto the item); every other mode
+    -- buckets the record on one of its own fields.
+    local groupBy = opts.groupBy
+    if not GROUP_MODE_LABEL[groupBy] then groupBy = "boss" end
+
+    local buckets, order = {}, {}
+    local function bucket(key, name, extra)
+        local g = buckets[key]
+        if not g then
+            g = { key = key, name = name, items = {} }
+            if extra then for k, v in pairs(extra) do g[k] = v end end
+            buckets[key] = g
+            order[#order + 1] = g
+        end
+        return g
+    end
+
+    if groupBy == "player" then
+        for _, rec in ipairs(records) do
+            for _, w in ipairs(rec.wishers) do
+                local g = bucket(w.short or w.playerName or "?", w.short or "?", {
+                    class = w.class, playerName = w.playerName,
+                })
+                g.items[#g.items + 1] = {
+                    itemID    = rec.itemID,
+                    name      = rec.name,
+                    quality   = rec.quality,
+                    slot      = rec.slot,
+                    location  = rec.location,
+                    armorType = rec.armorType,
+                    bossName  = rec.bossName,
+                    -- THIS player's wish, folded onto the item — the
+                    -- group header already says who, so a wisher row
+                    -- under it would just repeat the name.
+                    priority  = w.priority,
+                    note      = w.note,
+                    simPct    = w.simPct,
                 }
             end
         end
+    else
+        for _, rec in ipairs(records) do
+            local key, name
+            if groupBy == "location" then
+                key, name = rec.locationKey or UNKNOWN_KEY, rec.location or UNKNOWN_NAME
+            elseif groupBy == "slot" then
+                key, name = rec.slotKey or UNKNOWN_KEY, rec.slot or UNKNOWN_NAME
+            elseif groupBy == "armor" then
+                key, name = rec.armorTypeKey or UNKNOWN_KEY, rec.armorType or UNKNOWN_NAME
+            else
+                key, name = rec.bossKey, rec.bossName
+            end
+            local g = bucket(key, name)
+            g.items[#g.items + 1] = rec
+        end
     end
-    return { bosses = bosses }
+
+    -- Pass 6 — order items inside each group, tally, then order groups.
+    local byPriority = function(a, b)
+        local ra = ui.PRIORITY_ORDER[a.priority] or 99
+        local rb = ui.PRIORITY_ORDER[b.priority] or 99
+        if ra ~= rb then return ra < rb end
+        local na, nb = (a.name or ""):lower(), (b.name or ""):lower()
+        if na ~= nb then return na < nb end
+        return a.itemID < b.itemID
+    end
+    local byDemand = function(a, b)
+        if #a.wishers ~= #b.wishers then return #a.wishers > #b.wishers end
+        local na, nb = (a.name or ""):lower(), (b.name or ""):lower()
+        if na ~= nb then return na < nb end
+        return a.itemID < b.itemID
+    end
+
+    local totalItems, totalWishes = 0, 0
+    for _, g in ipairs(order) do
+        table.sort(g.items, groupBy == "player" and byPriority or byDemand)
+        g.itemCount = #g.items
+        if groupBy == "player" then
+            g.wishCount = #g.items   -- one wish per row in player mode
+        else
+            local wishes = 0
+            for _, it in ipairs(g.items) do wishes = wishes + #it.wishers end
+            g.wishCount = wishes
+        end
+        totalItems = totalItems + g.itemCount
+        totalWishes = totalWishes + g.wishCount
+    end
+
+    local rankOf
+    if groupBy == "slot" then
+        rankOf = function(g) return SLOT_RANK[g.key] end
+    elseif groupBy == "armor" then
+        rankOf = function(g) return ARMOR_RANK[g.key] end
+    end
+    table.sort(order, function(a, b)
+        -- The catch-all buckets always sink, whatever the pivot.
+        local aTail = (a.key == UNKNOWN_KEY or a.key == UNASSIGNED_KEY)
+        local bTail = (b.key == UNKNOWN_KEY or b.key == UNASSIGNED_KEY)
+        if aTail ~= bTail then return bTail end
+        if rankOf then
+            local ra, rb = rankOf(a) or 99, rankOf(b) or 99
+            if ra ~= rb then return ra < rb end
+        end
+        local na, nb = (a.name or ""):lower(), (b.name or ""):lower()
+        if na ~= nb then return na < nb end
+        return a.key < b.key
+    end)
+
+    return {
+        groupBy = groupBy, groups = order,
+        itemCount = totalItems, wishCount = totalWishes,
+    }
 end
 
 ---------------------------------------------------------------------------
@@ -552,34 +569,103 @@ end
 -- Row builders — Events-tab visual language
 ---------------------------------------------------------------------------
 
--- Boss section header: thin divider + gold label + dim meta, the same
--- idiom as EventsDetail's BuildSectionHeader (yOff-based here since the
--- browser lays out with running offsets like the Roster sub-view).
-local function BuildBossHeader(content, yOff, boss)
+-- Collapsible group header: divider + chevron + label + dim counts, and
+-- the whole row is the hit area. Keeps EventsDetail's section idiom
+-- (thin divider + gold label) but earns its click: with five pivots the
+-- header is now the primary navigation, not decoration.
+--
+-- In player mode the label carries the class icon + class colour, so the
+-- group reads exactly like a wisher row one level up.
+local CHEVRON_OPEN   = "\226\150\188"   -- ▼
+local CHEVRON_CLOSED = "\226\150\182"   -- ▶
+
+local function BuildGroupHeader(content, yOff, group, collapsed, onToggle)
+    local row = CreateFrame("Button", nil, content)
+    row:SetSize(CONTENT_W, SECTION_H)
+    row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+    row:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+    local hl = row:GetHighlightTexture()
+    if hl then hl:SetAlpha(0.2) end
+
     local divider = content:CreateTexture(nil, "ARTWORK")
-    divider:SetPoint("TOPLEFT",  content, "TOPLEFT",  0, yOff - 4)
-    divider:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, yOff - 4)
+    divider:SetPoint("TOPLEFT",  content, "TOPLEFT",  0, yOff - 2)
+    divider:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, yOff - 2)
     divider:SetHeight(1)
     divider:SetColorTexture(0.3, 0.3, 0.3, 0.6)
 
-    local fs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetPoint("TOPLEFT", content, "TOPLEFT", 4, yOff - 10)
-    fs:SetText(string.format(
-        "|cffffd100%s|r  |cff888888(%d item%s \194\183 %d wish%s)|r",
-        boss.name,
-        boss.itemCount, boss.itemCount == 1 and "" or "s",
-        boss.wishCount, boss.wishCount == 1 and "" or "es"))
+    local x = 4
+    local chev = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    chev:SetPoint("LEFT", row, "LEFT", x, -1)
+    chev:SetText("|cff888888" .. (collapsed and CHEVRON_CLOSED or CHEVRON_OPEN) .. "|r")
+    x = x + 14
+
+    -- Player groups get the class icon, same 16px tile as a wisher row.
+    local nameHex = "ffffd100"   -- gold, the section-label colour
+    if group.class then
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(16, 16)
+        icon:SetPoint("LEFT", row, "LEFT", x, -1)
+        local classHex = WGS.CLASS_COLORS[group.class] or "ffffffff"
+        ApplyClassIcon(icon, group.class, classHex)
+        nameHex = classHex
+        x = x + 20
+    elseif group.playerName then
+        nameHex = "ffffffff"   -- known player, unknown class
+    end
+
+    local fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetPoint("LEFT", row, "LEFT", x, -1)
+    fs:SetJustifyH("LEFT")
+    local counts
+    if group.playerName then
+        counts = string.format("(%d item%s)", group.itemCount,
+            group.itemCount == 1 and "" or "s")
+    else
+        counts = string.format("(%d item%s \194\183 %d wish%s)",
+            group.itemCount, group.itemCount == 1 and "" or "s",
+            group.wishCount, group.wishCount == 1 and "" or "es")
+    end
+    fs:SetText("|c" .. nameHex .. group.name .. "|r  |cff888888" .. counts .. "|r")
+
+    row:SetScript("OnClick", function() onToggle(group.key) end)
+    if group.playerName then
+        ui.AttachPlayerContextMenu(row, group.playerName, group.class)
+    end
 
     return yOff - SECTION_H
 end
 
--- One item row: quality-coloured name on the left, dim
--- "Slot · Armor · Location · N wishers" pill on the right — the
--- rail-row chrome (subtle bg, Listbox highlight). Slot/armor/location
--- segments drop out when unknown (legacy imports), leaving just the
--- wisher count.
+-- Compose an item row's dim meta line. Deliberately OMITS whatever
+-- dimension is currently the grouping — repeating "Head" on every row
+-- under a "Head" header is noise that costs the useful segments room.
+-- Segments drop out when the import doesn't carry them (legacy data).
+local function ItemMetaSegments(item, groupBy)
+    local segs = {}
+    local function push(v) if v and v ~= "" then segs[#segs + 1] = v end end
+    if groupBy == "player" then
+        -- The player IS the header, so no item dimension is redundant;
+        -- keep it to the two that drive a loot decision (what it is,
+        -- where it drops) since priority takes the right edge.
+        push(item.slot)
+        push(item.bossName)
+    else
+        if groupBy ~= "slot"     then push(item.slot) end
+        if groupBy ~= "armor"    then push(item.armorType) end
+        if groupBy ~= "location" then push(item.location) end
+        if groupBy ~= "boss"     then push(item.bossName) end
+    end
+    return segs
+end
+
+-- One item row: quality-coloured name on the left, dim meta on the
+-- right — the rail-row chrome (subtle bg, Listbox highlight).
+--
+-- Item modes end the meta with the wisher count (the demand signal the
+-- list is sorted by). Player mode instead right-aligns THAT player's
+-- priority + Droptimizer gain, exactly like a wisher row, because in
+-- that pivot the row IS the wish.
 -- Hover shows the real item tooltip when the client has the item cached.
-local function BuildItemRow(content, item, yOff)
+local function BuildItemRow(content, item, yOff, groupBy)
     local row = CreateFrame("Button", nil, content)
     row:SetSize(CONTENT_W, ITEM_ROW_H)
     row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
@@ -592,20 +678,36 @@ local function BuildItemRow(content, item, yOff)
     local hl = row:GetHighlightTexture()
     if hl then hl:SetAlpha(0.25) end
 
+    local rightAnchor = row
+    local rightInset = -8
+    if groupBy == "player" then
+        local prio = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        prio:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        prio:SetJustifyH("RIGHT")
+        local text = "|c" .. (ui.PRIORITY_COLORS[item.priority] or "ffffffff")
+            .. (item.priority or "?") .. "|r"
+        local sim = WGS.FormatWishSimPct and WGS:FormatWishSimPct(item.simPct)
+        if sim then
+            local color = (tonumber(item.simPct) or 0) > 0 and "|cff44cc66" or "|cff999999"
+            text = text .. " " .. color .. sim .. "|r"
+        end
+        prio:SetText(text)
+        rightAnchor, rightInset = prio, -10
+    end
+
+    local segs = ItemMetaSegments(item, groupBy)
+    if groupBy ~= "player" then
+        local n = #item.wishers
+        segs[#segs + 1] = n .. (n == 1 and " wisher" or " wishers")
+    end
     local meta = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    meta:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-    local n = #item.wishers
-    local metaText = n .. (n == 1 and " wisher" or " wishers")
-    if item.location and item.location ~= "" then
-        metaText = item.location .. "  \194\183  " .. metaText
+    if rightAnchor == row then
+        meta:SetPoint("RIGHT", row, "RIGHT", rightInset, 0)
+    else
+        meta:SetPoint("RIGHT", rightAnchor, "LEFT", rightInset, 0)
     end
-    if item.armorType and item.armorType ~= "" then
-        metaText = item.armorType .. "  \194\183  " .. metaText
-    end
-    if item.slot and item.slot ~= "" then
-        metaText = item.slot .. "  \194\183  " .. metaText
-    end
-    meta:SetText("|cffaaaaaa" .. metaText .. "|r")
+    meta:SetJustifyH("RIGHT")
+    meta:SetText("|cffaaaaaa" .. table.concat(segs, "  \194\183  ") .. "|r")
 
     local nameFs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     nameFs:SetPoint("LEFT", row, "LEFT", 8, 0)
@@ -613,6 +715,10 @@ local function BuildItemRow(content, item, yOff)
     nameFs:SetJustifyH("LEFT")
     nameFs:SetWordWrap(false)
     nameFs:SetText("|c" .. qualityHex(item.quality) .. item.name .. "|r")
+    if item.note and item.note ~= "" and groupBy == "player" then
+        nameFs:SetText("|c" .. qualityHex(item.quality) .. item.name
+            .. "|r  |cff888888(" .. item.note .. ")|r")
+    end
 
     local itemID = item.itemID
     row:SetScript("OnEnter", function(self)
@@ -718,8 +824,10 @@ local function BuildFilterDropdown(sv, cfg)
     local btn = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
     btn:SetSize(cfg.width, 22)
     btn:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
-    btn:SetText(cfg.allLabel)
-    sv[cfg.stateKey] = nil
+    -- `noAll` dropdowns always hold a value (the pivot must be
+    -- *something*); the rest start on their "All …" nil selection.
+    btn:SetText(cfg.noAll and (cfg.defaultLabel or "") or cfg.allLabel)
+    sv[cfg.stateKey] = cfg.noAll and cfg.default or nil
 
     local menu = CreateFrame("Frame", nil, sv, "BackdropTemplate")
     menu:SetBackdrop({
@@ -742,7 +850,8 @@ local function BuildFilterDropdown(sv, cfg)
         for _, m in ipairs(sv._filterMenus) do m:Hide() end
         for _, b in ipairs(menuButtons) do b:Hide() end
 
-        local options = { { key = nil, name = cfg.allLabel } }
+        local options = {}
+        if not cfg.noAll then options[1] = { key = nil, name = cfg.allLabel } end
         for _, o in ipairs(cfg.options() or {}) do
             options[#options + 1] = { key = o.key, name = o.name }
         end
@@ -780,37 +889,105 @@ local function BuildFilterDropdown(sv, cfg)
     return btn
 end
 
+---------------------------------------------------------------------------
+-- Collapse state (persisted per profile, keyed by pivot + group)
+---------------------------------------------------------------------------
+--
+-- Keyed by (groupBy, groupKey) so collapsing "Nexus-King" under the Boss
+-- pivot doesn't also collapse a same-named group under another pivot.
+-- Only EXPLICIT user toggles are stored; a group with no stored state
+-- falls back to the size heuristic, so a re-import that changes the
+-- group count re-applies the sensible default instead of freezing an
+-- old one.
+
+local function CollapseStore()
+    local p = WGS.db and WGS.db.profile
+    if not p then return {} end
+    p.wishlistCollapsed = p.wishlistCollapsed or {}
+    return p.wishlistCollapsed
+end
+
+local function CollapseKey(groupBy, key) return groupBy .. "\1" .. tostring(key) end
+
+local function IsCollapsed(groupBy, key, groupCount, searching)
+    -- An active search means the user asked to SEE things; honouring a
+    -- stale collapse would hide their own hits.
+    if searching then return false end
+    local stored = CollapseStore()[CollapseKey(groupBy, key)]
+    if stored ~= nil then return stored end
+    return groupCount > AUTO_COLLAPSE_THRESHOLD
+end
+
+local function SetCollapsed(groupBy, key, collapsed)
+    CollapseStore()[CollapseKey(groupBy, key)] = collapsed
+end
+
+---------------------------------------------------------------------------
+-- Sub-view build
+---------------------------------------------------------------------------
+
 local function BuildSubView(sv)
-    -- The four filters sit in two rows above the list and AND together.
-    -- Four dropdowns + labels don't fit CONTENT_W in one row at
-    -- readable widths, so they wrap on a 28px pitch, grouped by what
-    -- they ask: row one narrows WHERE the item comes from (Boss,
-    -- Location — the long free-text values keep their full widths),
-    -- row two narrows WHAT the item is (Slot, Armor — short fixed
-    -- vocabularies, narrow buttons).
-    sv.bossBtn = BuildFilterDropdown(sv, {
-        label = "Boss:", width = 200,
-        allLabel = ALL_BOSSES, stateKey = "selectedBossKey",
-        options = function() return sv._bossGroups end,
-    })
-    sv.locationBtn = BuildFilterDropdown(sv, {
-        label = "Location:", anchor = sv.bossBtn, width = 170,
-        allLabel = ALL_LOCATIONS, stateKey = "selectedLocationKey",
-        options = function() return sv._locations end,
-    })
-    sv.slotBtn = BuildFilterDropdown(sv, {
-        label = "Slot:", y = -30, width = 110,
-        allLabel = ALL_SLOTS, stateKey = "selectedSlotKey",
-        options = function() return sv._slots end,
-    })
-    sv.armorBtn = BuildFilterDropdown(sv, {
-        label = "Armor:", anchor = sv.slotBtn, width = 110,
-        allLabel = ALL_ARMOR, stateKey = "selectedArmorKey",
-        options = function() return sv._armorTypes end,
+    -- ONE control row now: the pivot, a search box, and expand/collapse.
+    -- The old design spent two rows on four dropdowns; grouping subsumes
+    -- three of them and search covers every dimension at once, so the
+    -- list starts 28px higher with strictly more reach.
+    sv.groupByBtn = BuildFilterDropdown(sv, {
+        label = "Group by:", width = 110,
+        noAll = true, default = "boss", defaultLabel = GROUP_MODE_LABEL.boss,
+        stateKey = "groupBy",
+        options = function() return GROUP_MODES end,
     })
 
+    local searchLbl = sv:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    searchLbl:SetPoint("LEFT", sv.groupByBtn, "RIGHT", 14, 0)
+    searchLbl:SetText("Search:")
+
+    local eb = CreateFrame("EditBox", nil, sv, "InputBoxTemplate")
+    eb:SetSize(180, 20)
+    eb:SetPoint("LEFT", searchLbl, "RIGHT", 10, 0)
+    eb:SetAutoFocus(false)
+    eb:SetMaxLetters(40)
+    sv.searchBox = eb
+    sv._search = ""
+
+    -- Debounced: rebuilding the whole list on every keystroke stutters
+    -- once a guild's wishlists run to a few hundred rows.
+    local token = 0
+    eb:SetScript("OnTextChanged", function(self)
+        sv._search = self:GetText() or ""
+        token = token + 1
+        local mine = token
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.2, function()
+                if mine == token and sv._refreshFn then sv._refreshFn() end
+            end)
+        elseif sv._refreshFn then
+            sv._refreshFn()
+        end
+    end)
+    eb:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    eb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
+    -- Bulk toggle. Label reflects what the click will DO, derived each
+    -- render from whether anything is currently open.
+    local toggleAll = CreateFrame("Button", nil, sv, "UIPanelButtonTemplate")
+    toggleAll:SetSize(96, 22)
+    toggleAll:SetPoint("LEFT", eb, "RIGHT", 14, 0)
+    toggleAll:SetText("Collapse all")
+    toggleAll:SetScript("OnClick", function()
+        local collapse = not sv._allCollapsed
+        for _, key in ipairs(sv._visibleGroupKeys or {}) do
+            SetCollapsed(sv.groupBy or "boss", key, collapse)
+        end
+        if sv._refreshFn then sv._refreshFn() end
+    end)
+    sv.toggleAllBtn = toggleAll
+
     local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -56)
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
     sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(CONTENT_W)
@@ -821,87 +998,80 @@ local function BuildSubView(sv)
     sv.content = content
 end
 
--- Drop a stale selection (team switch or re-import removed the value)
--- instead of rendering an empty pane against a ghost filter. `list` is
--- the freshly-built option list the selection must still appear in.
-local function ResetStaleFilter(tab, stateKey, btn, list, allLabel)
-    local selected = tab[stateKey]
-    if not selected then return end
-    for _, o in ipairs(list) do
-        if o.key == selected then return end
-    end
-    tab[stateKey] = nil
-    btn:SetText(allLabel)
+local function EmptyMessage(tab, text)
+    local fs = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
+    fs:SetText(text)
+    tab.content:SetHeight(30)
 end
 
 local function Populate(tab)
     if not tab or not tab:IsVisible() then return end
     ClearContainer(tab.content)
+    tab._visibleGroupKeys = {}
 
     local wishlists = WGS.db.global.wishlists or {}
     if #wishlists == 0 then
-        tab._bossGroups, tab._locations, tab._slots, tab._armorTypes =
-            {}, {}, {}, {}
         ui.CreateImportHint(tab.content, "No wishlists imported yet.", 5, -5)
         tab.content:SetHeight(72)
         return
     end
 
-    local result = WGS:BuildWishlistBossGroups(wishlists, {
+    local groupBy = tab.groupBy or "boss"
+    local search = tab._search or ""
+    local searching = trim(search) ~= ""
+
+    local result = WGS:BuildWishlistGroups(wishlists, {
         allowed          = BuildAllowedPlayers(),
         loot             = WGS.db.global.loot,
         characterDetails = WGS.db.global.characterDetails,
         roster           = WGS:GetGuildRosterLookup(),
+        groupBy          = groupBy,
+        search           = search,
     })
-    tab._bossGroups = result.bosses
-    tab._locations  = result.locations
-    tab._slots      = result.slots
-    tab._armorTypes = result.armorTypes
 
-    ResetStaleFilter(tab, "selectedBossKey",     tab.bossBtn,     result.bosses,     ALL_BOSSES)
-    ResetStaleFilter(tab, "selectedLocationKey", tab.locationBtn, result.locations,  ALL_LOCATIONS)
-    ResetStaleFilter(tab, "selectedSlotKey",     tab.slotBtn,     result.slots,      ALL_SLOTS)
-    ResetStaleFilter(tab, "selectedArmorKey",    tab.armorBtn,    result.armorTypes, ALL_ARMOR)
-
-    if #result.bosses == 0 then
-        local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noData:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noData:SetText("No wishlisted items found for the current team filter.")
-        tab.content:SetHeight(30)
+    if #result.groups == 0 then
+        EmptyMessage(tab, searching
+            and ('Nothing matches "' .. trim(search) .. '".')
+            or "No wishlisted items found for the current team filter.")
         return
     end
 
-    -- The four filters AND together in the pure core; sections the
-    -- combination empties are gone from the view entirely. Each
-    -- dropdown's options stay derived from the UNfiltered result (like
-    -- the boss list always has), so a combination can legitimately
-    -- match nothing — that gets its own message, distinct from the
-    -- team-filter one above.
-    local view = WGS:FilterWishlistBossGroups(result, {
-        boss     = tab.selectedBossKey,
-        location = tab.selectedLocationKey,
-        slot     = tab.selectedSlotKey,
-        armor    = tab.selectedArmorKey,
-    })
-    if #view.bosses == 0 then
-        local noMatch = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        noMatch:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 5, -5)
-        noMatch:SetText("No wishlisted items match the current filters.")
-        tab.content:SetHeight(30)
-        return
-    end
-
+    local groupCount = #result.groups
+    local anyExpanded = false
     local yOff = 0
-    for _, boss in ipairs(view.bosses) do
-        yOff = BuildBossHeader(tab.content, yOff, boss)
-        for _, item in ipairs(boss.items) do
-            yOff = BuildItemRow(tab.content, item, yOff)
-            for _, w in ipairs(item.wishers) do
-                yOff = BuildWisherRow(tab.content, w, yOff)
+    for _, group in ipairs(result.groups) do
+        tab._visibleGroupKeys[#tab._visibleGroupKeys + 1] = group.key
+        local collapsed = IsCollapsed(groupBy, group.key, groupCount, searching)
+        if not collapsed then anyExpanded = true end
+
+        yOff = BuildGroupHeader(tab.content, yOff, group, collapsed, function(key)
+            -- Toggling while searching writes the state the user just
+            -- expressed, so it sticks once the search is cleared.
+            SetCollapsed(groupBy, key,
+                not IsCollapsed(groupBy, key, groupCount, searching))
+            if tab._refreshFn then tab._refreshFn() end
+        end)
+
+        if not collapsed then
+            for _, item in ipairs(group.items) do
+                yOff = BuildItemRow(tab.content, item, yOff, groupBy)
+                -- Player mode folds the wish onto the item row itself,
+                -- so there are no wisher rows to draw.
+                if groupBy ~= "player" then
+                    for _, w in ipairs(item.wishers) do
+                        yOff = BuildWisherRow(tab.content, w, yOff)
+                    end
+                end
+                yOff = yOff - ITEM_GAP
             end
-            yOff = yOff - ITEM_GAP
         end
         yOff = yOff - SECTION_GAP
+    end
+
+    tab._allCollapsed = not anyExpanded
+    if tab.toggleAllBtn then
+        tab.toggleAllBtn:SetText(anyExpanded and "Collapse all" or "Expand all")
     end
 
     -- SetSize (not just SetHeight) + UpdateScrollChildRect — same
