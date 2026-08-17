@@ -6,20 +6,9 @@ local EXPORT_HEADER_V3 = "WGS3"
 local EXPORT_HEADER_V4 = "WGS4"
 local MAX_KNOWN_ENVELOPE_VERSION = 4
 
--- LibDeflate handle, lazy + cached on WGS so it's shared with the
--- Encoder. WGS:_ResetCompressionCache (defined in Encoder.lua) flushes
--- both paths in one call.
-local function GetLibDeflate()
-    if WGS._libDeflate ~= nil then return WGS._libDeflate or nil end
-    local ok, lib = pcall(LibStub, "LibDeflate")
-    if ok and lib and type(lib.DecompressDeflate) == "function"
-       and type(lib.DecodeForPrint) == "function" then
-        WGS._libDeflate = lib
-        return lib
-    end
-    WGS._libDeflate = false
-    return nil
-end
+-- LibDeflate access goes through the shared WGS:GetLibDeflate()
+-- (defined in Sync/Encoder.lua, which loads first). One cache, one
+-- capability check; WGS:_ResetCompressionCache flushes it for tests.
 
 -- Decode an export string back into a data table. Accepts:
 --   v4:  WGS4<8-hex-djb2>:<LibDeflate-print-encoded deflated JSON>
@@ -42,16 +31,24 @@ function WGS:Decode(encoded)
 
     local json
 
-    if encoded:sub(1, #EXPORT_HEADER_V4) == EXPORT_HEADER_V4
-       and encoded:sub(#EXPORT_HEADER_V4 + 9, #EXPORT_HEADER_V4 + 9) == ":" then
+    if encoded:sub(1, #EXPORT_HEADER_V4) == EXPORT_HEADER_V4 then
         -- v4: deflate + print encoding. Checksum is over the encoded
         -- string, same scheme as v3.
+        --
+        -- The `:` structure check reports "truncated" rather than
+        -- falling through: "WGS4…" also starts with "WGS", so a paste
+        -- cut inside the checksum used to reach the legacy v2 branch,
+        -- base64-decode garbage, and report a misleading generic
+        -- JSON-parse error.
+        if encoded:sub(#EXPORT_HEADER_V4 + 9, #EXPORT_HEADER_V4 + 9) ~= ":" then
+            return nil, "Export string appears truncated — please re-copy the full string."
+        end
         local expectedSum = encoded:sub(#EXPORT_HEADER_V4 + 1, #EXPORT_HEADER_V4 + 8)
         local payload = encoded:sub(#EXPORT_HEADER_V4 + 10)
         if self:HashString(payload) ~= expectedSum then
             return nil, "Export string appears truncated — please re-copy the full string."
         end
-        local lib = GetLibDeflate()
+        local lib = self:GetLibDeflate()
         if not lib then
             return nil, "Export uses compression (v4) but LibDeflate is not loaded. Please update GuildHall."
         end
@@ -60,9 +57,12 @@ function WGS:Decode(encoded)
         json = lib:DecompressDeflate(raw)
         if not json then return nil, "Failed to decompress v4 payload" end
 
-    elseif encoded:sub(1, #EXPORT_HEADER_V3) == EXPORT_HEADER_V3
-       and encoded:sub(#EXPORT_HEADER_V3 + 9, #EXPORT_HEADER_V3 + 9) == ":" then
-        -- v3: base64 + checksum.
+    elseif encoded:sub(1, #EXPORT_HEADER_V3) == EXPORT_HEADER_V3 then
+        -- v3: base64 + checksum. Same truncation-over-fallthrough
+        -- rule as v4 for the structure check.
+        if encoded:sub(#EXPORT_HEADER_V3 + 9, #EXPORT_HEADER_V3 + 9) ~= ":" then
+            return nil, "Export string appears truncated — please re-copy the full string."
+        end
         local expectedSum = encoded:sub(#EXPORT_HEADER_V3 + 1, #EXPORT_HEADER_V3 + 8)
         local payload = encoded:sub(#EXPORT_HEADER_V3 + 10)
         if self:HashString(payload) ~= expectedSum then
@@ -71,7 +71,8 @@ function WGS:Decode(encoded)
         json = self:Base64Decode(payload)
 
     elseif encoded:sub(1, #EXPORT_HEADER_V2) == EXPORT_HEADER_V2 then
-        -- v2: base64, no checksum.
+        -- v2: base64, no checksum. Only genuine legacy strings reach
+        -- here — WGS3/WGS4 prefixes are fully handled above.
         json = self:Base64Decode(encoded:sub(#EXPORT_HEADER_V2 + 1))
 
     else
@@ -104,19 +105,6 @@ function WGS:DecodeAndImport(encoded)
 
     -- The web platform wraps data in the same envelope: { v, t, data: { teams, wishlists, ... } }
     local importData = data.data or data
-
-    -- Debug: show what keys were found
-    local keys = {}
-    for k, v in pairs(importData) do
-        if type(v) == "table" then
-            local count = 0
-            for _ in pairs(v) do count = count + 1 end
-            table.insert(keys, k .. "(" .. count .. ")")
-        else
-            table.insert(keys, k)
-        end
-    end
-    self:Print("Import data keys: " .. (next(keys) and table.concat(keys, ", ") or "none"))
 
     return self:ProcessImport(importData)
 end

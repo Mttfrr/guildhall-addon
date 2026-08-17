@@ -57,7 +57,7 @@ local function BuildEventRoster(eventId)
 
     for _, s in ipairs(signups) do
         if s.eventId == eventId and s.characterName then
-            local short = s.characterName:match("^([^%-]+)") or s.characterName
+            local short = WGS:ShortName(s.characterName)
             local d = details[short] or {}
             local row = {
                 short            = short,
@@ -518,13 +518,13 @@ WGS._EvaluateRaidCompBalance = evaluateRaidCompBalance   -- exposed for tests
 local function buildCompDiff(assignments, sessionMembers)
     local plannedByShort = {}
     for _, slot_ in ipairs(assignments) do
-        local short = ((slot_.name or ""):match("^([^%-]+)") or slot_.name or ""):lower()
+        local short = (WGS:ShortName(slot_.name)):lower()
         if short ~= "" then plannedByShort[short] = slot_ end
     end
 
     local actualByShort = {}
     for _, m in ipairs(sessionMembers) do
-        local short = ((m.name or ""):match("^([^%-]+)") or m.name or ""):lower()
+        local short = (WGS:ShortName(m.name)):lower()
         if short ~= "" then actualByShort[short] = m end
     end
 
@@ -719,7 +719,8 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
         if #diff.missing > 0 then
             local labels = {}
             for _, m in ipairs(diff.missing) do
-                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local short = WGS:ShortName(m.name)
+                if short == "" then short = "?" end
                 local classFile = WGS:NormalizeClassFile(m.class or "")
                 local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
                 labels[#labels + 1] = "|c" .. colorHex .. short .. "|r"
@@ -738,7 +739,8 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
         if #diff.extras > 0 then
             local labels = {}
             for _, m in ipairs(diff.extras) do
-                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local short = WGS:ShortName(m.name)
+                if short == "" then short = "?" end
                 local classFile = WGS:NormalizeClassFile(m.class or "")
                 local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
                 labels[#labels + 1] = "|c" .. colorHex .. short .. "|r"

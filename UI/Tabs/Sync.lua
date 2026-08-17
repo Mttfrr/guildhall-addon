@@ -20,15 +20,11 @@ local TAB_INDEX = ui.TAB_SYNC
 local OFFICER_SYNC_H = 50    -- height of the new top section
 local IMPORT_TOP_Y   = -OFFICER_SYNC_H
 
+-- Relative-time display goes through the shared WGS:FormatRelativeTime
+-- (Util/Time.lua) so the "3m ago" strings read the same on every
+-- surface (this tab, /gh diag, /gh interop).
 local function FormatAgo(ts)
-    if not ts or ts == 0 then return "never" end
-    local now = (time and time()) or 0
-    local delta = now - ts
-    if delta < 0   then return "just now" end
-    if delta < 60  then return delta .. "s ago" end
-    if delta < 3600 then return math.floor(delta / 60) .. "m ago" end
-    if delta < 86400 then return math.floor(delta / 3600) .. "h ago" end
-    return math.floor(delta / 86400) .. "d ago"
+    return WGS:FormatRelativeTime(ts)
 end
 
 local function BuildSyncTab(parent)
@@ -158,13 +154,28 @@ local function BuildSyncTab(parent)
     btnImport:SetScript("OnClick", function()
         local text = ieb:GetText()
         if text and text ~= "" then
+            -- DecodeAndImport returning true means the string decoded
+            -- and the import chain STARTED — ProcessImport spreads the
+            -- importers across frames, so the data isn't in db.global
+            -- yet. Clear the paste box now (the string was valid), but
+            -- leave the re-render to the WGS_IMPORT_APPLIED subscriber
+            -- below, which fires when the last importer has actually
+            -- run.
             if WGS:DecodeAndImport(text) then
                 ieb:SetText("")
                 ieb:ClearFocus()
-                WGS:RefreshMainFrame()
             end
         end
     end)
+
+    -- Refresh the whole frame when an import completes — this is the
+    -- real "import finished" signal (fires at the tail of the
+    -- ProcessImport chain), unlike DecodeAndImport's immediate true.
+    if WGS.RegisterCallback then
+        WGS.RegisterCallback(parent, "WGS_IMPORT_APPLIED", function()
+            WGS:RefreshMainFrame()
+        end)
+    end
 
     local btnClearImport = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btnClearImport:SetSize(80, 25)
@@ -210,13 +221,20 @@ local function BuildSyncTab(parent)
     parent.exportEditBox = eeb
 
     local function runExport()
-        local encoded = WGS:ExportAll()
+        local encoded, reason = WGS:ExportAll()
         if encoded then
             eeb:SetText(encoded)
             eeb:SetFocus()
             eeb:HighlightText()
             WGS.db.global.lastExport = WGS:GetTimestamp()
             WGS:Print(L["EXPORT_COPIED"])
+        elseif reason ~= "empty" then
+            -- ExportAll already prints its own "No data to export."
+            -- for the empty case; any other nil means the encode
+            -- pipeline itself failed. Say so instead of the button
+            -- silently doing nothing.
+            eeb:SetText("")
+            WGS:Print(L["EXPORT_FAILED"])
         end
     end
 

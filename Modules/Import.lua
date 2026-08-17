@@ -251,7 +251,8 @@ local IMPORTERS = {
 
 -- Process decoded import data from web platform.
 --
--- Spreads the 13 importers across separate frames via C_Timer when
+-- Spreads the importers (the IMPORTERS list above — one per frame)
+-- across separate frames via C_Timer when
 -- available — paste-to-finish takes the same wall-clock time, but the
 -- per-frame work stays small enough that WoW doesn't visibly hitch. In
 -- tests (no C_Timer) the loop runs synchronously so assertions can
@@ -331,43 +332,63 @@ end
 -- Read helpers (used by other modules + UI)
 ---------------------------------------------------------------------------
 
--- Get wishlist for a specific player (used by tooltip enrichment)
-function WGS:GetWishlistForPlayer(playerName)
-    local wishlists = self.db.global.wishlists
-    if not wishlists then return nil end
+-- Memoized itemID → wishes index over db.global.wishlists. The RCLC
+-- voting column calls GetWishlistForItem per cell update AND per sort
+-- comparison — a full scan + allocation each time was O(rows × wishes)
+-- per frame. Keyed by the wishlists TABLE IDENTITY plus the
+-- wishlistImportedAt stamp: a re-import swaps in a fresh table (and
+-- bumps the stamp), clears reset the stamp to 0, and specs that poke
+-- db.global.wishlists directly get a rebuild from the identity change.
+local wishIndex, wishIndexSource, wishIndexStamp
 
-    for _, entry in ipairs(wishlists) do
-        if entry.playerName == playerName then
-            return entry.items
-        end
-    end
-    return nil
-end
-
--- Get wishlist entries for a specific item ID
-function WGS:GetWishlistForItem(itemID)
-    local wishlists = self.db.global.wishlists
-    if not wishlists then return {} end
-
-    local results = {}
+local function buildWishIndex(wishlists)
+    local index = {}
     for _, entry in ipairs(wishlists) do
         if entry.items then
             for _, item in ipairs(entry.items) do
-                if item.itemID == itemID then
-                    table.insert(results, {
+                if item.itemID ~= nil then
+                    local bucket = index[item.itemID]
+                    if not bucket then
+                        bucket = {}
+                        index[item.itemID] = bucket
+                    end
+                    bucket[#bucket + 1] = {
                         playerName = entry.playerName,
                         priority = item.priority,
                         note = item.note,
-                        -- Droptimizer gain from the wisher's own sim —
+                        -- Droptimizer gain (% of baseline DPS) from the
+                        -- wisher's own sim — additive platform field,
                         -- rendered by the loot tooltip, the RCLC voting
                         -- column and the roll-window annotation.
+                        -- nil when never simmed; tonumber guards the
+                        -- wire type.
                         simPct = tonumber(item.simPct),
-                    })
+                    }
                 end
             end
         end
     end
-    return results
+    return index
+end
+
+-- Get wishlist entries for a specific item ID. Returns a fresh list
+-- each call (consumers sort it in place — the tooltip and the loot
+-- helper both do) whose row tables are shared with the index; treat
+-- rows as read-only.
+function WGS:GetWishlistForItem(itemID)
+    local wishlists = self.db.global.wishlists
+    if not wishlists then return {} end
+    local stamp = tonumber(self.db.global.wishlistImportedAt) or 0
+    if wishIndex == nil or wishIndexSource ~= wishlists or wishIndexStamp ~= stamp then
+        wishIndex = buildWishIndex(wishlists)
+        wishIndexSource = wishlists
+        wishIndexStamp = stamp
+    end
+    local bucket = wishIndex[itemID]
+    if not bucket then return {} end
+    local out = {}
+    for i = 1, #bucket do out[i] = bucket[i] end
+    return out
 end
 
 -- Get boss notes for a specific encounter

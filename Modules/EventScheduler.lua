@@ -39,7 +39,6 @@ function WGS:ResetInviteTracking()
 end
 
 function module:OnEnable()
-    self:RegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
     self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnGroupRosterUpdate")
 end
 
@@ -158,39 +157,46 @@ end
 --- opts.sourceOverride: "roster" forces the team-roster source, skipping
 ---   the signups + comp tiers. Used by the split button's "Invite team
 ---   roster" dropdown option.
+--- Expand a team id into its full character-name list: each player's
+--- main plus every mapped alt (legacy team shape: the flat `members`
+--- array). Returns nil when the team isn't in db.global.teams — the
+--- callers in GetEventInviteList distinguish "no such team" from an
+--- empty roster.
+local function expandTeamRoster(self, teamId)
+    if not teamId then return nil end
+    local teams = self.db.global.teams
+    if not teams then return nil end
+    for _, t in ipairs(teams) do
+        if t.id == teamId then
+            local names = {}
+            if t.playerMembers then
+                local chars = self.db.global.characters or {}
+                for _, pm in ipairs(t.playerMembers) do
+                    if pm.main then names[#names + 1] = pm.main end
+                    local info = chars[pm.playerId]
+                    if info and info.alts then
+                        for _, alt in ipairs(info.alts) do
+                            names[#names + 1] = alt
+                        end
+                    end
+                end
+            elseif t.members then
+                for _, m in ipairs(t.members) do names[#names + 1] = m end
+            end
+            return names
+        end
+    end
+    return nil
+end
+
 function WGS:GetEventInviteList(event, opts)
     opts = opts or {}
     local eventId = event.id or event.eventId
 
     -- Team-roster override skips ahead to tier 3.
     if opts.sourceOverride == "roster" then
-        local teamId = event.team_id or event.teamId
-        if teamId then
-            local teams = self.db.global.teams
-            if teams then
-                for _, t in ipairs(teams) do
-                    if t.id == teamId then
-                        local names = {}
-                        if t.playerMembers then
-                            local chars = self.db.global.characters or {}
-                            for _, pm in ipairs(t.playerMembers) do
-                                if pm.main then names[#names + 1] = pm.main end
-                                local info = chars[pm.playerId]
-                                if info and info.alts then
-                                    for _, alt in ipairs(info.alts) do
-                                        names[#names + 1] = alt
-                                    end
-                                end
-                            end
-                        elseif t.members then
-                            for _, m in ipairs(t.members) do names[#names + 1] = m end
-                        end
-                        return names, "team roster"
-                    end
-                end
-            end
-        end
-        return {}, "team roster"   -- override fell through
+        local names = expandTeamRoster(self, event.team_id or event.teamId)
+        return names or {}, "team roster"
     end
 
     -- 1. Event signups — primary source. If the web has signups for this
@@ -226,31 +232,9 @@ function WGS:GetEventInviteList(event, opts)
 
     -- 3. Team roster — broadest net, used when neither signups nor comp
     -- are available (e.g. ad-hoc weekly raid without sign-ups recorded).
-    local teamId = event.team_id or event.teamId
-    if teamId then
-        local teams = self.db.global.teams
-        if teams then
-            for _, t in ipairs(teams) do
-                if t.id == teamId then
-                    local names = {}
-                    if t.playerMembers then
-                        local chars = self.db.global.characters or {}
-                        for _, pm in ipairs(t.playerMembers) do
-                            if pm.main then names[#names + 1] = pm.main end
-                            local info = chars[pm.playerId]
-                            if info and info.alts then
-                                for _, alt in ipairs(info.alts) do
-                                    names[#names + 1] = alt
-                                end
-                            end
-                        end
-                    elseif t.members then
-                        for _, m in ipairs(t.members) do names[#names + 1] = m end
-                    end
-                    return names, "team roster"
-                end
-            end
-        end
+    local names = expandTeamRoster(self, event.team_id or event.teamId)
+    if names then
+        return names, "team roster"
     end
 
     return {}, nil
@@ -312,8 +296,8 @@ function WGS:AutoInvite(eventOverride, opts)
     -- yet gets (re-)invited, so people who declined the first invite or
     -- disconnected-and-came-back are pulled in the moment you click again.
     for _, name in ipairs(names) do
-        local short = name:match("^([^%-]+)")
-        if short then
+        local short = WGS:ShortName(name)
+        if short ~= "" then
             local gi = roster[short]
             if gi and gi.online and gi.fullName ~= myKey then
                 -- Skip if already in group
@@ -396,7 +380,7 @@ function WGS:SortRaidGroups(eventOverride)
     local hasGroups = false
     for _, a in ipairs(comp.assignments) do
         if a.group and a.name then
-            local short = a.name:match("^([^%-]+)") or a.name
+            local short = WGS:ShortName(a.name)
             targetGroup[short:lower()] = tonumber(a.group)
             hasGroups = true
         end
@@ -408,7 +392,7 @@ function WGS:SortRaidGroups(eventOverride)
         local dpsGroup = 3
         for _, a in ipairs(comp.assignments) do
             if a.name then
-                local short = (a.name:match("^([^%-]+)") or a.name):lower()
+                local short = (WGS:ShortName(a.name)):lower()
                 local role = self:NormalizeRole(a.role)
                 targetGroup[short] = roleGroup[role] or dpsGroup
             end
@@ -420,7 +404,7 @@ function WGS:SortRaidGroups(eventOverride)
     for i = 1, GetNumGroupMembers() do
         local name, _, subgroup = GetRaidRosterInfo(i)
         if name then
-            local short = name:match("^([^%-]+)") or name
+            local short = WGS:ShortName(name)
             local target = targetGroup[short:lower()]
             if target and target ~= subgroup then
                 SetRaidSubgroup(i, target)
@@ -455,7 +439,7 @@ function WGS:PlaceRaiderInCompGroup(shortName, eventId)
     local target
     for _, a in ipairs(comp.assignments) do
         if a.group and a.name then
-            local sh = (a.name:match("^([^%-]+)") or a.name):lower()
+            local sh = (WGS:ShortName(a.name)):lower()
             if sh == wanted then target = tonumber(a.group); break end
         end
     end
@@ -464,7 +448,7 @@ function WGS:PlaceRaiderInCompGroup(shortName, eventId)
     for i = 1, GetNumGroupMembers() do
         local name, _, subgroup = GetRaidRosterInfo(i)
         if name then
-            local sh = (name:match("^([^%-]+)") or name):lower()
+            local sh = (WGS:ShortName(name)):lower()
             if sh == wanted then
                 if subgroup ~= target then
                     SetRaidSubgroup(i, target)
@@ -502,7 +486,7 @@ function WGS:BuildInviteSnapshot(event, opts)
     local names = self:GetEventInviteList(event, opts) or {}
     local roster = self:GetGuildRosterLookup() or {}
     local groupSet = self:GetCurrentGroupShortNames()
-    local myShort = (self:GetPlayerKey() or ""):match("^([^%-]+)")
+    local myShort = self:ShortName(self:GetPlayerKey())
 
     -- Signup status per short name (so a "Late" signup who's now in the
     -- raid can show both dimensions).
@@ -510,14 +494,14 @@ function WGS:BuildInviteSnapshot(event, opts)
     local statusByShort = {}
     for _, s in ipairs(self.db.global.signups or {}) do
         if s.eventId == eventId and s.characterName then
-            local sh = s.characterName:match("^([^%-]+)") or s.characterName
+            local sh = WGS:ShortName(s.characterName)
             statusByShort[sh] = s.status
         end
     end
 
     local seen = {}
     for _, name in ipairs(names) do
-        local short = name:match("^([^%-]+)") or name
+        local short = WGS:ShortName(name)
         if short and not seen[short] then
             seen[short] = true
             local gi = roster[short]
@@ -542,13 +526,6 @@ function WGS:BuildInviteSnapshot(event, opts)
         end
     end
     return out
-end
-
----------------------------------------------------------------------------
--- Guild roster watch (lightweight, no polling)
----------------------------------------------------------------------------
-
-function module:OnGuildRosterUpdate()
 end
 
 ---------------------------------------------------------------------------

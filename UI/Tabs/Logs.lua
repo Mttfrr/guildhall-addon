@@ -226,7 +226,9 @@ local function PopulateLoot(sv)
             itemText:SetJustifyH("LEFT")
             itemText:SetText("|c" .. qColor .. (entry.itemName or "Unknown") .. "|r")
 
-            local short = (entry.player or ""):match("^([^%-]+)") or entry.player or "?"
+            local short = WGS:ShortName(entry.player)
+
+            if short == "" then short = "?" end
             local gi = roster[short]
             local pColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
             -- Player cell is its own Button overlay (instead of a bare
@@ -692,7 +694,7 @@ local function PopulateAttendance(sv)
                 "|cff5599ff%dT|r  |cff00ff00%dH|r  |cffff4444%dD|r  |cff888888·|r  %s  |cff666666·|r  |cffaaaaaastarted by %s|r",
                 tally.TANK, tally.HEALER, tally.DPS,
                 s.instanceName or "?",
-                (s.startedBy or "?"):match("^([^%-]+)") or s.startedBy or "?"))
+                WGS:ShortName(s.startedBy or "?")))
 
             yOff = yOff - 18
 
@@ -719,7 +721,8 @@ local function PopulateAttendance(sv)
             local i = 0
             local maxRow = 0
             for _, m in ipairs(sorted) do
-                local short = (m.name or ""):match("^([^%-]+)") or m.name or "?"
+                local short = WGS:ShortName(m.name)
+                if short == "" then short = "?" end
                 local classFile = WGS:NormalizeClassFile(m.class or "")
                 local colorHex = WGS.CLASS_COLORS[classFile] or "ffffffff"
 

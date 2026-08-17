@@ -24,6 +24,10 @@ votes.
 - **Droptimizer gains beside every wish.** When a raider has imported a Raidbots Droptimizer report on the platform, their wishes carry the sim's real DPS gain (new per-item `simPct` export field) — and the addon shows it everywhere a wish renders: the **RCLC voting column reads `BiS +2.3%`** (priority still sorts first; the gain breaks ties inside a band, capped so a wild sim can never outrank a higher priority), the **roll window** appends it to your own `GH:` line, the **Wishlists browser** shows it beside each wisher's priority, and the **loot tooltip** carries it per wisher. Green for a positive gain, grey for "simmed, no gain" — which is also information; absent entirely on pre-sim imports. One shared formatter (`WGS:FormatWishSimPct` / `WGS:FormatWishLabel`) drives all four surfaces.
 - **Deleted loot no longer haunts the platform.** Every locally deleted loot row (an officer correction, or the RCLC trade-flow retiring the temporary holder's chat capture) now records a **platform tombstone** — the row's natural key, kept 45 days / max 200 — and every export ships the list (`lootTombstones`). The platform deletes its matching copy, un-flips any wishlist item that drop had auto-obtained, and pins the tombstone so **no later export can resurrect the row** (another raider's client that never saw the deletion, for example). Peer-driven deletes record the receiving client's own row key too, since each client may have exported its own capture with a slightly different timestamp. Previously a row deleted in-game after an export simply lived on the platform forever.
 
+## [0.7.8-beta]
+
+Never shipped — the RCLootCouncil integration grew beyond a patch release during development and was renumbered to 0.8.0-beta (see above).
+
 ## [0.7.7-beta] — 2026-07-26
 
 Raid-forming tools: invite as often as you like, see who's actually in the
@@ -57,6 +61,8 @@ button silently refusing to re-invite stragglers.
 ### Fixed
 
 - **Mass invite now re-invites people who declined or reconnected.** The Invite button worked once, then reported *"All members are already in group or offline"* and quietly invited nobody on the second press — so raiders who declined the first invite, let it expire, or disconnected-and-reconnected could never be pulled in without a `/reload`. Root cause: the invited-set in `Modules/EventScheduler.lua` was a **permanent boolean** — once a character was invited, they were marked forever. It's now a per-character **timestamp with a 30-second re-invite cooldown**: a second press inside the cooldown is still a no-op (so an accidental double-click doesn't fire 25 duplicate invite popups), but once the cooldown lapses, pressing Invite again reaches everyone who still isn't in the group. Members who were offline on the first pass were never marked, so they're invited the instant they reconnect. 4 new specs lock the first-invite, in-cooldown no-op, post-cooldown re-invite, and reconnect paths.
+
+## [0.7.5-beta] — 2026-06-06
 
 Post-feedback follow-up to 0.7.4-beta. Critical right-click menu bug fixes
 (the EasyMenu → MenuUtil migration in 0.7.4-beta opened menus correctly

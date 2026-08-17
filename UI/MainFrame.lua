@@ -422,9 +422,30 @@ local function CreateMainFrame()
     SelectTab(f, TAB_EVENTS)
     f.tabContents[TAB_EVENTS]:Show()
 
+    -- Status-bar text update, driven by a 2s ticker while the frame is
+    -- shown (see OnShow/OnHide below). Previously a per-frame OnUpdate
+    -- accumulator — needless per-frame cost for 2s-granularity work.
+    local function UpdateStatusText(self)
+        if not self.statusText then return end
+        if WGS:IsTrackingAttendance() then
+            self.statusText:SetText("|cff00ff00Attendance tracking active|r")
+            self.statusText:Show()
+        else
+            self.statusText:Hide()
+        end
+    end
+
     f:SetScript("OnShow", function(self)
         if self.teamPicker and self.teamPicker.refresh then
             self.teamPicker.refresh()
+        end
+        -- Start the 2s status ticker for the shown lifetime of the
+        -- frame; OnHide cancels it so a hidden frame costs nothing.
+        UpdateStatusText(self)
+        if not self._statusTicker and C_Timer and C_Timer.NewTicker then
+            self._statusTicker = C_Timer.NewTicker(2, function()
+                UpdateStatusText(self)
+            end)
         end
         -- Re-check stale state on every OnShow so the banner appears
         -- if the data crossed the 7-day threshold while the main frame
@@ -443,19 +464,10 @@ local function CreateMainFrame()
         RefreshCurrentTab(self)
     end)
 
-    -- 2s status-bar ticker. Used to also re-render the Dashboard tab
-    -- here (when one existed); now it only refreshes the status text.
-    f:SetScript("OnUpdate", function(self, elapsed)
-        self._tick = (self._tick or 0) + elapsed
-        if self._tick < 2 then return end
-        self._tick = 0
-        if self.statusText then
-            if WGS:IsTrackingAttendance() then
-                self.statusText:SetText("|cff00ff00Attendance tracking active|r")
-                self.statusText:Show()
-            else
-                self.statusText:Hide()
-            end
+    f:SetScript("OnHide", function(self)
+        if self._statusTicker then
+            self._statusTicker:Cancel()
+            self._statusTicker = nil
         end
     end)
 

@@ -596,4 +596,178 @@ describe("Modules/RCLC.lua", function()
         installFakeRCLC(nil)
         assert.is_false(WGS:InteropStatus().rclcLoaded)
     end)
+    ------------------------------------------------------------------
+    -- Owner-absent holder retirement + gate ordering
+    ------------------------------------------------------------------
+
+    it("retires a lone stray holder row when entry.owner is absent", function()
+        -- Same trade-flow situation, but RCLC didn't populate owner.
+        -- Exactly one un-award-tagged row for the item under a
+        -- different player inside the window → that's the holder row.
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 120,
+            player    = "Holder-TestRealm",
+            itemID    = 212425,
+        })
+        local action = WGS:RecordRCLCAward("Winner-TestRealm", makeHistoryEntry{})
+        assert.are.equal("added", action)
+        assert.are.equal(1, #WGS.db.global.loot, "holder row retired, winner row added")
+        assert.are.equal("Winner-TestRealm", WGS.db.global.loot[1].player)
+
+        local fired = lastFired("WGS_LOOT_EDITED")
+        assert.are.equal("delete", fired.kind)
+        assert.are.equal("Holder-TestRealm", fired.row.player)
+    end)
+
+    it("owner-absent retirement refuses to guess between multiple candidates", function()
+        -- Two un-award-tagged rows for the same item (two genuine
+        -- copies dropped): deleting either would risk erasing a real
+        -- drop, so ambiguity leaves both alone.
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 120, player = "HolderA-TestRealm", itemID = 212425,
+        })
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 100, player = "HolderB-TestRealm", itemID = 212425,
+        })
+        assert.are.equal("added",
+            WGS:RecordRCLCAward("Winner-TestRealm", makeHistoryEntry{}))
+        assert.are.equal(3, #WGS.db.global.loot,
+            "both candidate rows survive next to the award row")
+    end)
+
+    it("a cached sub-Epic award skips BEFORE retiring the holder row (no data loss)", function()
+        _G.C_Item = { GetItemInfo = function() return "Blue Thing", nil, 3, 480 end }
+        table.insert(WGS.db.global.loot, {
+            timestamp = 1754078130 - 120,
+            player    = "Holder-TestRealm",
+            itemID    = 212425,
+        })
+        assert.are.equal("skipped",
+            WGS:RecordRCLCAward("Winner-TestRealm",
+                makeHistoryEntry{ owner = "Holder-TestRealm" }))
+        assert.are.equal(1, #WGS.db.global.loot,
+            "the holder's row must survive an award we refuse to record")
+        assert.are.equal("Holder-TestRealm", WGS.db.global.loot[1].player)
+    end)
+
+    ------------------------------------------------------------------
+    -- Award-arrived-first chat dedup (Modules/Loot.lua guard)
+    ------------------------------------------------------------------
+
+    describe("WGS:HasRCLCAwardRow (chat-capture dedup predicate)", function()
+        before_each(function()
+            assert.are.equal("added",
+                WGS:RecordRCLCAward("Winner-TestRealm", makeHistoryEntry{}))
+        end)
+
+        it("covers the same drop arriving via chat after the award", function()
+            assert.is_true(WGS:HasRCLCAwardRow(212425, "Winner-TestRealm", 1754078130 + 30))
+        end)
+
+        it("matches across realm-suffix drift on the player name", function()
+            assert.is_true(WGS:HasRCLCAwardRow(212425, "Winner", 1754078130 + 30))
+        end)
+
+        it("does not cover a different player, item, or a drop outside the window", function()
+            assert.is_false(WGS:HasRCLCAwardRow(212425, "Other-TestRealm", 1754078130))
+            assert.is_false(WGS:HasRCLCAwardRow(99999,  "Winner-TestRealm", 1754078130))
+            assert.is_false(WGS:HasRCLCAwardRow(212425, "Winner-TestRealm", 1754078130 + 1000))
+        end)
+
+        it("ignores plain chat/MRT rows (no rclcId) — two real copies both record", function()
+            WGS.db.global.loot = { {
+                timestamp = 1754078130, player = "Winner-TestRealm", itemID = 212425,
+            } }
+            assert.is_false(WGS:HasRCLCAwardRow(212425, "Winner-TestRealm", 1754078130))
+        end)
+    end)
+
+    ------------------------------------------------------------------
+    -- simPct (Droptimizer gain) rendering
+    ------------------------------------------------------------------
+
+    it("voting cell renders the wish's simPct gain next to the priority", function()
+        local captured, vf
+        vf = {
+            scrollCols = {},
+            GetColumnIndex = function() return nil end,
+            AddColumn = function(_, spec) captured = { spec = spec } end,
+            GetCurrentSession = function() return 1 end,
+        }
+        rc = makeFakeRCLC({ modules = { votingframe = vf },
+                            lootTable = { { itemID = 212425 } } })
+        installFakeRCLC(rc)
+        WGS.db.global.wishlists = {
+            { playerName = "Wisher", items = {
+                { itemID = 212425, priority = "BiS", simPct = 5.3 },
+            } },
+        }
+        assert.is_true(WGS:_RCLC_InstallVotingColumn(rc))
+
+        local frame = { text = { SetText = function(self, t) self.last = t end } }
+        local data = { { name = "Wisher-TestRealm", cols = { [6] = {} } } }
+        captured.spec.DoCellUpdate(nil, frame, data, nil, 1, 1, 6, true)
+        assert.is_truthy(frame.text.last:find("BiS"))
+        assert.is_truthy(frame.text.last:find("+5.3%", 1, true),
+            "the Droptimizer gain renders beside the priority")
+        -- Banded weight: priority band (4 × 1000) + bounded sim tie-break
+        -- (5.3% → 53). Priority still dominates; gain only breaks ties.
+        assert.are.equal(4053, data[1].cols[6].value, "banded sort weight: priority band + sim tie-break")
+    end)
+
+    it("voting cell survives an RCLC surface drift (pcall guard) and still writes the value", function()
+        local captured, vf
+        vf = {
+            scrollCols = {},
+            GetColumnIndex = function() return nil end,
+            AddColumn = function(_, spec) captured = { spec = spec } end,
+        }
+        rc = makeFakeRCLC({ modules = { votingframe = vf } })
+        -- Drifted surface: GetLootTable now throws.
+        rc.GetLootTable = function() error("surface moved") end
+        vf.GetCurrentSession = function() error("surface moved") end
+        installFakeRCLC(rc)
+        assert.is_true(WGS:_RCLC_InstallVotingColumn(rc))
+
+        local frame = { text = { SetText = function(self, t) self.last = t end } }
+        local data = { { name = "Wisher-TestRealm", cols = { [6] = {} } } }
+        captured.spec.DoCellUpdate(nil, frame, data, nil, 1, 1, 6, true)
+        assert.are.equal("-", frame.text.last, "drift degrades to the empty cell")
+        assert.are.equal(0, data[1].cols[6].value, "sortable value still written")
+    end)
+
+    ------------------------------------------------------------------
+    -- GetWishlistForItem memoization
+    ------------------------------------------------------------------
+
+    it("GetWishlistForItem carries simPct and rebuilds when the wishlists change", function()
+        WGS.db.global.wishlists = {
+            { playerName = "Wisher", items = {
+                { itemID = 212425, priority = "BiS", note = "pls", simPct = 2.5 },
+            } },
+        }
+        local wishes = WGS:GetWishlistForItem(212425)
+        assert.are.equal(1, #wishes)
+        assert.are.equal("Wisher", wishes[1].playerName)
+        assert.are.equal(2.5, wishes[1].simPct)
+
+        -- Repeat call serves from the index (same content).
+        assert.are.equal(1, #WGS:GetWishlistForItem(212425))
+        assert.are.equal(0, #WGS:GetWishlistForItem(99999))
+
+        -- A re-import swaps the table identity → the index rebuilds.
+        WGS.db.global.wishlists = {
+            { playerName = "Other", items = {
+                { itemID = 212425, priority = "Low" },
+            } },
+        }
+        local fresh = WGS:GetWishlistForItem(212425)
+        assert.are.equal(1, #fresh)
+        assert.are.equal("Other", fresh[1].playerName)
+
+        -- Stamp bump alone (same table) also invalidates.
+        WGS.db.global.wishlists[1].items[1].priority = "High"
+        WGS.db.global.wishlistImportedAt = 1754078131
+        assert.are.equal("High", WGS:GetWishlistForItem(212425)[1].priority)
+    end)
 end)

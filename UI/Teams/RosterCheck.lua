@@ -229,12 +229,12 @@ local function Populate(tab)
         addRow("|cff666666(none)|r")
     else
         for _, p in ipairs(present) do
-            local short = p.main:match("^([^%-]+)") or p.main
+            local short = WGS:ShortName(p.main)
             local gi = roster[short]
             local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
             local label = "|c" .. cColor .. short .. "|r"
             if p.matched ~= p.main then
-                local altShort = p.matched:match("^([^%-]+)") or p.matched
+                local altShort = WGS:ShortName(p.matched)
                 label = label .. " |cff888888(on alt: " .. altShort .. ")|r"
             end
             addRow(label)
@@ -247,7 +247,7 @@ local function Populate(tab)
         addRow("|cff666666(none)|r")
     else
         for _, m in ipairs(missing) do
-            local short = m:match("^([^%-]+)") or m
+            local short = WGS:ShortName(m)
             local gi = roster[short]
             local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
             local status = gi and (gi.online and "|cff00ff00online|r" or "|cff555555offline|r") or "|cffff4444not in guild|r"
@@ -261,12 +261,12 @@ local function Populate(tab)
         addRow("|cff666666(none)|r")
     else
         for _, e in ipairs(extra) do
-            local short = e.name:match("^([^%-]+)") or e.name
+            local short = WGS:ShortName(e.name)
             local gi = roster[short]
             local cColor = gi and WGS.CLASS_COLORS[gi.class] or "ffffffff"
             local label = "|c" .. cColor .. short .. "|r"
             if e.altOfMain then
-                local mainShort = e.altOfMain:match("^([^%-]+)") or e.altOfMain
+                local mainShort = WGS:ShortName(e.altOfMain)
                 label = label .. " |cff888888(alt of " .. mainShort .. ")|r"
             else
                 label = label .. " |cff888888(pug)|r"
@@ -289,7 +289,7 @@ local function Populate(tab)
                 local channel = WGS:GetGroupChannel() or "PARTY"
                 local shorts = {}
                 for _, m in ipairs(missing) do
-                    shorts[#shorts + 1] = m:match("^([^%-]+)") or m
+                    shorts[#shorts + 1] = WGS:ShortName(m)
                 end
                 WGS:SendChatLine("Missing for " .. (data.event.title or "event") .. ":", channel)
                 WGS:SendChatChunked(WGS:PackChatTokens(shorts), channel)

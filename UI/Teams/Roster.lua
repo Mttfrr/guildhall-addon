@@ -33,7 +33,7 @@ local ApplyClassIcon      = ui.ApplyClassIcon
 -- names like "Death Knight"; roster carries the file constant already.
 local function ResolveClass(charName, roster)
     local details = WGS.db.global.characterDetails
-    local key = charName:match("^([^%-]+)") or charName
+    local key = WGS:ShortName(charName)
     local d = details and details[key]
     if d and d.class and d.class ~= "" then return WGS:NormalizeClassFile(d.class) end
     local gi = roster[key]
@@ -45,7 +45,7 @@ end
 local function GetCharacterDetails(charName)
     local details = WGS.db.global.characterDetails
     if not details then return nil end
-    local key = charName:match("^([^%-]+)") or charName
+    local key = WGS:ShortName(charName)
     return details[key]
 end
 
@@ -56,7 +56,7 @@ local function BuildAltTooltipLines(charName, roster)
     local info = GetCharacterDetails(charName)
     local class = ResolveClass(charName, roster) or ""
     local colorHex = WGS.CLASS_COLORS[class] or "ffffffff"
-    local short = charName:match("^([^%-]+)") or charName
+    local short = WGS:ShortName(charName)
 
     local lines = {}
     -- Header: "AltName (Class, Spec)"
@@ -379,13 +379,13 @@ local function Populate(tab)
             -- unlinked members would silently drop the unlinked ones.
             local linkInfo = {}
             for _, pm in ipairs(team.playerMembers or {}) do
-                local shortMain = (pm.main or ""):match("^([^%-]+)") or pm.main or ""
+                local shortMain = WGS:ShortName(pm.main)
                 if shortMain ~= "" then linkInfo[shortMain:lower()] = pm end
             end
 
             local rows = {}
             for _, memberName in ipairs(memberNames) do
-                local short = memberName:match("^([^%-]+)") or memberName
+                local short = WGS:ShortName(memberName)
                 local pm = linkInfo[short:lower()]
                 local altList = pm and characters[pm.playerId] and characters[pm.playerId].alts
                 local info = details[short] or {}

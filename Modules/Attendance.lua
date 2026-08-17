@@ -331,10 +331,31 @@ local function DecodeMRTRosterEntry(raw)
     return name, MRT_CLASS_LETTER_TO_NAME[letter] or ""
 end
 
+--- Are two per-pull rosters identical (same names + classes, in MRT's
+--- stable positional order)? Drives the consecutive-roster dedup below.
+local function RostersEqual(a, b)
+    if #a ~= #b then return false end
+    for i = 1, #a do
+        if a[i].name ~= b[i].name or a[i].class ~= b[i].class then
+            return false
+        end
+    end
+    return true
+end
+
 --- Read MRT's per-encounter roster snapshots (VMRT.Attendance.data) and
 --- return rows whose timestamp falls inside [startedAt, endedAt]. Each
 --- row becomes a `bossAttendance` entry on the session. Returns an
 --- empty table if MRT isn't loaded or has no overlapping rows.
+---
+--- SavedVariables growth cap: bossAttendance is the fastest-growing
+--- capture table (one up-to-40-name roster per pull — a 50-pull prog
+--- night on one boss is 50 near-identical rosters). Consecutive pulls
+--- with an identical roster store `sameRosterAsPrev = true` instead of
+--- the roster copy. The platform import consumes per-pull rosters
+--- (kills/wipes counts + per-pull "bosses attended"), so the compact
+--- form is re-expanded via WGS:ExpandBossAttendance at the export
+--- boundary (Sync/Encoder.lua) — the wire/export contract is unchanged.
 ---
 --- Contract reference: docs/INTEROP.md → MRT → Attendance.
 function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
@@ -344,6 +365,7 @@ function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
     local data = vmrt and vmrt.Attendance and vmrt.Attendance.data
     if type(data) ~= "table" then return out end
 
+    local lastRoster = nil
     for _, row in ipairs(data) do
         if type(row) == "table"
            and type(row.t) == "number"
@@ -361,7 +383,7 @@ function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
                     end
                 end
             end
-            out[#out + 1] = {
+            local entry = {
                 encounterID   = row.eI,
                 encounterName = row.eN,
                 difficultyID  = row.d,
@@ -370,7 +392,42 @@ function WGS:BuildBossAttendanceFromMRT(startedAt, endedAt)
                 groupSize     = row.g,
                 roster        = roster,
             }
+            if lastRoster and RostersEqual(lastRoster, roster) then
+                -- Identical to the previous pull's roster: store the
+                -- marker, not another 40-name copy. Expanded back at
+                -- export time (WGS:ExpandBossAttendance).
+                entry.roster = nil
+                entry.sameRosterAsPrev = true
+            else
+                lastRoster = roster
+            end
+            out[#out + 1] = entry
         end
+    end
+    return out
+end
+
+--- Inverse of the consecutive-roster dedup above: return a NEW list in
+--- which every entry carries a materialized `roster` (rows flagged
+--- `sameRosterAsPrev` get the nearest preceding stored roster; the
+--- flag itself is stripped). Input rows are not mutated — expanded rows
+--- share the stored roster tables by reference, which is fine for
+--- read-only serialization. Used by the export pipeline so the
+--- platform keeps seeing the full per-pull roster contract.
+function WGS:ExpandBossAttendance(bossAttendance)
+    local out = {}
+    local lastRoster = nil
+    for _, row in ipairs(bossAttendance or {}) do
+        local copy = {}
+        for k, v in pairs(row) do
+            if k ~= "sameRosterAsPrev" then copy[k] = v end
+        end
+        if row.roster then
+            lastRoster = row.roster
+        elseif row.sameRosterAsPrev then
+            copy.roster = lastRoster or {}
+        end
+        out[#out + 1] = copy
     end
     return out
 end
@@ -573,11 +630,15 @@ function WGS:SnapshotRaidComp(bossInfo)
     if not snapshot then return false end
 
     local results = self.db.global.raidCompResults
-    local last = results[#results]
-    -- Dedupe: skip if the previous snapshot is from the same session and has
-    -- the same comp signature. (Same session = same startedAt timestamp.)
-    if last and last.startedAt == snapshot.startedAt and last.signature == snapshot.signature then
-        return false
+    -- Dedupe against EVERY snapshot already saved for this session
+    -- (same session = same startedAt timestamp), not just the last row
+    -- — an A→B→A comp sequence used to record A twice, and peer-merged
+    -- rows can interleave sessions so "last row" isn't even guaranteed
+    -- to be ours.
+    for _, existing in ipairs(results) do
+        if existing.startedAt == snapshot.startedAt and existing.signature == snapshot.signature then
+            return false
+        end
     end
 
     results[#results + 1] = snapshot

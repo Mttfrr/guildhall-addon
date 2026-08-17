@@ -146,6 +146,20 @@ function WGS:InteropStatus()
         for _ in pairs(vmrt) do vmrtSubTables = vmrtSubTables + 1 end
     end
 
+    -- RCLC version drift: docs/INTEROP.md's bridge contract was
+    -- verified against RCLootCouncil 3.23.x. A newer RCLC still mostly
+    -- degrades to pcall'd no-ops if its internals moved, but the
+    -- officer should KNOW the bridge is running against an unverified
+    -- surface instead of debugging silently-missing award rows.
+    local rclcVersion, rclcVersionDrifted = nil, false
+    do
+        local rc = self:GetRCLC()
+        if rc and type(rc.version) == "string" and rc.version ~= "" then
+            rclcVersion = rc.version
+            rclcVersionDrifted = self:CompareVersions(rclcVersion, "3.24.0") >= 0
+        end
+    end
+
     -- MRT note text size: GMRT.F:GetNote() or MRT.F.GetNote() if the
     -- public API is available, otherwise VMRT.Note.Text1 fallback.
     local noteText, noteAPIUsed = nil, nil
@@ -181,6 +195,8 @@ function WGS:InteropStatus()
         rclcCaptureOn   = (self.db and self.db.profile and self.db.profile.rclcCapture) ~= false,
         rclcLootCount   = rclcLootCount,
         rclcLootLast    = rclcLootLast,
+        rclcVersion     = rclcVersion,
+        rclcVersionDrifted = rclcVersionDrifted,
     }
 end
 
@@ -189,13 +205,9 @@ end
 -- and the formatting is interop-specific.
 function WGS:PrintInteropStatus()
     local s = self:InteropStatus()
+    -- Shared relative-time formatter (Util/Time.lua).
     local function ago(ts)
-        if not ts or ts == 0 then return "never" end
-        local d = (tonumber(time and time()) or 0) - ts
-        if d < 60   then return d .. "s ago" end
-        if d < 3600 then return math.floor(d / 60)   .. "m ago" end
-        if d < 86400 then return math.floor(d / 3600) .. "h ago" end
-        return math.floor(d / 86400) .. "d ago"
+        return self:FormatRelativeTime(ts)
     end
     local function yesno(b)
         return b and "|cff00ff00yes|r" or "|cff888888no|r"
@@ -224,7 +236,14 @@ function WGS:PrintInteropStatus()
             "|cff888888  No MRT/NSRT data available — bridge code stays dormant.|r")
     end
 
-    self:Print(string.format("  RCLC loaded:       %s", yesno(s.rclcLoaded)))
+    self:Print(string.format("  RCLC loaded:       %s%s", yesno(s.rclcLoaded),
+        s.rclcVersion and ("  (v" .. s.rclcVersion .. ")") or ""))
+    if s.rclcVersionDrifted then
+        self:Print(string.format(
+            "  |cffffaa00RCLC v%s is newer than the verified 3.23.x — the bridge " ..
+            "degrades to no-ops where RCLC's internals moved. Check for a GuildHall update.|r",
+            s.rclcVersion))
+    end
     if s.rclcLoaded then
         self:Print("|cffffd100  RCLC award capture|r")
         self:Print(string.format("    capture: %s   rows tagged source=rclc: %d / %d total  (last: %s)",

@@ -385,10 +385,6 @@ end
 -- Public API
 ---------------------------------------------------------------------------
 
-function WGS:ToggleEventsFrame()
-    self:SelectMainFrameTab(self._ui.TAB_EVENTS)
-end
-
 function WGS:PopulateEvents(container)
     PopulateEvents(container)
 end

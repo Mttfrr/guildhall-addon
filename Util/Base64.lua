@@ -29,8 +29,14 @@ function WGS:Base64Encode(data)
     return table.concat(out)
 end
 
+-- Returns the decoded string, or nil when the input contains a
+-- character outside the base64 alphabet. Mapping unknown characters
+-- to 0 (the old behaviour) silently decoded corrupted/truncated
+-- pastes into garbage bytes that then failed much later with a
+-- misleading JSON error — better to fail at the source.
 function WGS:Base64Decode(str)
     str = str:gsub("%s+", ""):gsub("=", "")
+    if str:find("[^A-Za-z0-9+/]") then return nil end
     local out, n = {}, 0
     for i = 1, #str, 4 do
         local a = b64lookup[str:sub(i, i)] or 0

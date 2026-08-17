@@ -75,4 +75,40 @@ describe("Exported-data clear snapshot", function()
         local ok = WGS:RestoreClearedData()
         assert.is_false(ok)
     end)
+    it("ExpireClearSnapshot drops an expired snapshot from disk", function()
+        loadSampleData()
+        WGS:SnapshotExportedData()
+        WGS.db.global.lastClearSnapshot.t = WGS:GetTimestamp() - (25 * 60 * 60)
+
+        WGS:ExpireClearSnapshot()
+
+        local snap = WGS.db.global.lastClearSnapshot
+        assert.are.equal(0, snap.t, "expired snapshot resets to the empty sentinel")
+        assert.is_nil(snap.loot, "the copied tables are actually gone from SavedVariables")
+        assert.is_false(WGS:HasRestorableSnapshot())
+    end)
+
+    it("ExpireClearSnapshot keeps a snapshot inside the 24h window", function()
+        loadSampleData()
+        WGS:SnapshotExportedData()
+
+        WGS:ExpireClearSnapshot()
+
+        assert.is_true(WGS:HasRestorableSnapshot())
+        assert.are.equal(2, #WGS.db.global.lastClearSnapshot.loot)
+    end)
+
+    it("ExpireClearSnapshot no-ops when no snapshot was ever taken", function()
+        WGS:ExpireClearSnapshot()
+        assert.are.equal(0, WGS.db.global.lastClearSnapshot.t)
+    end)
+
+    it("ClearExportedData empties every canonical exported table", function()
+        loadSampleData()
+        WGS:ClearExportedData()
+        for _, k in ipairs(WGS.EXPORTED_DATA_KEYS) do
+            assert.is_table(WGS.db.global[k])
+            assert.is_nil(next(WGS.db.global[k]), k .. " should be empty")
+        end
+    end)
 end)
