@@ -13,6 +13,15 @@ local QUALITY_THRESHOLD = 4  -- Epic
 local lastBossName = ""
 local bossNameTimer = nil
 
+--- Extract itemID from an item link. Single implementation shared by
+--- the CHAT_MSG_LOOT capture path and the MRT reconciliation pass so
+--- both compare apples to apples.
+local function ItemIDFromLink(link)
+    if type(link) ~= "string" then return nil end
+    local id = link:match("item:(%d+)")
+    return id and tonumber(id) or nil
+end
+
 -- Build loot message patterns from WoW's global strings (locale-safe)
 local function BuildLootPatterns()
     local function escape(s)
@@ -137,7 +146,7 @@ function module:OnLootMessage(_, msg, ...)
         player = player .. "-" .. (GetNormalizedRealmName() or "")
     end
 
-    local itemID = self:GetItemIDFromLink(itemLink)
+    local itemID = ItemIDFromLink(itemLink)
     if not itemID then return end
 
     local playerId = WGS:ResolvePlayerForCharacter(player)

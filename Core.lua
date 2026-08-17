@@ -504,13 +504,10 @@ local function formatRowCount(name, val)
     return tostring(n)
 end
 
+-- Shared relative-time formatter (Util/Time.lua). Local alias keeps
+-- the call sites below compact.
 local function formatAgo(ts)
-    if not ts or ts <= 0 then return "never" end
-    local delta = (time() or 0) - ts
-    if delta < 60 then return delta .. "s ago" end
-    if delta < 3600 then return math.floor(delta / 60) .. "m ago" end
-    if delta < 86400 then return math.floor(delta / 3600) .. "h ago" end
-    return math.floor(delta / 86400) .. "d ago"
+    return WGS:FormatRelativeTime(ts)
 end
 
 function WGS:PrintDiagSummary()

@@ -14,15 +14,24 @@ local EXPORT_VERSION = 4
 local EXPORT_HEADER_V3 = "WGS3"
 local EXPORT_HEADER_V4 = "WGS4"
 
--- Lazy-loaded LibDeflate handle. Stored on the WGS namespace (not in
--- a module-local) so the Encoder and Decoder share the same cache and
--- _ResetCompressionCache flushes both at once — important for tests
--- that swap LibStub between cases.
-local function GetLibDeflate()
+-- Lazy-loaded LibDeflate handle, shared by every consumer (Encoder,
+-- Decoder, PeerMessage — this file loads first in Sync/Sync.xml).
+-- Stored on the WGS namespace so all paths share one cache and
+-- _ResetCompressionCache flushes them at once — important for tests
+-- that swap LibStub between cases. The capability check covers the
+-- union of what every call site needs, so a partially-functional
+-- library stub is treated as missing everywhere consistently.
+function WGS:GetLibDeflate()
     if WGS._libDeflate ~= nil then return WGS._libDeflate or nil end
     local ok, lib = pcall(LibStub, "LibDeflate")
-    if ok and lib and type(lib.CompressDeflate) == "function"
-       and type(lib.EncodeForPrint) == "function" then
+    if ok and lib
+       and type(lib.CompressDeflate) == "function"
+       and type(lib.DecompressDeflate) == "function"
+       and type(lib.EncodeForPrint) == "function"
+       and type(lib.DecodeForPrint) == "function"
+       and type(lib.EncodeForWoWAddonChannel) == "function"
+       and type(lib.DecodeForWoWAddonChannel) == "function"
+    then
         WGS._libDeflate = lib
         return lib
     end
@@ -53,7 +62,7 @@ function WGS:Encode(data)
     -- payload's `v` field reflects the envelope ACTUALLY emitted (not
     -- EXPORT_VERSION), so decoders can route on either the envelope
     -- header OR the embedded `v` field consistently.
-    local lib = GetLibDeflate()
+    local lib = self:GetLibDeflate()
     local emitVersion = lib and EXPORT_VERSION or 3
 
     local payload = {
@@ -154,14 +163,18 @@ function WGS:BuildExportData(modules)
     return data
 end
 
--- Full export: build + encode
+-- Full export: build + encode. Returns the encoded string, or
+-- nil + reason ("empty" — already printed — or "encode-failed") so
+-- the UI can surface encode failures instead of silently no-opping.
 function WGS:ExportAll()
     local data = self:BuildExportData()
     if not data or next(data) == nil then
         self:Print("No data to export.")
-        return nil
+        return nil, "empty"
     end
-    return self:Encode(data)
+    local encoded = self:Encode(data)
+    if not encoded then return nil, "encode-failed" end
+    return encoded
 end
 
 -- Export specific module

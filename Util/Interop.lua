@@ -144,13 +144,9 @@ end
 -- and the formatting is interop-specific.
 function WGS:PrintInteropStatus()
     local s = self:InteropStatus()
+    -- Shared relative-time formatter (Util/Time.lua).
     local function ago(ts)
-        if not ts or ts == 0 then return "never" end
-        local d = (tonumber(time and time()) or 0) - ts
-        if d < 60   then return d .. "s ago" end
-        if d < 3600 then return math.floor(d / 60)   .. "m ago" end
-        if d < 86400 then return math.floor(d / 3600) .. "h ago" end
-        return math.floor(d / 86400) .. "d ago"
+        return self:FormatRelativeTime(ts)
     end
     local function yesno(b)
         return b and "|cff00ff00yes|r" or "|cff888888no|r"

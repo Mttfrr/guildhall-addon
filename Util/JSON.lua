@@ -86,7 +86,8 @@ function WGS:FromJson(str)
                 pos = pos + 1
             end
         end
-        return table.concat(parts)
+        -- Ran off the end without a closing quote — truncated input.
+        error("unterminated string at character " .. pos)
     end
 
     local function parseNumber()
@@ -105,11 +106,20 @@ function WGS:FromJson(str)
         return tonumber(str:sub(start, pos - 1))
     end
 
+    -- Both container parsers bounds-check `pos` at the top of every
+    -- iteration. Without this, truncated input like "[1,2" loops
+    -- forever: the closing-bracket test never matches on the empty
+    -- string that sub() returns past the end, and the bare
+    -- `pos = pos + 1` advances into infinity — a hard client freeze
+    -- that pcall cannot rescue. error() here unwinds to the pcall in
+    -- FromJson, which returns nil to the caller.
+
     local function parseArray()
         pos = pos + 1; skipWs()
         local arr = {}
         if str:sub(pos, pos) == "]" then pos = pos + 1; return arr end
         while true do
+            if pos > len then error("unterminated array at character " .. pos) end
             skipWs(); arr[#arr + 1] = parseValue(); skipWs()
             if str:sub(pos, pos) == "]" then pos = pos + 1; return arr end
             pos = pos + 1
@@ -121,6 +131,7 @@ function WGS:FromJson(str)
         local obj = {}
         if str:sub(pos, pos) == "}" then pos = pos + 1; return obj end
         while true do
+            if pos > len then error("unterminated object at character " .. pos) end
             skipWs(); local key = parseString(); skipWs()
             pos = pos + 1; skipWs()
             obj[key] = parseValue(); skipWs()
