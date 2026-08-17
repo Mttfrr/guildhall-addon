@@ -121,6 +121,48 @@ local function CleanLootForExport(lootEntries)
     return cleaned
 end
 
+-- Re-expand bossAttendance for export. Storage dedupes identical
+-- consecutive per-pull rosters (`sameRosterAsPrev` marker — see
+-- Modules/Attendance.lua BuildBossAttendanceFromMRT) to cap
+-- SavedVariables growth, but the platform's import counts per-pull
+-- roster membership, so the wire format ships every roster in full.
+-- Sessions without markers pass through untouched (no copies).
+local function CleanAttendanceForExport(sessions)
+    local cleaned = {}
+    for _, session in ipairs(sessions) do
+        local ba = session.bossAttendance
+        local needsExpand = false
+        if type(ba) == "table" then
+            for _, row in ipairs(ba) do
+                if type(row) == "table" and row.sameRosterAsPrev then
+                    needsExpand = true
+                    break
+                end
+            end
+        end
+        if needsExpand then
+            local copy = {}
+            for k, v in pairs(session) do copy[k] = v end
+            copy.bossAttendance = WGS:ExpandBossAttendance(ba)
+            cleaned[#cleaned + 1] = copy
+        else
+            cleaned[#cleaned + 1] = session
+        end
+    end
+    return cleaned
+end
+
+-- Per-table export pre-pass dispatch, shared by BuildExportData and
+-- ExportModule so a selective export can't drift from the full one.
+local function CleanTableForExport(mod, stored)
+    if mod == "loot" then
+        return CleanLootForExport(stored)
+    elseif mod == "attendance" then
+        return CleanAttendanceForExport(stored)
+    end
+    return stored
+end
+
 -- Build export data from all captured modules
 function WGS:BuildExportData(modules)
     modules = modules or { "attendance", "loot", "encounters", "raidCompResults", "guildBankMoneyChanges", "guildBankTransactions" }
@@ -129,11 +171,7 @@ function WGS:BuildExportData(modules)
     for _, mod in ipairs(modules) do
         local stored = self.db.global[mod]
         if stored and next(stored) ~= nil then
-            if mod == "loot" then
-                data[mod] = CleanLootForExport(stored)
-            else
-                data[mod] = stored
-            end
+            data[mod] = CleanTableForExport(mod, stored)
         end
     end
 
@@ -184,11 +222,7 @@ function WGS:ExportModule(moduleName)
         self:Print("No " .. moduleName .. " data to export.")
         return nil
     end
-    local exportData = stored
-    if moduleName == "loot" then
-        exportData = CleanLootForExport(stored)
-    end
-    return self:Encode({ [moduleName] = exportData })
+    return self:Encode({ [moduleName] = CleanTableForExport(moduleName, stored) })
 end
 
 -- Selective tables that /gh export <name> will accept. Listed
@@ -229,26 +263,6 @@ function WGS:ExportTableInteractive(tableName)
         -- (early-init slash invocation in a stripped client).
         self:Print(encoded)
     end
-end
-
--- Export multiple specific modules
-function WGS:ExportModules(moduleNames)
-    local data = {}
-    for _, mod in ipairs(moduleNames) do
-        local stored = self.db.global[mod]
-        if stored and next(stored) ~= nil then
-            if mod == "loot" then
-                data[mod] = CleanLootForExport(stored)
-            else
-                data[mod] = stored
-            end
-        end
-    end
-    if next(data) == nil then
-        self:Print("No data to export for selected modules.")
-        return nil
-    end
-    return self:Encode(data)
 end
 
 --- Test-only: drop the LibDeflate handle cache so specs can flip

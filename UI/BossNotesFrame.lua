@@ -25,6 +25,10 @@ end
 
 --- Populate boss notes into any container with .noteText (FontString) and .content.
 function WGS:PopulateBossNotes(container, encounterName)
+    -- Guard the container contract instead of nil-dereferencing: a
+    -- caller that hands us a frame without the expected children gets
+    -- a silent no-op, not a Lua error mid-render.
+    if not (container and container.noteText and container.content) then return end
     if not encounterName then
         container.noteText:SetText("|cff888888Select a boss from the dropdown above.|r")
         container.content:SetHeight(40)

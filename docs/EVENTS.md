@@ -217,6 +217,72 @@ Kinds:
   (`awardResponse`, `awardResponseId`, `awardIsReason`, `awardVotes`,
   `rclcId`).
 
+### `WGS_ATTENDANCE_EDITED`
+
+The attendance counterpart of `WGS_LOOT_EDITED`: fires when an officer
+corrects an already-recorded session. PeerSync broadcasts the payload's
+`session` on the attendance channel; the merge fn is rev-aware (LWW),
+so every edit bumps `session.rev`. Payload:
+
+| Field | Type | Notes |
+|---|---|---|
+| `index` | integer | the session's index in `db.global.attendance` at edit time (pre-removal index for deletes) |
+| `session` | table | the edited session — see per-kind notes below |
+| `kind` | string | `"rebind"`, `"remove_member"`, or `"delete"` |
+| `memberName` | string | `"remove_member"` only — the character spliced out |
+
+Kinds:
+
+- **`"rebind"`** — an officer re-bound the session's `eventId` /
+  `eventTitle` (`WGS:RebindAttendanceSession`). `session` is the live
+  row; matching `raidCompResults` rows are rebound in the same pass.
+- **`"remove_member"`** — a character was spliced out of the session's
+  `memberList` (`WGS:RemoveMemberFromSession`), and out of every
+  comp snapshot sharing the session's `startedAt`.
+- **`"delete"`** — the session was removed
+  (`WGS:DeleteAttendanceSession`). `session` is a tombstone: the
+  natural key (`startedAt`, `startedBy`) plus `_deleted = true` and the
+  bumped `rev`, so peers find their copy and remove it (cascading into
+  their `raidCompResults`).
+
+### `WGS_BANK_CAPTURED`
+
+Fires when a guild-bank visit lands new data in `db.global`
+(`Modules/GuildBank.lua`). Two payload shapes, discriminated by which
+field is present:
+
+| Field | Type | Notes |
+|---|---|---|
+| `added` | integer | transaction-scan shape: rows newly appended to `guildBankTransactions` |
+| `total` | integer | transaction-scan shape: table size after the append |
+| `goldChanged` | boolean | gold-delta shape: always `true` |
+| `money` | integer | gold-delta shape: the new balance in copper |
+
+Subscribers that only care that *something* bank-related changed can
+treat both shapes identically (the Logs → Bank tab does).
+
+### `WGS_GROUP_ROSTER_CHANGED`
+
+Debounced (~0.4 s) mirror of Blizzard's `GROUP_ROSTER_UPDATE`, fired by
+`Modules/Attendance.lua` so UI surfaces can re-render live raid state
+(the Events detail panel's Raid Status section) without each subscriber
+implementing its own storm-guard. **No payload** — read the live group
+APIs / `WGS:BuildInviteSnapshot` for current state. A burst of joins
+or leaves coalesces into a single fire.
+
+### `WGS_SIGNUP_EDITED`
+
+Fires when an officer changes a signup status in-game
+(`WGS:UpdateSignupStatus` — the Mark-status flow on the Events roster).
+The change is applied to `db.global.signups` and queued in
+`pendingSignupChanges` for the next export. Payload:
+
+| Field | Type | Notes |
+|---|---|---|
+| `eventId` | integer | the event whose signup changed |
+| `characterName` | string | |
+| `status` | string | the new status code (`"P"`, `"L"`, `"B"`, `"A"`, …) |
+
 ### `WGS_CURRENT_TEAM_CHANGED`
 
 Fires when the user changes the global current-team picker (via the

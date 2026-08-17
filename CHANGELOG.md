@@ -51,6 +51,8 @@ button silently refusing to re-invite stragglers.
 
 - **Mass invite now re-invites people who declined or reconnected.** The Invite button worked once, then reported *"All members are already in group or offline"* and quietly invited nobody on the second press — so raiders who declined the first invite, let it expire, or disconnected-and-reconnected could never be pulled in without a `/reload`. Root cause: the invited-set in `Modules/EventScheduler.lua` was a **permanent boolean** — once a character was invited, they were marked forever. It's now a per-character **timestamp with a 30-second re-invite cooldown**: a second press inside the cooldown is still a no-op (so an accidental double-click doesn't fire 25 duplicate invite popups), but once the cooldown lapses, pressing Invite again reaches everyone who still isn't in the group. Members who were offline on the first pass were never marked, so they're invited the instant they reconnect. 4 new specs lock the first-invite, in-cooldown no-op, post-cooldown re-invite, and reconnect paths.
 
+## [0.7.5-beta] — 2026-06-06
+
 Post-feedback follow-up to 0.7.4-beta. Critical right-click menu bug fixes
 (the EasyMenu → MenuUtil migration in 0.7.4-beta opened menus correctly
 but action items silently did nothing on live retail), plus the

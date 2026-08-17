@@ -93,7 +93,6 @@ local dbDefaults = {
         targetIlvl = 0,
         lastExport = 0,
         lastImport = 0,
-        exportHistory = {},
         serverMinAddonVersion = nil,  -- captured from the web's export response on import
         lastClearSnapshot = { t = 0 }, -- 24h recoverable backup of cleared exported data
     },
@@ -116,8 +115,11 @@ function WGS:OnInitialize()
 end
 
 function WGS:OnEnable()
-    self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:SetupTooltipHooks()
+    -- Expire the 24h clear-data undo snapshot: HasRestorableSnapshot
+    -- only *reports* expiry, so without this the copied tables would
+    -- sit in SavedVariables forever, permanently doubling storage.
+    self:ExpireClearSnapshot()
 end
 
 --- Print the standard "edit applied" confirmation that the correction
@@ -143,13 +145,10 @@ end
 
 function WGS:OnDisable() end
 
-function WGS:PLAYER_ENTERING_WORLD()
-    -- Reserved for future per-character init. The "What's new" modal
-    -- used to fire here on version bumps but auto-popping a modal on
-    -- every login was intrusive — it now surfaces via a title-bar
-    -- badge in the main frame (opt-in) and the /gh whatsnew slash.
-    -- See UI/WhatsNew.lua.
-end
+-- Note: the "What's new" modal used to fire from a PLAYER_ENTERING_WORLD
+-- handler on version bumps, but auto-popping a modal on every login was
+-- intrusive — it now surfaces via a title-bar badge in the main frame
+-- (opt-in) and the /gh whatsnew slash. See UI/WhatsNew.lua.
 
 -- Slash command dispatch. Each entry is a function(self, input) where
 -- input is the raw rest-of-line so handlers that need sub-args can
@@ -190,12 +189,23 @@ local SLASH_HANDLERS = {
     bank      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_BANK) end,
     logs      = function(self) self:SelectMainFrameTab(self._ui.TAB_LOGS, self._ui.LOGS_SUB_LOOT) end,
     restore   = function(self) self:RestoreClearedData() end,
+
+    -- /gh clear — clear the already-exported telemetry tables (loot,
+    -- attendance, encounters, raid comps, bank journals) behind the
+    -- same confirm + 24h-restore snapshot the Sync tab's "Clear
+    -- Exported Data" button uses. This is the command /gh diag
+    -- recommends when a table grows large.
+    clear = function(self)
+        if StaticPopup_Show then
+            StaticPopup_Show("WGS_CONFIRM_CLEAR_EXPORTED")
+        end
+    end,
     whatsnew  = function(self) if self.ShowWhatsNew then self:ShowWhatsNew() end end,
 
     -- /gh sync / catchup — manual peer-sync catch-up. Useful when you
     -- join a raid late and the GROUP_ROSTER_UPDATE debounce hasn't
     -- fired yet, or when you suspect a peer's data drifted. Bypasses
-    -- the 60s debounce so it always does something visible.
+    -- the 5-minute catch-up debounce so it always does something visible.
     sync = function(self) self:PeerSync_ManualCatchup() end,
 
     -- /gh interop — read-only MRT/NSRT/RCLC integration diagnostic.
@@ -394,10 +404,44 @@ end
 
 WGS.CLEAR_SNAPSHOT_TTL = 24 * 60 * 60
 
-local SNAPSHOTTED_KEYS = {
+-- The canonical list of captured-telemetry tables — everything the
+-- export ships and "Clear Exported Data" wipes. Consumed by the clear
+-- snapshot/restore below, the Sync-tab clear popup (UI/LootFrame.lua)
+-- and the Config panel's "Clear ALL Data" — one table, not four
+-- hand-copied lists.
+WGS.EXPORTED_DATA_KEYS = {
     "loot", "attendance", "encounters", "raidCompResults",
     "guildBankMoneyChanges", "guildBankTransactions",
 }
+
+-- Same idea for the tables imported from the web platform (cleared by
+-- "Clear Imported Data" / "Clear ALL Data" in the Config panel). Keys
+-- listed here reset to {}; the scalar companions (wishlistImportedAt,
+-- targetIlvl) are handled by ClearImportedData.
+WGS.IMPORTED_DATA_KEYS = {
+    "teams", "wishlists", "bossNotes", "raidComps", "events",
+    "gearAudit", "characters", "characterLookup",
+}
+
+local SNAPSHOTTED_KEYS = WGS.EXPORTED_DATA_KEYS
+
+--- Reset every exported-telemetry table to empty. Callers that want
+--- the 24h undo must call SnapshotExportedData() first — this is the
+--- bare wipe.
+function WGS:ClearExportedData()
+    for _, k in ipairs(WGS.EXPORTED_DATA_KEYS) do
+        self.db.global[k] = {}
+    end
+end
+
+--- Reset every imported-from-web table (plus its scalar companions).
+function WGS:ClearImportedData()
+    for _, k in ipairs(WGS.IMPORTED_DATA_KEYS) do
+        self.db.global[k] = {}
+    end
+    self.db.global.wishlistImportedAt = 0
+    self.db.global.targetIlvl = 0
+end
 
 function WGS:SnapshotExportedData()
     local db = self.db.global
@@ -406,6 +450,20 @@ function WGS:SnapshotExportedData()
         snap[k] = db[k] or {}
     end
     db.lastClearSnapshot = snap
+end
+
+--- Drop the clear-data snapshot from disk once its 24h restore window
+--- has lapsed. Called from OnEnable (login / reload) — before this,
+--- HasRestorableSnapshot only reported expiry while the copied tables
+--- stayed in SavedVariables forever.
+function WGS:ExpireClearSnapshot()
+    local db = self.db and self.db.global
+    if not db then return end
+    local snap = db.lastClearSnapshot
+    if not snap or not snap.t or snap.t == 0 then return end
+    if (self:GetTimestamp() - snap.t) > self.CLEAR_SNAPSHOT_TTL then
+        db.lastClearSnapshot = { t = 0 }
+    end
 end
 
 function WGS:HasRestorableSnapshot()
@@ -464,36 +522,6 @@ function WGS:SetCurrentTeamId(teamId)
     if self.db.profile.currentTeamId == teamId then return end
     self.db.profile.currentTeamId = teamId
     self:FireEvent("WGS_CURRENT_TEAM_CHANGED", { teamId = teamId })
-end
-
----------------------------------------------------------------------------
--- Teams
----------------------------------------------------------------------------
-
-function WGS:ListTeams()
-    local teams = self.db.global.teams
-    if not teams or #teams == 0 then
-        self:Print("No teams imported. Use /gh import.")
-        return
-    end
-
-    local chars = self.db.global.characters or {}
-    self:Print("--- Imported Teams ---")
-    for i, team in ipairs(teams) do
-        local count = team.playerMembers and #team.playerMembers or (team.members and #team.members or 0)
-        self:Print(string.format("  %d. %s (%s) — %d members", team.id or i, team.name or "?", team.type or "?", count))
-
-        if team.playerMembers then
-            for _, pm in ipairs(team.playerMembers) do
-                local info = chars[pm.playerId]
-                local main = (pm.main or ""):match("^([^%-]+)") or "?"
-                local nAlts = info and info.alts and #info.alts or 0
-                self:Print("     " .. main .. (nAlts > 0 and (" (+" .. nAlts .. " alts)") or ""))
-            end
-        elseif team.members and #team.members > 0 then
-            self:Print("     " .. table.concat(team.members, ", "))
-        end
-    end
 end
 
 ---------------------------------------------------------------------------
@@ -597,8 +625,7 @@ end
 -- "Foo-EU" rows and "Foo-Realm" rows.
 
 local function shortLower(name)
-    if not name or name == "" then return "" end
-    return ((name):match("^([^%-]+)") or name):lower()
+    return WGS:ShortName(name):lower()
 end
 
 local function nameMatches(needle, value)

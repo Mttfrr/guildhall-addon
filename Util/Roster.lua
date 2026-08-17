@@ -28,6 +28,16 @@ function WGS:NormalizeFullName(name, realm)
     return name .. "-" .. realm
 end
 
+--- Strip the realm suffix: "Foo-Realm" → "Foo". The single canonical
+--- short-name helper — every `name:match("^([^%-]+)")` call site should
+--- route through here (or a thin local wrapper) so the strip rule can't
+--- drift. Nil-safe: nil / non-string / empty input returns "". A name
+--- with no realm suffix comes back unchanged.
+function WGS:ShortName(name)
+    if type(name) ~= "string" or name == "" then return "" end
+    return name:match("^([^%-]+)") or name
+end
+
 --- Reverse lookup: CharName-Realm → playerId. Rebuilt on each import.
 function WGS:BuildCharacterLookup()
     local lookup = {}
@@ -97,7 +107,7 @@ function WGS:GetGuildRosterLookup()
     for i = 1, GetNumGuildMembers() do
         local name, rankName, _, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
         if name then
-            local short = name:match("^([^%-]+)")
+            local short = self:ShortName(name)
             roster[short] = {
                 fullName = self:NormalizeFullName(name),  -- always "Char-Realm"
                 class = classFile or "",

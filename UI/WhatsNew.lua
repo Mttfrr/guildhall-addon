@@ -41,6 +41,64 @@ local RELEASE_NOTES = {
         },
     },
     {
+        version = "0.7.7-beta",
+        title = "Raid-forming tools",
+        sections = {
+            { heading = "Added", items = {
+                "Raid Status snapshot on the Events detail panel — every expected raider bucketed live: In raid / Invited (waiting) / Not invited / Offline, with a one-line count summary",
+                "\"Organize Groups\" button — one click sorts everyone into the subgroups your platform raid comp assigns",
+                "Auto-sort into comp groups as raiders accept (on by default; never reshuffles people you've placed by hand)",
+            } },
+            { heading = "Changed", items = {
+                "Mass invite has no cooldown any more — every press (re-)invites everyone online who isn't in the group yet",
+            } },
+        },
+    },
+    {
+        version = "0.7.6-beta",
+        title = "Raid-start tracking prompt",
+        sections = {
+            { heading = "Added", items = {
+                "\"You're about to raid — start tracking?\" prompt when you form/join a raid that lines up with a scheduled event — one click starts attendance tracking (new toggle, on by default)",
+            } },
+            { heading = "Fixed", items = {
+                "Mass invite now re-invites people who declined, let the invite expire, or reconnected — no more one-shot Invite button",
+            } },
+        },
+    },
+    {
+        version = "0.7.5-beta",
+        title = "Menus fixed + officer corrections sync",
+        sections = {
+            { heading = "Added", items = {
+                "Corrections now propagate to other officers within seconds — re-tag a loot row, rebind or delete an attendance session, remove a member, and every officer's addon follows (no re-import round-trip)",
+                "Live UI refresh — Mark-status, new loot drops, boss kills, and comp snapshots re-render the visible tab immediately",
+                "Right-click player menu on the Teams → Roster sub-view",
+            } },
+            { heading = "Fixed", items = {
+                "Right-click menu actions actually fire on live retail (Whisper / Invite / Copy name / Copy profile link)",
+                "Right-click → Invite works cross-realm; Copy name / Copy profile link popups contain the value again",
+                "Invite button correctly excludes players marked Bench",
+            } },
+        },
+    },
+    {
+        version = "0.7.4-beta",
+        title = "Comp diff, officer status edits + /gh tooling",
+        sections = {
+            { heading = "Added", items = {
+                "Planned-vs-actual raid comp diff while mid-raid (Missing / Subbed in, per group)",
+                "Class-balance warnings on the planned comp (no combat rez / no Bloodlust / class stacking)",
+                "Officer right-click \"Mark status\" on Roster rows — all 8 status codes, exported to the platform",
+                "Stale-data banner when the last import is older than 7 days, with a one-click jump to Sync",
+                "/gh search <name> (cross-context lookup), /gh export <table> (selective export), /gh diag (data health summary)",
+            } },
+            { heading = "Fixed", items = {
+                "Every right-click menu works on current retail again (EasyMenu was removed by Blizzard; migrated to MenuUtil)",
+            } },
+        },
+    },
+    {
         version = "0.7.3",
         title = "Contextual menus everywhere + /reload survival",
         sections = {

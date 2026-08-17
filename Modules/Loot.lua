@@ -237,12 +237,6 @@ function module:ParseLootMessage(msg)
     return nil, nil
 end
 
-function module:GetItemIDFromLink(link)
-    if not link then return nil end
-    local id = link:match("item:(%d+)")
-    return id and tonumber(id) or nil
-end
-
 ---------------------------------------------------------------------------
 -- MRT loot reconciliation
 ---------------------------------------------------------------------------
@@ -283,14 +277,6 @@ local function ParseMRTLootRow(s)
         quantity    = tonumber(segs[7]) or 1,
         itemLink    = segs[8] or "",
     }
-end
-
---- Extract itemID from an item link. Used both for our existing rows
---- and for MRT-sourced rows so reconciliation compares apples to apples.
-local function ItemIDFromLink(link)
-    if type(link) ~= "string" then return nil end
-    local id = link:match("item:(%d+)")
-    return id and tonumber(id) or nil
 end
 
 --- Does our db.global.loot already contain a row matching this MRT

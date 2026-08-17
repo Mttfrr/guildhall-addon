@@ -215,7 +215,7 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
         if not allowed then return true end
         if not playerName then return false end
         if allowed[playerName] then return true end
-        local short = playerName:match("^([^%-]+)") or playerName
+        local short = WGS:ShortName(playerName)
         return allowed[short] == true
     end
 
@@ -232,8 +232,8 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
     for _, entry in ipairs(wishlists or {}) do
         if type(entry) == "table" and type(entry.items) == "table"
             and inScope(entry.playerName) then
-            local short = (entry.playerName or ""):match("^([^%-]+)")
-                or entry.playerName or "?"
+            local short = WGS:ShortName(entry.playerName)
+            if short == "" then short = "?" end
             for _, item in ipairs(entry.items) do
                 if item.itemID then
                     local rec = items[item.itemID]
@@ -511,7 +511,7 @@ local function BuildAllowedPlayers()
         if t.id == currentTeamId then
             for _, memberName in ipairs(t.members or {}) do
                 allowed[memberName] = true
-                local short = memberName:match("^([^%-]+)") or memberName
+                local short = WGS:ShortName(memberName)
                 allowed[short] = true
             end
             local chars = WGS.db.global.characters or {}
@@ -520,7 +520,7 @@ local function BuildAllowedPlayers()
                 if info and info.alts then
                     for _, alt in ipairs(info.alts) do
                         allowed[alt] = true
-                        local altShort = alt:match("^([^%-]+)") or alt
+                        local altShort = WGS:ShortName(alt)
                         allowed[altShort] = true
                     end
                 end

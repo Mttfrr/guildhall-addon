@@ -1,23 +1,17 @@
 local L = {}
 
-L["ADDON_NAME"] = "GuildHall"
-L["SLASH_HELP"] = "Commands: /gh show | events | teams | logs | sync | loot | bank | attendance | wishlists | rostercheck | bossnotes <name> | team <name|all> | invite | sortgroups | config | help"
+L["SLASH_HELP"] = "Commands: /gh show | events | teams | logs | sync | loot | bank | attendance | wishlists | rostercheck | bossnotes <name> | team <name|all> | invite | sortgroups | clear | diag | search <name> | whatsnew | config | help"
 L["EXPORT_COPIED"] = "Export string ready. Copy and paste it into your guild web app."
+L["EXPORT_FAILED"] = "Export failed: could not encode the data. Try /reload and export again; if it persists, report it."
 L["IMPORT_PROMPT"] = "Paste the import string from your guild web app below:"
 L["IMPORT_SUCCESS"] = "Successfully imported %d items."
 L["IMPORT_FAILED"] = "Import failed: invalid or corrupted data."
-L["ATTENDANCE_START"] = "Attendance tracking started for this raid."
-L["ATTENDANCE_STOP"] = "Attendance tracking stopped. %d members recorded."
 L["LOOT_RECORDED"] = "%s looted by %s."
 
 -- RCLootCouncil bridge (Modules/RCLC.lua).
 L["RCLC_AWARD_RECORDED"] = "%s awarded to %s by loot council."
 L["RCLC_IMPORT_RESULT"]  = "RCLootCouncil history import: %d new award(s) added to the loot log."
 L["RCLC_NOT_AVAILABLE"]  = "RCLootCouncil is not loaded."
-L["BANK_SCANNED"] = "Guild bank scanned: %d items across %d tabs."
-L["GOLD_CHANGE"] = "Guild bank gold changed: %s"
-L["NO_GUILD"] = "You are not in a guild."
-L["NOT_IN_RAID"] = "You are not in a raid group."
 
 -- Permission gates for /gh invite + /gh sortgroups. Each is shown to
 -- the user as a single chat line, red so it's hard to miss.

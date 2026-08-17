@@ -106,18 +106,5 @@ function WGS:DecodeAndImport(encoded)
     -- The web platform wraps data in the same envelope: { v, t, data: { teams, wishlists, ... } }
     local importData = data.data or data
 
-    -- Debug: show what keys were found
-    local keys = {}
-    for k, v in pairs(importData) do
-        if type(v) == "table" then
-            local count = 0
-            for _ in pairs(v) do count = count + 1 end
-            table.insert(keys, k .. "(" .. count .. ")")
-        else
-            table.insert(keys, k)
-        end
-    end
-    self:Print("Import data keys: " .. (next(keys) and table.concat(keys, ", ") or "none"))
-
     return self:ProcessImport(importData)
 end

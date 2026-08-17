@@ -251,7 +251,8 @@ local IMPORTERS = {
 
 -- Process decoded import data from web platform.
 --
--- Spreads the 13 importers across separate frames via C_Timer when
+-- Spreads the importers (the IMPORTERS list above — one per frame)
+-- across separate frames via C_Timer when
 -- available — paste-to-finish takes the same wall-clock time, but the
 -- per-frame work stays small enough that WoW doesn't visibly hitch. In
 -- tests (no C_Timer) the loop runs synchronously so assertions can
@@ -330,19 +331,6 @@ end
 ---------------------------------------------------------------------------
 -- Read helpers (used by other modules + UI)
 ---------------------------------------------------------------------------
-
--- Get wishlist for a specific player (used by tooltip enrichment)
-function WGS:GetWishlistForPlayer(playerName)
-    local wishlists = self.db.global.wishlists
-    if not wishlists then return nil end
-
-    for _, entry in ipairs(wishlists) do
-        if entry.playerName == playerName then
-            return entry.items
-        end
-    end
-    return nil
-end
 
 -- Get wishlist entries for a specific item ID
 function WGS:GetWishlistForItem(itemID)
