@@ -151,6 +151,17 @@ function WGS:BuildExportData(modules)
         data.pendingSignupChanges = queue
     end
 
+    -- Loot rows deleted locally after a possible earlier export (RCLC
+    -- trade-flow retirement, officer corrections). The platform deletes
+    -- its matching copy and pins the tombstone so no later export can
+    -- resurrect it. Idempotent server-side, so re-shipping the whole
+    -- list every export is deliberate — the addon never learns which
+    -- exports actually got pasted.
+    local tombs = self.db.global.lootTombstones
+    if type(tombs) == "table" and #tombs > 0 then
+        data.lootTombstones = tombs
+    end
+
     return data
 end
 

@@ -358,6 +358,10 @@ function WGS:GetWishlistForItem(itemID)
                         playerName = entry.playerName,
                         priority = item.priority,
                         note = item.note,
+                        -- Droptimizer gain from the wisher's own sim —
+                        -- rendered by the loot tooltip, the RCLC voting
+                        -- column and the roll-window annotation.
+                        simPct = tonumber(item.simPct),
                     })
                 end
             end

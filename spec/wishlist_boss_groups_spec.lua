@@ -314,6 +314,20 @@ describe("WGS:BuildWishlistBossGroups", function()
         assert.are.equal("Old", w.short)
         assert.is_nil(w.class)
         assert.are.equal("pls", w.note)
+        assert.is_nil(w.simPct, "no sim data on legacy imports — renders nothing")
+    end)
+
+    it("carries each wisher's Droptimizer gain through as a number", function()
+        local result = WGS:BuildWishlistBossGroups({
+            { playerName = "Simmed", items = {
+                { itemID = 101, priority = "BiS", source = "B", simPct = 2.5 } } },
+            { playerName = "Stringy", items = {
+                { itemID = 101, priority = "High", source = "B", simPct = "1.2" } } },
+        }, {})
+        local wishers = result.bosses[1].items[1].wishers
+        assert.are.equal(2.5, wishers[1].simPct)
+        assert.are.equal(1.2, wishers[2].simPct,
+            "tolerates a stringly-typed simPct from a hand-rolled export")
     end)
 
     it("skips wishes without an itemID (free-text platform wishes are not exported rows)", function()
