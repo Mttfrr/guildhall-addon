@@ -93,6 +93,29 @@ local options = {
                     get = function() return WGS.db.profile.showBossNotes end,
                     set = function(_, val) WGS.db.profile.showBossNotes = val end,
                 },
+                headerRCLC = {
+                    order = 24,
+                    type = "header",
+                    name = "RCLootCouncil",
+                },
+                rclcCapture = {
+                    order = 25,
+                    type = "toggle",
+                    name = "Capture RCLC Awards",
+                    desc = "Record RCLootCouncil award decisions (winner, response, votes) into the loot log — upgrading the chat-captured row for the same drop when one exists. Works for every raider running both addons, not just the loot master. Does nothing when RCLootCouncil isn't loaded. Takes effect on next /reload.",
+                    width = "full",
+                    get = function() return WGS.db.profile.rclcCapture end,
+                    set = function(_, val) WGS.db.profile.rclcCapture = val end,
+                },
+                rclcWishlistColumn = {
+                    order = 26,
+                    type = "toggle",
+                    name = "Wishlists in RCLC Frames",
+                    desc = "Add a GuildHall column to RCLootCouncil's voting frame showing each candidate's imported wishlist priority for the item, and append your own wish to the roll window. Does nothing when RCLootCouncil isn't loaded. Takes effect on next /reload.",
+                    width = "full",
+                    get = function() return WGS.db.profile.rclcWishlistColumn end,
+                    set = function(_, val) WGS.db.profile.rclcWishlistColumn = val end,
+                },
                 headerPeerSync = {
                     order = 28,
                     type = "header",
@@ -189,6 +212,7 @@ local options = {
                     func = function()
                         WGS.db.global.teams = {}
                         WGS.db.global.wishlists = {}
+                        WGS.db.global.wishlistImportedAt = 0
                         WGS.db.global.bossNotes = {}
                         WGS.db.global.raidComps = {}
                         WGS.db.global.events = {}
@@ -216,6 +240,7 @@ local options = {
                         WGS.db.global.lastKnownGold = nil
                         WGS.db.global.teams = {}
                         WGS.db.global.wishlists = {}
+                        WGS.db.global.wishlistImportedAt = 0
                         WGS.db.global.bossNotes = {}
                         WGS.db.global.raidComps = {}
                         WGS.db.global.events = {}

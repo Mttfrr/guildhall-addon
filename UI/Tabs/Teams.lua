@@ -59,7 +59,7 @@ local function BuildTeamsTab(parent)
     wishlists.build(parent.subViews[TEAMS_SUB_WISHLISTS])
 
     -- Back-pointers used by the Refresh button inside RosterCheck and
-    -- the boss-dropdown inside Wishlists. Sub-view-owned re-renders.
+    -- the filter dropdowns inside Wishlists. Sub-view-owned re-renders.
     parent.subViews[TEAMS_SUB_CHECK]._refreshFn = function()
         rosterCheck.populate(parent.subViews[TEAMS_SUB_CHECK])
     end
