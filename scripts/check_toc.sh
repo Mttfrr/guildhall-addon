@@ -46,8 +46,13 @@ if [[ "$TOC_VERSION" != "$LUA_VERSION" ]]; then
 fi
 
 TOC_INTERFACE=$(grep -E "^## Interface:" "$TOC" | head -1 | sed -E 's/^## Interface:[[:space:]]+//' | tr -d ' \t\r\n')
-if ! [[ $TOC_INTERFACE =~ ^[0-9]+$ ]]; then
-    echo "FAIL: $TOC ## Interface field missing or non-numeric: '$TOC_INTERFACE'"
+# Retail TOCs may declare SEVERAL interface versions, comma-separated, so a
+# single build is marked compatible with both the live patch and the next
+# one across a patch transition (the packager and Wago/CurseForge both read
+# the whole list). Each entry must still be numeric — a typo here silently
+# flags the addon out-of-date for everyone.
+if ! [[ $TOC_INTERFACE =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    echo "FAIL: $TOC ## Interface must be a number or comma-separated numbers, got: '$TOC_INTERFACE'"
     exit 1
 fi
 
