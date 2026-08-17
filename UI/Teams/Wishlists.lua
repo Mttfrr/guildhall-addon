@@ -23,14 +23,19 @@ local ui = WGS._ui
 --              which only appears when imports are mixed — and a fully
 --              location-less import produces an empty location list, so
 --              the dropdown offers nothing beyond "All locations".
+--   armorType → per-item field ("Cloth"/"Leather"/"Mail"/"Plate", ""
+--              when not armor). Same degradation contract as location:
+--              blanks/absents land in the Armor filter's "Unknown"
+--              bucket only when imports are mixed, and a fully
+--              armor-less import produces an empty option list.
 --
--- Three filters sit above the list — Boss, Location, Slot — and they
--- combine (AND). Boss sections emptied by the combination disappear
--- entirely rather than rendering hollow headers.
+-- Four filters sit above the list in two rows — Boss + Location, then
+-- Slot + Armor — and they combine (AND). Boss sections emptied by the
+-- combination disappear entirely rather than rendering hollow headers.
 --
 -- The grouping/sorting/fallback logic is pure and lives in
 -- WGS:BuildWishlistBossGroups (which also derives the distinct
--- location/slot option lists the dropdowns render); the filter
+-- location/slot/armor option lists the dropdowns render); the filter
 -- application is equally pure in WGS:FilterWishlistBossGroups. Both are
 -- pinned by spec/wishlist_boss_groups_spec.lua without a rendering
 -- harness.
@@ -58,11 +63,13 @@ local UNASSIGNED_NAME = "Unassigned"
 local ALL_BOSSES      = "All bosses"
 local ALL_LOCATIONS   = "All locations"
 local ALL_SLOTS       = "All slots"
+local ALL_ARMOR       = "All armor"
 
--- Shared "this item doesn't carry the field" bucket for the Location
--- and Slot filters. Distinct from the boss UNASSIGNED bucket, which is
--- a *group* the browser renders — Unknown is purely a filter concept
--- (item rows never print "Unknown"; they just omit the missing bit).
+-- Shared "this item doesn't carry the field" bucket for the Location,
+-- Slot and Armor filters. Distinct from the boss UNASSIGNED bucket,
+-- which is a *group* the browser renders — Unknown is purely a filter
+-- concept (item rows never print "Unknown"; they just omit the
+-- missing bit).
 local UNKNOWN_KEY     = "__unknown"
 local UNKNOWN_NAME    = "Unknown"
 
@@ -79,6 +86,15 @@ local SLOT_ORDER = {
 }
 local SLOT_RANK = {}   -- [lowercased slot] = canonical position
 for i, s in ipairs(SLOT_ORDER) do SLOT_RANK[s:lower()] = i end
+
+-- Fixed armor-class order for the Armor filter — lightest to heaviest,
+-- the order every WoW player already knows, not alphabetical. The
+-- platform's vocabulary is exactly these four ("" for non-armor items);
+-- values outside it aren't dropped — they sort after, alphabetically —
+-- mirroring the Slot filter's tolerance for a future export.
+local ARMOR_ORDER = { "Cloth", "Leather", "Mail", "Plate" }
+local ARMOR_RANK = {}   -- [lowercased armor type] = canonical position
+for i, a in ipairs(ARMOR_ORDER) do ARMOR_RANK[a:lower()] = i end
 
 -- Epic purple — the sensible default for raid loot whose quality isn't
 -- cached yet. The old view hardcoded this for every item name.
@@ -152,8 +168,9 @@ end
 ---
 --- wishlists: platform export shape —
 ---   { { playerName, class?, items = { { itemID, itemName?, slot?,
----       priority, note?, source?, location? } } }, ... }
---- (class + source + location are new fields; older imports lack them.)
+---       priority, note?, source?, location?, armorType? } } }, ... }
+--- (class + source + location + armorType are new fields; older
+--- imports lack them.)
 ---
 --- opts:
 ---   allowed          set of permitted player names (full AND short
@@ -164,21 +181,25 @@ end
 ---   roster           WGS:GetGuildRosterLookup()-shaped map (class fallback)
 ---   getItemInfo      fn(itemID) → name?, quality? (defaults to C_Item)
 ---
---- Returns { bosses, locations, slots } where bosses = { { key, name,
---- itemCount, wishCount, items = { { itemID, name, quality?, slot?,
---- slotKey?, location?, locationKey?, wishers = { { playerName, short,
---- class?, priority, note? } } } } } } with:
+--- Returns { bosses, locations, slots, armorTypes } where bosses =
+--- { { key, name, itemCount, wishCount, items = { { itemID, name,
+--- quality?, slot?, slotKey?, location?, locationKey?, armorType?,
+--- armorTypeKey?, wishers = { { playerName, short, class?, priority,
+--- note? } } } } } } with:
 ---   bosses  sorted alphabetically, "Unassigned" always last
 ---   items   sorted by wisher count desc, then name, then itemID
 ---   wishers sorted by priority rank (BiS→Low, unknown last), then name
 ---
---- locations/slots are the filter dropdowns' option lists — the
---- distinct values present across the (team-filtered) items, each as
---- { key, name }:
----   locations sorted alphabetically (first-seen display casing)
----   slots     in SLOT_ORDER, unrecognised values after (alphabetical),
----             recognised values displayed in canonical casing
---- Both grow a trailing Unknown bucket only when the data is MIXED
+--- locations/slots/armorTypes are the filter dropdowns' option lists —
+--- the distinct values present across the (team-filtered) items, each
+--- as { key, name }:
+---   locations  sorted alphabetically (first-seen display casing)
+---   slots      in SLOT_ORDER, unrecognised values after (alphabetical),
+---              recognised values displayed in canonical casing
+---   armorTypes in ARMOR_ORDER (Cloth → Plate, only those present),
+---              unrecognised values after (alphabetical), recognised
+---              values displayed in canonical casing
+--- All three grow a trailing Unknown bucket only when the data is MIXED
 --- (some items carry the field, some don't); when no item carries it
 --- the list stays empty, so the dropdown offers nothing beyond "All" —
 --- a filter over a field the import doesn't have would never narrow
@@ -207,6 +228,7 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
     local items   = {}   -- [itemID] = { itemID, name?, slot?, wishers, srcTally }
     local display = {}   -- [mergeKey] = first-seen display casing
     local locDisplay, slotDisplay = {}, {}   -- ditto, for location / slot
+    local armorDisplay = {}                  -- ditto, for armor type
     for _, entry in ipairs(wishlists or {}) do
         if type(entry) == "table" and type(entry.items) == "table"
             and inScope(entry.playerName) then
@@ -249,6 +271,19 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
                             rec.locationKey, rec.location = lk, ld
                         end
                     end
+                    -- armorType likewise — first non-blank wins, but
+                    -- the four known values display in canonical
+                    -- casing ("cloth" → "Cloth") since the vocabulary
+                    -- is fixed; unrecognised values keep their casing.
+                    local ak, ad = textKey(item.armorType)
+                    if ak then
+                        local canonical = ARMOR_RANK[ak]
+                            and ARMOR_ORDER[ARMOR_RANK[ak]] or ad
+                        if not armorDisplay[ak] then armorDisplay[ak] = canonical end
+                        if not rec.armorTypeKey then
+                            rec.armorTypeKey, rec.armorType = ak, canonical
+                        end
+                    end
                 end
             end
         end
@@ -278,8 +313,8 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
     -- filter dropdowns' option lists.
     local getItemInfo = opts.getItemInfo or defaultGetItemInfo
     local groups = {}
-    local locSeen, slotSeen = {}, {}   -- [key] = true; display casing is pass 1's
-    local anyNoLocation, anyNoSlot = false, false
+    local locSeen, slotSeen, armorSeen = {}, {}, {}   -- [key] = true; display casing is pass 1's
+    local anyNoLocation, anyNoSlot, anyNoArmor = false, false, false
     for _, rec in pairs(items) do
         if not rec.name then rec.name = lootName[rec.itemID] end
         local ciName, ciQuality = getItemInfo(rec.itemID)
@@ -297,6 +332,11 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
             slotSeen[rec.slotKey] = true
         else
             anyNoSlot = true
+        end
+        if rec.armorTypeKey then
+            armorSeen[rec.armorTypeKey] = true
+        else
+            anyNoArmor = true
         end
 
         local key = majorityKey(rec.srcTally)
@@ -380,12 +420,34 @@ function WGS:BuildWishlistBossGroups(wishlists, opts)
         slots[#slots + 1] = { key = UNKNOWN_KEY, name = UNKNOWN_NAME }
     end
 
-    return { bosses = bosses, locations = locations, slots = slots }
+    local armorTypes = {}
+    for key in pairs(armorSeen) do
+        armorTypes[#armorTypes + 1] = {
+            key  = key,
+            -- Pass 1 already canonicalised recognised values.
+            name = armorDisplay[key] or key,
+            rank = ARMOR_RANK[key],
+        }
+    end
+    table.sort(armorTypes, function(a, b)
+        local ra, rb = a.rank or 99, b.rank or 99
+        if ra ~= rb then return ra < rb end
+        return a.key < b.key   -- unrecognised armor types: alphabetical
+    end)
+    for _, a in ipairs(armorTypes) do a.rank = nil end
+    if #armorTypes > 0 and anyNoArmor then
+        armorTypes[#armorTypes + 1] = { key = UNKNOWN_KEY, name = UNKNOWN_NAME }
+    end
+
+    return {
+        bosses = bosses, locations = locations, slots = slots,
+        armorTypes = armorTypes,
+    }
 end
 
 --- Apply the browser's filter selections to a BuildWishlistBossGroups
 --- result. Pure and non-mutating: returns a fresh { bosses } view in
---- which the three filters combine (AND). Groups whose items all fail
+--- which the four filters combine (AND). Groups whose items all fail
 --- the filters vanish entirely — no hollow section headers — and the
 --- surviving groups' item/wish counts are recomputed so the headers
 --- stay honest against what's actually listed. Items and wishers are
@@ -396,10 +458,13 @@ end
 ---   location  location key (from result.locations) — the Unknown
 ---             bucket matches items that carry no location — or nil
 ---   slot      slot key (from result.slots), Unknown likewise, or nil
+---   armor     armor-type key (from result.armorTypes), Unknown
+---             likewise, or nil
 function WGS:FilterWishlistBossGroups(result, filters)
     filters = filters or {}
-    local fBoss, fLoc, fSlot = filters.boss, filters.location, filters.slot
-    if not (fBoss or fLoc or fSlot) then
+    local fBoss, fLoc, fSlot, fArmor =
+        filters.boss, filters.location, filters.slot, filters.armor
+    if not (fBoss or fLoc or fSlot or fArmor) then
         return { bosses = (result and result.bosses) or {} }
     end
 
@@ -409,7 +474,8 @@ function WGS:FilterWishlistBossGroups(result, filters)
             local kept = {}
             for _, it in ipairs(g.items) do
                 if (not fLoc or (it.locationKey or UNKNOWN_KEY) == fLoc)
-                    and (not fSlot or (it.slotKey or UNKNOWN_KEY) == fSlot) then
+                    and (not fSlot or (it.slotKey or UNKNOWN_KEY) == fSlot)
+                    and (not fArmor or (it.armorTypeKey or UNKNOWN_KEY) == fArmor) then
                     kept[#kept + 1] = it
                 end
             end
@@ -504,9 +570,10 @@ local function BuildBossHeader(content, yOff, boss)
 end
 
 -- One item row: quality-coloured name on the left, dim
--- "Slot · Location · N wishers" pill on the right — the rail-row chrome
--- (subtle bg, Listbox highlight). Slot/location segments drop out when
--- unknown (legacy imports), leaving just the wisher count.
+-- "Slot · Armor · Location · N wishers" pill on the right — the
+-- rail-row chrome (subtle bg, Listbox highlight). Slot/armor/location
+-- segments drop out when unknown (legacy imports), leaving just the
+-- wisher count.
 -- Hover shows the real item tooltip when the client has the item cached.
 local function BuildItemRow(content, item, yOff)
     local row = CreateFrame("Button", nil, content)
@@ -527,6 +594,9 @@ local function BuildItemRow(content, item, yOff)
     local metaText = n .. (n == 1 and " wisher" or " wishers")
     if item.location and item.location ~= "" then
         metaText = item.location .. "  \194\183  " .. metaText
+    end
+    if item.armorType and item.armorType ~= "" then
+        metaText = item.armorType .. "  \194\183  " .. metaText
     end
     if item.slot and item.slot ~= "" then
         metaText = item.slot .. "  \194\183  " .. metaText
@@ -606,14 +676,17 @@ end
 ---------------------------------------------------------------------------
 
 -- One filter dropdown — label + button + hand-rolled menu, the same
--- chrome the redesign gave the Boss filter, now shared by all three.
+-- chrome the redesign gave the Boss filter, now shared by all four.
 -- Every dropdown lists exactly what's present in the (team-filtered)
 -- wishlist data — Populate stashes the option lists on sv each render —
 -- NOT the loot-history values the old view scanned (wrong/empty for
 -- bosses never looted). cfg:
 --   label     the prefix FontString text ("Boss:")
---   anchor    frame the label hangs off (nil = sv's top-left corner)
---   width     button + menu width (the three shrink to share one row)
+--   anchor    frame the label hangs off (nil = sv's top-left corner,
+--             optionally pushed down by `y` to start a second row)
+--   y         top offset when anchor is nil (default -2, the first
+--             row; -30 starts the second row on the same 28px pitch)
+--   width     button + menu width (budgeted per row against CONTENT_W)
 --   allLabel  the nil-selection option ("All bosses")
 --   stateKey  sv field holding the selected KEY (sv[stateKey]) so
 --             Populate's stale-selection reset can clear it in one place
@@ -625,7 +698,7 @@ local function BuildFilterDropdown(sv, cfg)
     if cfg.anchor then
         lbl:SetPoint("LEFT", cfg.anchor, "RIGHT", 12, 0)
     else
-        lbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, -2)
+        lbl:SetPoint("TOPLEFT", sv, "TOPLEFT", 5, cfg.y or -2)
     end
     lbl:SetText(cfg.label)
 
@@ -695,9 +768,13 @@ local function BuildFilterDropdown(sv, cfg)
 end
 
 local function BuildSubView(sv)
-    -- The three filters share one row above the list and AND together.
-    -- Widths are budgeted against CONTENT_W: boss names run longest,
-    -- locations are zone names, slot labels are short.
+    -- The four filters sit in two rows above the list and AND together.
+    -- Four dropdowns + labels don't fit CONTENT_W in one row at
+    -- readable widths, so they wrap on a 28px pitch, grouped by what
+    -- they ask: row one narrows WHERE the item comes from (Boss,
+    -- Location — the long free-text values keep their full widths),
+    -- row two narrows WHAT the item is (Slot, Armor — short fixed
+    -- vocabularies, narrow buttons).
     sv.bossBtn = BuildFilterDropdown(sv, {
         label = "Boss:", width = 200,
         allLabel = ALL_BOSSES, stateKey = "selectedBossKey",
@@ -709,13 +786,18 @@ local function BuildSubView(sv)
         options = function() return sv._locations end,
     })
     sv.slotBtn = BuildFilterDropdown(sv, {
-        label = "Slot:", anchor = sv.locationBtn, width = 110,
+        label = "Slot:", y = -30, width = 110,
         allLabel = ALL_SLOTS, stateKey = "selectedSlotKey",
         options = function() return sv._slots end,
     })
+    sv.armorBtn = BuildFilterDropdown(sv, {
+        label = "Armor:", anchor = sv.slotBtn, width = 110,
+        allLabel = ALL_ARMOR, stateKey = "selectedArmorKey",
+        options = function() return sv._armorTypes end,
+    })
 
     local sf = CreateFrame("ScrollFrame", nil, sv, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -28)
+    sf:SetPoint("TOPLEFT", sv, "TOPLEFT", 0, -56)
     sf:SetPoint("BOTTOMRIGHT", sv, "BOTTOMRIGHT", -22, 0)
     local content = CreateFrame("Frame", nil, sf)
     content:SetWidth(CONTENT_W)
@@ -745,7 +827,8 @@ local function Populate(tab)
 
     local wishlists = WGS.db.global.wishlists or {}
     if #wishlists == 0 then
-        tab._bossGroups, tab._locations, tab._slots = {}, {}, {}
+        tab._bossGroups, tab._locations, tab._slots, tab._armorTypes =
+            {}, {}, {}, {}
         ui.CreateImportHint(tab.content, "No wishlists imported yet.", 5, -5)
         tab.content:SetHeight(72)
         return
@@ -760,10 +843,12 @@ local function Populate(tab)
     tab._bossGroups = result.bosses
     tab._locations  = result.locations
     tab._slots      = result.slots
+    tab._armorTypes = result.armorTypes
 
-    ResetStaleFilter(tab, "selectedBossKey",     tab.bossBtn,     result.bosses,    ALL_BOSSES)
-    ResetStaleFilter(tab, "selectedLocationKey", tab.locationBtn, result.locations, ALL_LOCATIONS)
-    ResetStaleFilter(tab, "selectedSlotKey",     tab.slotBtn,     result.slots,     ALL_SLOTS)
+    ResetStaleFilter(tab, "selectedBossKey",     tab.bossBtn,     result.bosses,     ALL_BOSSES)
+    ResetStaleFilter(tab, "selectedLocationKey", tab.locationBtn, result.locations,  ALL_LOCATIONS)
+    ResetStaleFilter(tab, "selectedSlotKey",     tab.slotBtn,     result.slots,      ALL_SLOTS)
+    ResetStaleFilter(tab, "selectedArmorKey",    tab.armorBtn,    result.armorTypes, ALL_ARMOR)
 
     if #result.bosses == 0 then
         local noData = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -773,7 +858,7 @@ local function Populate(tab)
         return
     end
 
-    -- The three filters AND together in the pure core; sections the
+    -- The four filters AND together in the pure core; sections the
     -- combination empties are gone from the view entirely. Each
     -- dropdown's options stay derived from the UNfiltered result (like
     -- the boss list always has), so a combination can legitimately
@@ -783,6 +868,7 @@ local function Populate(tab)
         boss     = tab.selectedBossKey,
         location = tab.selectedLocationKey,
         slot     = tab.selectedSlotKey,
+        armor    = tab.selectedArmorKey,
     })
     if #view.bosses == 0 then
         local noMatch = tab.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")

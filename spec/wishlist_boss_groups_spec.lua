@@ -14,12 +14,15 @@ local helpers = require("spec.helpers")
 --   location → per-item field (first non-blank wish wins); items
 --              without one fall into the filter's "Unknown" bucket,
 --              which exists only when imports are mixed
+--   armorType → per-item field, same first-non-blank rule; the four
+--              known values (Cloth/Leather/Mail/Plate) normalise to
+--              canonical casing, blanks degrade exactly like location
 --
--- The builder also derives the Location/Slot filter dropdowns' option
--- lists (distinct values present in the team-filtered data), and its
--- sibling WGS:FilterWishlistBossGroups applies the Boss + Location +
--- Slot selections (AND) as a pure view over the built structure —
--- recomputed counts, emptied groups dropped.
+-- The builder also derives the Location/Slot/Armor filter dropdowns'
+-- option lists (distinct values present in the team-filtered data),
+-- and its sibling WGS:FilterWishlistBossGroups applies the Boss +
+-- Location + Slot + Armor selections (AND) as a pure view over the
+-- built structure — recomputed counts, emptied groups dropped.
 --
 -- Both functions are pure with respect to their inputs (no db reads),
 -- so these specs pin the grouping + filtering without a rendering
@@ -49,8 +52,8 @@ describe("WGS:BuildWishlistBossGroups", function()
         WGS = setup()
     end)
 
-    it("returns empty boss/location/slot lists for empty/nil wishlists", function()
-        local empty = { bosses = {}, locations = {}, slots = {} }
+    it("returns empty boss/location/slot/armor lists for empty/nil wishlists", function()
+        local empty = { bosses = {}, locations = {}, slots = {}, armorTypes = {} }
         assert.are.same(empty, WGS:BuildWishlistBossGroups({}, {}))
         assert.are.same(empty, WGS:BuildWishlistBossGroups(nil, {}))
     end)
@@ -221,7 +224,9 @@ describe("WGS:BuildWishlistBossGroups", function()
             local result = WGS:BuildWishlistBossGroups({
                 wish("Eve", "Priest", { item(101, { source = "B" }) }),
             }, { allowed = { Aly = true } })
-            assert.are.same({ bosses = {}, locations = {}, slots = {} }, result)
+            assert.are.same(
+                { bosses = {}, locations = {}, slots = {}, armorTypes = {} },
+                result)
         end)
     end)
 
@@ -440,13 +445,14 @@ describe("WGS:BuildWishlistBossGroups", function()
             -- contract as the boss filter. Pin the input side: a value
             -- present in one build is absent from the next.
             local first = WGS:BuildWishlistBossGroups({
-                wish("Aly", "Mage", { item(101, { source = "B", slot = "Head", location = "The Voidspire" }) }),
+                wish("Aly", "Mage", { item(101, { source = "B", slot = "Head", location = "The Voidspire", armorType = "Plate" }) }),
             }, {})
             assert.are.equal("the voidspire", first.locations[1].key)
             assert.are.equal("head", first.slots[1].key)
+            assert.are.equal("plate", first.armorTypes[1].key)
 
             local second = WGS:BuildWishlistBossGroups({
-                wish("Aly", "Mage", { item(101, { source = "B", slot = "Ring", location = "Manaforge Omega" }) }),
+                wish("Aly", "Mage", { item(101, { source = "B", slot = "Ring", location = "Manaforge Omega", armorType = "Cloth" }) }),
             }, {})
             for _, l in ipairs(second.locations) do
                 assert.are_not.equal("the voidspire", l.key)
@@ -454,22 +460,104 @@ describe("WGS:BuildWishlistBossGroups", function()
             for _, s in ipairs(second.slots) do
                 assert.are_not.equal("head", s.key)
             end
+            for _, a in ipairs(second.armorTypes) do
+                assert.are_not.equal("plate", a.key)
+            end
+        end)
+    end)
+
+    describe("armor type metadata + filter option list", function()
+        it("carries per-item armorType through — first non-blank wish wins, trimmed + keyed", function()
+            local result = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage",   { item(101, { source = "B", armorType = "" }) }),  -- blank first: doesn't lock in nil
+                wish("Bob", "Rogue",  { item(101, { source = "B", armorType = "  Plate " }) }),
+                wish("Cid", "Priest", { item(202, { source = "B" }) }),
+            }, {})
+            local byId = {}
+            for _, it in ipairs(result.bosses[1].items) do byId[it.itemID] = it end
+            assert.are.equal("Plate", byId[101].armorType)
+            assert.are.equal("plate", byId[101].armorTypeKey)
+            assert.is_nil(byId[202].armorType)
+            assert.is_nil(byId[202].armorTypeKey)
+        end)
+
+        it("normalises the four known values to canonical casing, merging case-insensitively", function()
+            local result = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage",  { item(101, { source = "B", armorType = "cloth" }) }),
+                wish("Bob", "Rogue", { item(202, { source = "B", armorType = "CLOTH" }) }),
+            }, {})
+            assert.are.equal(1, #result.armorTypes)
+            assert.are.equal("Cloth", result.armorTypes[1].name)
+            local byId = {}
+            for _, it in ipairs(result.bosses[1].items) do byId[it.itemID] = it end
+            assert.are.equal("Cloth", byId[101].armorType)
+            assert.are.equal("Cloth", byId[202].armorType)
+        end)
+
+        it("orders present armor types Cloth → Leather → Mail → Plate, not alphabetically or by appearance", function()
+            local result = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage", {
+                    item(101, { source = "B", armorType = "Plate" }),
+                    item(202, { source = "B", armorType = "Cloth" }),
+                    item(303, { source = "B", armorType = "Mail" }),
+                }),
+            }, {})
+            local names = {}
+            for _, a in ipairs(result.armorTypes) do names[#names + 1] = a.name end
+            -- Leather absent: only the types present are listed.
+            assert.are.same({ "Cloth", "Mail", "Plate" }, names)
+        end)
+
+        it("keeps unrecognised armor values, after the canonical list, in first-seen casing", function()
+            local result = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage", {
+                    item(101, { source = "B", armorType = "Shield" }),   -- not in the vocabulary
+                    item(202, { source = "B", armorType = "Plate" }),
+                    item(303, { source = "B", armorType = "Cosmic" }),   -- not in the vocabulary
+                }),
+            }, {})
+            local names = {}
+            for _, a in ipairs(result.armorTypes) do names[#names + 1] = a.name end
+            assert.are.same({ "Plate", "Cosmic", "Shield" }, names)
+        end)
+
+        it("buckets armor-less items as Unknown, last, only when armor types are mixed", function()
+            local mixed = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage", {
+                    item(101, { source = "B", armorType = "Leather" }),
+                    item(202, { source = "B", armorType = "" }),         -- non-armor: blank
+                }),
+            }, {})
+            local names = {}
+            for _, a in ipairs(mixed.armorTypes) do names[#names + 1] = a.name end
+            assert.are.same({ "Leather", "Unknown" }, names)
+        end)
+
+        it("returns no armor options at all for a pre-armorType export (legacy back-compat)", function()
+            local result = WGS:BuildWishlistBossGroups({
+                wish("Aly", "Mage", { item(101, { source = "B" }) }),
+                wish("Bob", "Rogue", { item(202, { source = "B" }) }),
+            }, {})
+            -- A lone "Unknown" option would make the dropdown a no-op
+            -- filter; the list stays empty so the UI offers only "All".
+            assert.are.same({}, result.armorTypes)
         end)
     end)
 
     describe("WGS:FilterWishlistBossGroups (combined filtering)", function()
         -- One dataset exercised by every case: two bosses, mixed
-        -- locations and slots, one slotless/locationless legacy item.
+        -- locations, slots and armor types (the jewelry carries none,
+        -- like the platform's "" for non-armor), one fully-legacy item.
         local function build()
             return WGS:BuildWishlistBossGroups({
                 wish("Aly", "Mage", {
-                    item(101, { source = "Ulgrax", slot = "Head", location = "The Voidspire" }),
+                    item(101, { source = "Ulgrax", slot = "Head", location = "The Voidspire", armorType = "Plate" }),
                     item(202, { source = "Ulgrax", slot = "Ring", location = "Manaforge Omega" }),
-                    item(303, { source = "Sikran", slot = "Ring", location = "The Voidspire" }),
+                    item(303, { source = "Sikran", slot = "Ring", location = "The Voidspire", armorType = "Plate" }),
                 }),
                 wish("Bob", "Rogue", {
-                    item(101, { source = "Ulgrax", slot = "Head", location = "The Voidspire" }),
-                    item(404, { source = "Sikran" }),   -- legacy: no slot, no location
+                    item(101, { source = "Ulgrax", slot = "Head", location = "The Voidspire", armorType = "Plate" }),
+                    item(404, { source = "Sikran" }),   -- legacy: no slot, no location, no armor
                 }),
             }, {})
         end
@@ -511,9 +599,16 @@ describe("WGS:BuildWishlistBossGroups", function()
             assert.are.equal(2, #view.bosses)
         end)
 
-        it("combines boss + location + slot (AND)", function()
+        it("filters by armor type across every boss", function()
+            local view = WGS:FilterWishlistBossGroups(build(), { armor = "plate" })
+            assert.are.same({ 101, 303 }, itemIds(view))
+            assert.are.equal(2, #view.bosses)
+        end)
+
+        it("combines boss + location + slot + armor (AND)", function()
             local view = WGS:FilterWishlistBossGroups(build(), {
-                boss = "ulgrax", location = "the voidspire", slot = "head",
+                boss = "ulgrax", location = "the voidspire",
+                slot = "head", armor = "plate",
             })
             assert.are.same({ 101 }, itemIds(view))
         end)
@@ -526,11 +621,14 @@ describe("WGS:BuildWishlistBossGroups", function()
             assert.are.equal(2, view.bosses[1].wishCount)
         end)
 
-        it("matches items with no location/slot via the Unknown bucket", function()
+        it("matches items with no location/slot/armor via the Unknown bucket", function()
             local byLoc = WGS:FilterWishlistBossGroups(build(), { location = "__unknown" })
             assert.are.same({ 404 }, itemIds(byLoc))
             local bySlot = WGS:FilterWishlistBossGroups(build(), { slot = "__unknown" })
             assert.are.same({ 404 }, itemIds(bySlot))
+            -- Both armor-less items match — the jewelry AND the legacy row.
+            local byArmor = WGS:FilterWishlistBossGroups(build(), { armor = "__unknown" })
+            assert.are.same({ 202, 404 }, itemIds(byArmor))
         end)
 
         it("returns an empty boss list when the combination matches nothing", function()
@@ -538,6 +636,12 @@ describe("WGS:BuildWishlistBossGroups", function()
                 boss = "sikran", slot = "head",
             })
             assert.are.same({ bosses = {} }, view)
+            -- Armor participates in the dead-end too: the only Head
+            -- item is Plate, so Head + armor-Unknown is a contradiction.
+            local viaArmor = WGS:FilterWishlistBossGroups(build(), {
+                slot = "head", armor = "__unknown",
+            })
+            assert.are.same({ bosses = {} }, viaArmor)
         end)
 
         it("never mutates the built structure (counts + items survive filtering)", function()
@@ -552,7 +656,7 @@ describe("WGS:BuildWishlistBossGroups", function()
             assert.are.equal(2, #ulgrax.items)
         end)
 
-        it("filters a legacy no-location/no-slot import only by boss (location/slot are no-ops)", function()
+        it("filters a legacy no-location/no-slot/no-armor import only by boss (the rest are no-ops)", function()
             local legacy = WGS:BuildWishlistBossGroups({
                 wish("Old", nil, { { itemID = 101, priority = "BiS", source = "B" } }),
             }, {})
