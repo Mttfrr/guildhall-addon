@@ -34,7 +34,7 @@ local RELEASE_NOTES = {
             } },
             { heading = "Changed", items = {
                 "Redesigned Wishlists browser — events-style rows with class icons, wishers ranked BiS-first, and items grouped under the boss each wish actually names (with loot-history fallback for older imports)",
-                "Filter the Wishlists browser by Location (where the item drops) and Slot alongside Boss — the three combine, and item rows show the location next to the slot",
+                "Filter the Wishlists browser by Location (where the item drops), Slot and Armor type (Cloth → Plate) alongside Boss — the four combine, and item rows show the armor type and location next to the slot",
                 "Wishlist imports are tier-scoped — a retired tier's wishes no longer show on tooltips or in RCLC frames",
                 "Wishlist items added from Discord (/wishlist add) reach the addon on your next import — no website visit needed",
             } },

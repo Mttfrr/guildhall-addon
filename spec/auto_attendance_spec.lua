@@ -7,13 +7,22 @@ local helpers = require("spec.helpers")
 --   * Exactly one match → return it. Zero or multiple → return nil.
 -- Returning nil makes Modules/Attendance.lua OnRaidEnter start untagged.
 
-local function dateStringForNow()
-    return os.date("%Y-%m-%d")
-end
+-- Fixed "now" injected into FindActiveScheduledEvent so these specs never
+-- read the wall clock. The old helpers built `date` from os.date() and
+-- `time` from os.time()+offset SEPARATELY, so a CI run within |offset| of
+-- local midnight fabricated an impossible event (today's date + yesterday's
+-- wall-clock time) and the suite went red once a night. Real events can't
+-- do that — date and time always describe the same instant — so both
+-- fields must derive from the SAME timestamp, exactly like the
+-- back-resolution specs below already do.
+local NOW = 1700000000
 
-local function timeStringOffset(seconds)
-    -- "HH:MM" string for (now + seconds), no AM/PM (24h form is supported)
-    return os.date("%H:%M", os.time() + seconds)
+local function eventFieldsAt(offsetSeconds)
+    -- date + "HH:MM" (24h form) for the single instant NOW+offset, in the
+    -- runner's local timezone — the same zone ParseEventTime's fallback
+    -- parses with, so the round trip is exact to the minute.
+    local ts = NOW + offsetSeconds
+    return os.date("%Y-%m-%d", ts), os.date("%H:%M", ts)
 end
 
 describe("WGS:GetCurrentAttendanceContext", function()
@@ -72,73 +81,90 @@ describe("FindActiveScheduledEvent (auto-team resolution)", function()
 
     it("returns nil when no events are imported", function()
         WGS.db.global.events = {}
-        assert.is_nil(WGS:FindActiveScheduledEvent())
+        assert.is_nil(WGS:FindActiveScheduledEvent(NOW))
     end)
 
     it("picks the event when its scheduled start is within the window", function()
+        local d, t = eventFieldsAt(10 * 60)   -- starts in 10 min
         WGS.db.global.events = {
-            { id = 1, team_id = 99, title = "Tonight raid",
-              date = dateStringForNow(), time = timeStringOffset(10 * 60) }, -- starts in 10 min
+            { id = 1, team_id = 99, title = "Tonight raid", date = d, time = t },
         }
-        local ev = WGS:FindActiveScheduledEvent()
+        local ev = WGS:FindActiveScheduledEvent(NOW)
         assert.is_not_nil(ev)
         assert.are.equal(99, ev.team_id)
     end)
 
     it("matches events that started up to 1 hour ago (officer joined late)", function()
+        local d, t = eventFieldsAt(-45 * 60)
         WGS.db.global.events = {
-            { id = 2, team_id = 7, title = "Started 45min ago",
-              date = dateStringForNow(), time = timeStringOffset(-45 * 60) },
+            { id = 2, team_id = 7, title = "Started 45min ago", date = d, time = t },
         }
-        local ev = WGS:FindActiveScheduledEvent()
+        local ev = WGS:FindActiveScheduledEvent(NOW)
         assert.is_not_nil(ev)
         assert.are.equal(7, ev.team_id)
     end)
 
     it("matches events scheduled to start in 30 minutes (officer arrived early)", function()
+        local d, t = eventFieldsAt(25 * 60)
         WGS.db.global.events = {
-            { id = 3, team_id = 5, title = "Starts in 25min",
-              date = dateStringForNow(), time = timeStringOffset(25 * 60) },
+            { id = 3, team_id = 5, title = "Starts in 25min", date = d, time = t },
         }
-        local ev = WGS:FindActiveScheduledEvent()
+        local ev = WGS:FindActiveScheduledEvent(NOW)
         assert.is_not_nil(ev)
         assert.are.equal(5, ev.team_id)
     end)
 
     it("returns nil when the only candidate started over an hour ago", function()
+        local d, t = eventFieldsAt(-90 * 60)
         WGS.db.global.events = {
-            { id = 4, team_id = 11, title = "Started 90min ago",
-              date = dateStringForNow(), time = timeStringOffset(-90 * 60) },
+            { id = 4, team_id = 11, title = "Started 90min ago", date = d, time = t },
         }
-        assert.is_nil(WGS:FindActiveScheduledEvent())
+        assert.is_nil(WGS:FindActiveScheduledEvent(NOW))
     end)
 
     it("returns nil when the only candidate is more than 30 min away", function()
+        local d, t = eventFieldsAt(90 * 60)
         WGS.db.global.events = {
-            { id = 5, team_id = 12, title = "Starts in 90min",
-              date = dateStringForNow(), time = timeStringOffset(90 * 60) },
+            { id = 5, team_id = 12, title = "Starts in 90min", date = d, time = t },
         }
-        assert.is_nil(WGS:FindActiveScheduledEvent())
+        assert.is_nil(WGS:FindActiveScheduledEvent(NOW))
+    end)
+
+    it("matches a pre-midnight start from the other side of midnight", function()
+        -- Raid scheduled 23:45, officer starts tracking at 00:30 next day —
+        -- the event's date is YESTERDAY relative to "now". This is the real
+        -- shape the old wall-clock helpers garbled (today's date + a wrapped
+        -- time); pin that the window logic handles the day boundary.
+        local evDay = os.date("*t", NOW)
+        evDay.hour, evDay.min, evDay.sec = 23, 45, 0
+        local lateStart = os.time(evDay)             -- NOW's day @ 23:45 local
+        WGS.db.global.events = {
+            { id = 10, team_id = 8, title = "Late night raid",
+              date = os.date("%Y-%m-%d", lateStart), time = "23:45" },
+        }
+        local ev = WGS:FindActiveScheduledEvent(lateStart + 45 * 60)  -- 00:30 next day
+        assert.is_not_nil(ev)
+        assert.are.equal(8, ev.team_id)
     end)
 
     it("returns nil when two events overlap the window (ambiguous)", function()
         -- Two events with overlapping windows — we refuse to guess.
+        local d1, t1 = eventFieldsAt(0)
+        local d2, t2 = eventFieldsAt(15 * 60)
         WGS.db.global.events = {
-            { id = 6, team_id = 21, title = "Team A raid",
-              date = dateStringForNow(), time = timeStringOffset(0) },
-            { id = 7, team_id = 22, title = "Team B raid",
-              date = dateStringForNow(), time = timeStringOffset(15 * 60) },
+            { id = 6, team_id = 21, title = "Team A raid", date = d1, time = t1 },
+            { id = 7, team_id = 22, title = "Team B raid", date = d2, time = t2 },
         }
-        assert.is_nil(WGS:FindActiveScheduledEvent())
+        assert.is_nil(WGS:FindActiveScheduledEvent(NOW))
     end)
 
     it("skips events whose date string is malformed instead of crashing", function()
+        local d, t = eventFieldsAt(0)
         WGS.db.global.events = {
             { id = 8, team_id = 33, title = "Bad date", date = "not-a-date", time = "20:00" },
-            { id = 9, team_id = 44, title = "Good event",
-              date = dateStringForNow(), time = timeStringOffset(0) },
+            { id = 9, team_id = 44, title = "Good event", date = d, time = t },
         }
-        local ev = WGS:FindActiveScheduledEvent()
+        local ev = WGS:FindActiveScheduledEvent(NOW)
         assert.is_not_nil(ev)
         assert.are.equal(44, ev.team_id)
     end)
@@ -469,7 +495,7 @@ end)
 -- the WGS._MaybePromptRaidTracking glue.
 describe("WGS:ShouldPromptRaidTracking", function()
     local WGS
-    local NOW = 1700000000
+    -- reuses the file-level fixed NOW
 
     before_each(function()
         WGS = helpers.setup()
