@@ -433,7 +433,8 @@ describe("WGS:BuildWishlistGroups", function()
                     m.key .. " is offered in the dropdown but not honoured by the builder")
             end
             table.sort(offered)
-            assert.are.same({ "armor", "boss", "location", "player", "slot" }, offered)
+            assert.are.same(
+                { "armor", "boss", "contentType", "location", "player", "slot" }, offered)
         end)
     end)
 
@@ -503,6 +504,28 @@ describe("WGS:BuildWishlistGroups", function()
             assert.are.same({ "Cloth", "Plate", "Unknown" }, groupNames(result))
             -- The ring carries no armor type — non-armor is honest data.
             assert.are.equal(202, result.groups[3].items[1].itemID)
+        end)
+
+        it("groups by content type — Raid and Dungeon are one axis, instance another", function()
+            local result = WGS:BuildWishlistGroups({
+                wish("Aly", "MAGE", {
+                    item(101, { contentType = "Raid",    location = "Manaforge Omega" }),
+                    item(202, { contentType = "Dungeon", location = "Ara-Kara" }),
+                    item(303, { contentType = "Dungeon", location = "City of Threads" }),
+                }),
+            }, { groupBy = "contentType" })
+            assert.are.same({ "Dungeon", "Raid" }, groupNames(result))
+            assert.are.equal(2, result.groups[1].itemCount, "both dungeons collapse together")
+        end)
+
+        it("sinks items with no content type into Unknown", function()
+            local result = WGS:BuildWishlistGroups({
+                wish("Aly", "MAGE", {
+                    item(101, { contentType = "Raid" }),
+                    item(202, {}),
+                }),
+            }, { groupBy = "contentType" })
+            assert.are.same({ "Raid", "Unknown" }, groupNames(result))
         end)
 
         it("groups by location alphabetically", function()

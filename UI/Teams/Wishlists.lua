@@ -18,7 +18,7 @@ local ui = WGS._ui
 --
 -- The fix is to make the hierarchy itself the control:
 --
---   Group by  Boss | Player | Raid/Dungeon | Slot | Armor
+--   Group by  Boss | Player | Type | Instance | Slot | Armor
 --             — one dropdown pivots the whole tree. Grouping SUBSUMES
 --               filtering for these dimensions: grouping by Location and
 --               collapsing everything is strictly better than a Location
@@ -46,6 +46,8 @@ local ui = WGS._ui
 --              "Unassigned" group.
 --   class    → characterDetails / guild-roster lookup; icon omitted when
 --              still unknown.
+--   contentType → per-item field (Raid / Dungeon / World / ...), the
+--              platform's third source axis beside boss and instance.
 --   location/armorType → per-item fields; items lacking one land in an
 --              "Unknown" group, which only materialises when the import
 --              is MIXED. Group by a dimension no item carries and you
@@ -95,7 +97,8 @@ local UNKNOWN_NAME    = "Unknown"
 local GROUP_MODES = {
     { key = "boss",     name = "Boss" },
     { key = "player",   name = "Player" },
-    { key = "location", name = "Raid / Dungeon" },
+    { key = "contentType", name = "Type" },
+    { key = "location", name = "Instance" },
     { key = "slot",     name = "Slot" },
     { key = "armor",    name = "Armor" },
 }
@@ -319,6 +322,10 @@ function WGS:BuildWishlistGroups(wishlists, opts)
                     -- the four known values display in canonical
                     -- casing ("cloth" → "Cloth") since the vocabulary
                     -- is fixed; unrecognised values keep their casing.
+                    local ck, cd = textKey(item.contentType)
+                    if ck and not rec.contentTypeKey then
+                        rec.contentTypeKey, rec.contentType = ck, cd
+                    end
                     local ak, ad = textKey(item.armorType)
                     if ak and not rec.armorTypeKey then
                         rec.armorTypeKey = ak
@@ -395,7 +402,7 @@ function WGS:BuildWishlistGroups(wishlists, opts)
         for _, rec in ipairs(records) do
             local hay = table.concat({
                 rec.name or "", rec.bossName or "", rec.location or "",
-                rec.slot or "", rec.armorType or "",
+                rec.slot or "", rec.armorType or "", rec.contentType or "",
             }, "\1"):lower()
             local hit = hay:find(needle, 1, true) ~= nil
             if not hit then
@@ -459,6 +466,8 @@ function WGS:BuildWishlistGroups(wishlists, opts)
                 key, name = rec.slotKey or UNKNOWN_KEY, rec.slot or UNKNOWN_NAME
             elseif groupBy == "armor" then
                 key, name = rec.armorTypeKey or UNKNOWN_KEY, rec.armorType or UNKNOWN_NAME
+            elseif groupBy == "contentType" then
+                key, name = rec.contentTypeKey or UNKNOWN_KEY, rec.contentType or UNKNOWN_NAME
             else
                 key, name = rec.bossKey, rec.bossName
             end
