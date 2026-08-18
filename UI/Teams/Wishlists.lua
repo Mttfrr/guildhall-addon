@@ -18,7 +18,7 @@ local ui = WGS._ui
 --
 -- The fix is to make the hierarchy itself the control:
 --
---   Group by  Boss | Player | Location | Slot | Armor
+--   Group by  Boss | Player | Raid/Dungeon | Slot | Armor
 --             — one dropdown pivots the whole tree. Grouping SUBSUMES
 --               filtering for these dimensions: grouping by Location and
 --               collapsing everything is strictly better than a Location
@@ -95,7 +95,7 @@ local UNKNOWN_NAME    = "Unknown"
 local GROUP_MODES = {
     { key = "boss",     name = "Boss" },
     { key = "player",   name = "Player" },
-    { key = "location", name = "Location" },
+    { key = "location", name = "Raid / Dungeon" },
     { key = "slot",     name = "Slot" },
     { key = "armor",    name = "Armor" },
 }
