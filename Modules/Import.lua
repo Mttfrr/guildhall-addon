@@ -130,6 +130,22 @@ local SLOT_GROUP_TO_ROLE = {
     dps     = "DPS",    damage  = "DPS",
 }
 
+--- Raid subgroup number out of the server's `slot_group`.
+---
+--- The web app keys comp buckets as "group1".."group8" plus "bench", and
+--- sends the seat within that bucket separately as `slot_index`. Those two
+--- got conflated: `group` fell through to `slot_index`, so a raider's SEAT
+--- became their GROUP. Every bucket has a seat 0, so a quarter of the raid
+--- came out as group 0 — and SetRaidSubgroup(index, 0) is out of range,
+--- which is the "Usage: SetRaidSubgroup(index, subgroup)" error officers
+--- hit when sorting.
+---
+--- Bench returns nil, not a number: a benched raider has no subgroup to be
+--- put in, and callers already treat nil as "leave them where they are".
+local function parseSlotGroup(slotGroup)
+    return tonumber(string.match(tostring(slotGroup or ""), "^group(%d+)$"))
+end
+
 local function normalizeRaidComp(comp)
     if not comp.slots then return comp end
     local assignments = {}
@@ -138,7 +154,9 @@ local function normalizeRaidComp(comp)
             name = slot.character_name or slot.name or "Unknown",
             class = slot.class or "",
             role = SLOT_GROUP_TO_ROLE[(slot.slot_group or ""):lower()] or slot.role or "DPS",
-            group = slot.group or slot.subgroup or slot.slot_index or nil,
+            -- NEVER slot_index — that's the seat, not the group.
+            group = tonumber(slot.group) or tonumber(slot.subgroup)
+                or parseSlotGroup(slot.slot_group),
             spec = slot.spec or nil,
             note = slot.note or nil,
         }
