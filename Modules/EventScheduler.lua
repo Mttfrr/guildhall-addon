@@ -339,6 +339,21 @@ function WGS:AutoInvite(eventOverride, opts)
 end
 
 ---------------------------------------------------------------------------
+--- WoW raid subgroups are 1..8. SetRaidSubgroup raises a hard Lua error
+--- ("Usage: SetRaidSubgroup(index, subgroup)") on anything else rather
+--- than failing quietly, so every value from imported data is checked
+--- here before it gets near the API — a malformed comp should sort
+--- nothing, not blow up mid-raid in front of the raid leader.
+local MAX_RAID_SUBGROUP = 8
+
+local function validSubgroup(value)
+    local n = tonumber(value)
+    if not n then return nil end
+    n = math.floor(n)
+    if n < 1 or n > MAX_RAID_SUBGROUP then return nil end
+    return n
+end
+
 -- /gh sortgroups — assign raid subgroups from comp
 ---------------------------------------------------------------------------
 
@@ -405,7 +420,7 @@ function WGS:SortRaidGroups(eventOverride)
         local name, _, subgroup = GetRaidRosterInfo(i)
         if name then
             local short = WGS:ShortName(name)
-            local target = targetGroup[short:lower()]
+            local target = validSubgroup(targetGroup[short:lower()])
             if target and target ~= subgroup then
                 SetRaidSubgroup(i, target)
                 moved = moved + 1
@@ -440,7 +455,7 @@ function WGS:PlaceRaiderInCompGroup(shortName, eventId)
     for _, a in ipairs(comp.assignments) do
         if a.group and a.name then
             local sh = (WGS:ShortName(a.name)):lower()
-            if sh == wanted then target = tonumber(a.group); break end
+            if sh == wanted then target = validSubgroup(a.group); break end
         end
     end
     if not target then return false end
