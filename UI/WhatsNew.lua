@@ -22,6 +22,20 @@ local WGS = GuildHall
 -- them stacked in one dialog (newest version on top).
 local RELEASE_NOTES = {
     {
+        version = "0.8.1-beta",
+        title = "Raid-night fixes",
+        sections = {
+            { heading = "Fixed", items = {
+                "Organize Groups works again — it was reading a raider's SEAT in their group as the group itself, so it errored out and shuffled people into the wrong groups. Benched raiders are now left alone instead of being sorted into a group that doesn't exist",
+                "Group numbers in an event's comp list were showing that same wrong value",
+            } },
+            { heading = "Changed", items = {
+                "Group the Wishlists browser by Type — Raid, Dungeon, World, Crafted or PvP",
+                "The Location pivot is now called Instance: it groups by the raid or dungeon the item drops in",
+            } },
+        },
+    },
+    {
         version = "0.8.0-beta",
         title = "RCLootCouncil integration",
         sections = {
