@@ -889,10 +889,20 @@ local function BuildFilterDropdown(sv, cfg)
         for _, m in ipairs(sv._filterMenus) do m:Hide() end
         for _, b in ipairs(menuButtons) do b:Hide() end
 
+        -- A menu row must always have SOMETHING to render. An option
+        -- table missing `name` used to reach the concatenation below and
+        -- throw, which surfaced to the user as a dead button plus a Lua
+        -- error — for a cosmetic field. `label` is tolerated as the older
+        -- spelling, then the key, so a data slip degrades to an ugly row
+        -- instead of a broken menu. The spelling itself stays pinned by
+        -- spec, so the ugly row still fails CI.
         local options = {}
-        if not cfg.noAll then options[1] = { key = nil, name = cfg.allLabel } end
+        if not cfg.noAll then options[1] = { key = nil, name = cfg.allLabel or "All" } end
         for _, o in ipairs(cfg.options() or {}) do
-            options[#options + 1] = { key = o.key, name = o.name }
+            options[#options + 1] = {
+                key = o.key,
+                name = o.name or o.label or tostring(o.key or "?"),
+            }
         end
 
         local bh = 22

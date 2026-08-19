@@ -408,6 +408,24 @@ describe("WGS:BuildWishlistGroups", function()
     -- instead made every row concatenate nil and throw, so the menu
     -- silently refused to open — no error visible, just a dead button.
     describe("group-mode dropdown contract", function()
+        -- Belt and braces: the contract above is what SHOULD hold, and
+        -- the fallback below is what happens when it doesn't. A missing
+        -- cosmetic field must never be able to throw a Lua error at a
+        -- raider mid-raid; the spec keeps it from silently becoming the
+        -- normal case.
+        it("renders a nameless option instead of concatenating nil", function()
+            local function menuLabel(o)
+                return o.name or o.label or tostring(o.key or "?")
+            end
+            assert.are.equal("Boss", menuLabel({ key = "boss", name = "Boss" }))
+            assert.are.equal("Boss", menuLabel({ key = "boss", label = "Boss" }))
+            assert.are.equal("boss", menuLabel({ key = "boss" }))
+            assert.are.equal("?", menuLabel({}))
+            for _, bad in ipairs({ { key = "boss" }, {}, { label = "L" } }) do
+                assert.has_no.errors(function() return "  " .. menuLabel(bad) end)
+            end
+        end)
+
         it("every mode carries the key + name the menu factory renders", function()
             local modes = WGS.WISHLIST_GROUP_MODES
             assert.is_table(modes)
