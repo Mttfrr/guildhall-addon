@@ -5,22 +5,28 @@ local ui = WGS._ui
 -- Hook item tooltips to show wishlist information from imported web data
 -- Modern API passes (tooltip, data); legacy OnTooltipSetItem passes (tooltip) only
 local function OnTooltipSetItem(tooltip, data)
-    local itemID
+    local itemID, itemName
 
     if data and data.id then
         -- Modern tooltip API (10.0.2+): get item ID directly from tooltip data
         itemID = data.id
     elseif tooltip.GetItem then
         -- Legacy fallback: extract from tooltip
-        local _, itemLink = tooltip:GetItem()
+        local name, itemLink = tooltip:GetItem()
+        itemName = name
         if itemLink then
             itemID = tonumber(itemLink:match("item:(%d+)"))
         end
     end
 
     if not itemID then return end
+    -- The name lets a Heroic drop match a Myth-track wish: same item,
+    -- different id, and the id lookup alone reports nobody wants it.
+    if not itemName and C_Item and C_Item.GetItemInfo then
+        itemName = C_Item.GetItemInfo(itemID)
+    end
 
-    local wishEntries = WGS:GetWishlistForItem(itemID)
+    local wishEntries = WGS:GetWishlistForItem(itemID, itemName)
     if not wishEntries or #wishEntries == 0 then return end
 
     tooltip:AddLine(" ")
