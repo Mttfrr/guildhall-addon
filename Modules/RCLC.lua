@@ -467,24 +467,24 @@ end
 
 --- Wishes for an item, preferring a peer-shared overlay strictly newer
 --- than our own import.
-function WGS:_RCLC_WishesForItem(itemID)
+function WGS:_RCLC_WishesForItem(itemID, itemName)
     local overlay = sharedWishes[itemID]
     local localTs = tonumber(self.db.global.wishlistImportedAt) or 0
     if overlay and (overlay.ts or 0) > localTs then
         return overlay.wishes
     end
-    return self:GetWishlistForItem(itemID)
+    return self:GetWishlistForItem(itemID, itemName)
 end
 
 --- A single player's best wish for an item (highest priority wins when
 --- the platform lists several). Short-name comparison — realm-suffix
 --- presence varies between RCLC candidate names and the platform's
 --- wishlist playerName, same rule the loot dedup paths use.
-function WGS:_RCLC_WishForPlayer(itemID, playerName)
+function WGS:_RCLC_WishForPlayer(itemID, playerName, itemName)
     local short = shortName(playerName)
     if short == "" or not itemID then return nil end
     local best
-    for _, w in ipairs(self:_RCLC_WishesForItem(itemID) or {}) do
+    for _, w in ipairs(self:_RCLC_WishesForItem(itemID, itemName) or {}) do
         if shortName(w.playerName) == short then
             if not best or (PRIORITY_WEIGHT[w.priority] or 0) > (PRIORITY_WEIGHT[best.priority] or 0) then
                 best = w
@@ -504,7 +504,8 @@ function WGS:_RCLC_ShareWishesForItem(item)
     if not itemID then return end
     local importedAt = tonumber(self.db.global.wishlistImportedAt) or 0
     if importedAt <= 0 then return end
-    local wishes = self:GetWishlistForItem(itemID)
+    local wishes = self:GetWishlistForItem(itemID, C_Item and C_Item.GetItemInfo
+        and C_Item.GetItemInfo(itemID) or nil)
     if not wishes or #wishes == 0 then return end
     pcall(sendGH, "group", "gh_wish", itemID, wishes, importedAt)
 end

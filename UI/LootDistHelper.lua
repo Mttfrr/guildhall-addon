@@ -152,7 +152,8 @@ function WGS:CheckLootDistribution(itemLink, itemID, player)
     -- Only show in raid/group
     if not WGS:IsInAnyGroup() then return end
 
-    local wishEntries = self:GetWishlistForItem(itemID)
+    local itemName = C_Item and C_Item.GetItemInfo and C_Item.GetItemInfo(itemLink) or nil
+    local wishEntries = self:GetWishlistForItem(itemID, itemName)
     if not wishEntries or #wishEntries == 0 then return end
 
     ShowLootHelper(itemLink, itemID, player, wishEntries)

@@ -357,20 +357,29 @@ end
 -- wishlistImportedAt stamp: a re-import swaps in a fresh table (and
 -- bumps the stamp), clears reset the stamp to 0, and specs that poke
 -- db.global.wishlists directly get a rebuild from the identity change.
-local wishIndex, wishIndexSource, wishIndexStamp
+local wishIndex, wishNameIndex, wishIndexSource, wishIndexStamp
 
+-- Two indexes over the same wishes: by item id, and by NAME.
+--
+-- Id alone missed the most common real case. A raider sims Mythic and
+-- wishlists the Myth-track piece; the guild runs Heroic and the
+-- Hero-track piece drops. Same item, different id — so the tooltip, the
+-- loot helper and the RCLC voting column all showed nobody wanting it,
+-- and the raider it was for never got flagged. Two items sharing a name
+-- are the same item at a different upgrade track, which is exactly what
+-- the id lookup can't see.
+--
+-- Name is a FALLBACK, never a merge: an id hit wins outright, so an exact
+-- match is never diluted by same-name rows. Names are lowercased for the
+-- key because the wire value comes from the platform's own item_name and
+-- casing there is whatever Wowhead returned.
 local function buildWishIndex(wishlists)
-    local index = {}
+    local index, byName = {}, {}
     for _, entry in ipairs(wishlists) do
         if entry.items then
             for _, item in ipairs(entry.items) do
                 if item.itemID ~= nil then
-                    local bucket = index[item.itemID]
-                    if not bucket then
-                        bucket = {}
-                        index[item.itemID] = bucket
-                    end
-                    bucket[#bucket + 1] = {
+                    local row = {
                         playerName = entry.playerName,
                         priority = item.priority,
                         note = item.note,
@@ -382,27 +391,52 @@ local function buildWishIndex(wishlists)
                         -- wire type.
                         simPct = tonumber(item.simPct),
                     }
+                    local bucket = index[item.itemID]
+                    if not bucket then
+                        bucket = {}
+                        index[item.itemID] = bucket
+                    end
+                    bucket[#bucket + 1] = row
+
+                    local name = type(item.itemName) == "string"
+                        and item.itemName:lower():match("^%s*(.-)%s*$") or nil
+                    if name and name ~= "" then
+                        local nb = byName[name]
+                        if not nb then
+                            nb = {}
+                            byName[name] = nb
+                        end
+                        nb[#nb + 1] = row
+                    end
                 end
             end
         end
     end
-    return index
+    return index, byName
 end
 
--- Get wishlist entries for a specific item ID. Returns a fresh list
+-- Get wishlist entries for an item. `itemName` is optional but worth
+-- passing: it's what lets a Heroic drop match a Myth-track wish (same
+-- item, different id). Returns a fresh list
 -- each call (consumers sort it in place — the tooltip and the loot
 -- helper both do) whose row tables are shared with the index; treat
 -- rows as read-only.
-function WGS:GetWishlistForItem(itemID)
+function WGS:GetWishlistForItem(itemID, itemName)
     local wishlists = self.db.global.wishlists
     if not wishlists then return {} end
     local stamp = tonumber(self.db.global.wishlistImportedAt) or 0
     if wishIndex == nil or wishIndexSource ~= wishlists or wishIndexStamp ~= stamp then
-        wishIndex = buildWishIndex(wishlists)
+        wishIndex, wishNameIndex = buildWishIndex(wishlists)
         wishIndexSource = wishlists
         wishIndexStamp = stamp
     end
     local bucket = wishIndex[itemID]
+    -- Fall back to the name only when the id found nothing: a different
+    -- upgrade track of the same item is still that item.
+    if not bucket and type(itemName) == "string" then
+        local key = itemName:lower():match("^%s*(.-)%s*$")
+        if key and key ~= "" then bucket = wishNameIndex[key] end
+    end
     if not bucket then return {} end
     local out = {}
     for i = 1, #bucket do out[i] = bucket[i] end
