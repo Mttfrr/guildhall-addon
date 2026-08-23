@@ -26,6 +26,7 @@ local RELEASE_NOTES = {
         title = "Raid-night fixes",
         sections = {
             { heading = "Fixed", items = {
+                "Your wishlist is recognised whichever difficulty an item drops at — sim Mythic, wishlist the Myth-track piece, and the Heroic one dropping still shows you as wanting it in the tooltip, the loot helper and the RCLC voting column. It used to show nobody wanting it, because the two tracks are different item ids",
                 "Organize Groups works again — it was reading a raider's SEAT in their group as the group itself, so it errored out and shuffled people into the wrong groups. Benched raiders are now left alone instead of being sorted into a group that doesn't exist",
                 "Group numbers in an event's comp list were showing that same wrong value",
             } },
