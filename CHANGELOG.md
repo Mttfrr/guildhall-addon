@@ -2,12 +2,15 @@
 
 All notable changes to GuildHall will be documented in this file.
 
-## [0.8.1-beta] — 2026-08-19
+## [0.8.1-beta] — 2026-08-22
 
-Two crash fixes for raid night, plus a pivot the Wishlists browser was
-missing. Everything in 0.8.0-beta is unchanged.
+Raid-night fixes: Organize Groups works again, and your wishlist is
+recognised whichever difficulty the item drops at. Everything in
+0.8.0-beta is unchanged.
 
 ### Fixed
+
+- **Your wishlist now matches an item across difficulties.** Sim Mythic, wishlist the Myth-track piece, then run Heroic — and the Hero-track version is a different item id, so the tooltip, the loot helper and the RCLC voting column all reported that nobody wanted it. The raider it was for never got flagged, on the night it mattered. Items are matched on their name as well as their id now, so the same piece is the same piece at any upgrade track. An exact id match still wins outright, so nobody else's wish gets pulled in alongside yours.
 
 - **Sorting raid groups threw an error and mis-placed raiders.** The web app sends a raider's subgroup and their seat *within* that subgroup as separate fields, and the addon was reading the seat as the group. Every group's first occupant came out as "group 0", which the game rejects outright — so Organize Groups threw `Usage: SetRaidSubgroup(index, subgroup)` at the raid leader, and the raiders it did move landed in the wrong groups (seat 3 of group 1 went to group 3). Benched raiders are now left where they are instead of being treated as group 0. The same bad number was also driving the group labels and ordering in the event's comp list.
 - **A malformed dropdown option can no longer throw.** The Group-by menu in the Wishlists browser now falls back to a readable label rather than erroring on a missing field. Nothing user-visible in 0.8.0-beta hit this — it's a guard so a future data slip degrades to an ugly menu row instead of a broken menu.
