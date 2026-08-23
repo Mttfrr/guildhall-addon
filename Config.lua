@@ -111,7 +111,7 @@ local options = {
                     order = 26,
                     type = "toggle",
                     name = "Wishlists in RCLC Frames",
-                    desc = "Add a GuildHall column to RCLootCouncil's voting frame showing each candidate's imported wishlist priority for the item, and append your own wish to the roll window. Does nothing when RCLootCouncil isn't loaded. Takes effect on next /reload.",
+                    desc = "Add a GuildHall column to RCLootCouncil's voting frame showing each candidate's imported wishlist priority for the item, and append your own wish to the roll window. The column is drawn on YOUR client only — a council member without GuildHall won't see it, which is why your own wish is also written into RCLootCouncil's own note field, where everyone on the council can read it. Does nothing when RCLootCouncil isn't loaded. Takes effect on next /reload.",
                     width = "full",
                     get = function() return WGS.db.profile.rclcWishlistColumn end,
                     set = function(_, val) WGS.db.profile.rclcWishlistColumn = val end,

@@ -310,6 +310,22 @@ timestamp-derived stand-in so re-runs stay idempotent.
   absent=0 (gain doesn't affect the sort). The voting frame builds its
   columns inside RCLC's `OnInitialize`, so the install poll-retries
   (1s, ≤30 tries) like the wowaudit plugin.
+- **Candidate note (the GuildHall-less council)**: `AddColumn` installs
+  the column on **our own client** — RCLC exposes no way to render into
+  another player's frame, so a council member without GuildHall sees
+  nothing there, by construction. The note is the one field that
+  travels: `Modules/lootFrame.lua` sends it with the response
+  (`addon:SendResponse("group", session, button, nil, nil, item.note)`)
+  and `Modules/VotingFrame/VotingFrame.lua` renders it in its native
+  `note` column (`SetCellNote`, paperclip + tooltip) for every council
+  member. So the roll-frame hook seeds `item.note` with the player's own
+  wish in **plain text** (`GH: BiS +4.2%`, ≤64 chars — the editbox's
+  `SetMaxLetters`), updating `noteEditbox` + the `noteButton` texture to
+  match so what is sent is visible and editable. **Seeds only into an
+  empty note, once per `(entry, item)`** — a typed note is never
+  overwritten and clearing ours sticks. `item.isRoll` entries are
+  skipped (RCLC hides their note button). Covers raiders who run
+  GuildHall; the column still covers everyone the *viewer* has imported.
 - **Roll-window note**: `hooksecurefunc` on
   `RCLootFrame.EntryManager.GetEntry` + per-entry `Update` post-hooks
   append the player's own wish (`GH: BiS`, with the `simPct` gain when

@@ -17,9 +17,11 @@ local L = GuildHall_L
 --   * Wishlist injection (rclcWishlistColumn) — a "GuildHall" column on
 --     RCLC's voting frame showing each candidate's imported wish
 --     priority for the session's item, the player's own wish appended
---     to their roll window, and a per-item freshness share on our own
---     "GHall" prefix so the council sees the newest import in the raid
---     even when the ML's is stale.
+--     to their roll window, their wish seeded into RCLC's OWN candidate
+--     note (the one surface a council member without GuildHall can
+--     read — the column is drawn by our code on our own client), and a
+--     per-item freshness share on our own "GHall" prefix so the council
+--     sees the newest import in the raid even when the ML's is stale.
 --
 -- Everything that touches RCLC internals runs inside pcall — an RCLC
 -- version drifting its surface must degrade to a silent no-op, never
@@ -558,6 +560,17 @@ function WGS:FormatWishLabel(wish)
     return label
 end
 
+--- The same shape WITHOUT colour escapes ("BiS +4.2%"). Used where the
+--- string leaves our own frames — the RCLC candidate note crosses
+--- RCLC's comms and is rendered by RCLC, so it must be plain text.
+function WGS:FormatWishPlainLabel(wish)
+    if not wish then return nil end
+    local label = wish.priority or "?"
+    local sim = self:FormatWishSimPct(wish.simPct)
+    if sim then label = label .. " " .. sim end
+    return label
+end
+
 --- Sortable weight for a wish: priority dominates (BiS always outranks
 --- High), positive sim gain breaks ties inside a priority band. Bounded
 --- so a wild sim value can't jump a band: gain contributes at most 999
@@ -684,16 +697,23 @@ local hookedEntries = {}
 --- scratch before our post-hook appends. pcall-guarded per the
 --- module's contract — a drifted roll-entry shape must no-op, not
 --- error inside RCLC's Update.
+--- The entry's item id: the session's loot-table row first (the
+--- authoritative id the ML put up), falling back to the link.
+local function RollEntryItemID(rc, entry)
+    if not (entry and entry.item) then return nil end
+    local session = entry.item.sessions and entry.item.sessions[1]
+    local itemID
+    if session then
+        local ok, lt = pcall(rc.GetLootTable, rc)
+        itemID = ok and lt and lt[session] and lt[session].itemID or nil
+    end
+    return itemID or ItemIDFromLink(entry.item.link)
+end
+
 local function AnnotateRollEntry(rc, entry)
     local ok, err = pcall(function()
         if not (entry and entry.itemLvl and entry.item) then return end
-        local session = entry.item.sessions and entry.item.sessions[1]
-        local itemID
-        if session then
-            local ok2, lt = pcall(rc.GetLootTable, rc)
-            itemID = ok2 and lt and lt[session] and lt[session].itemID or nil
-        end
-        itemID = itemID or ItemIDFromLink(entry.item.link)
+        local itemID = RollEntryItemID(rc, entry)
         if not itemID then return end
         local wish = WGS:_RCLC_WishForPlayer(itemID, WGS:GetPlayerKey())
         if not wish then return end
@@ -703,6 +723,65 @@ local function AnnotateRollEntry(rc, entry)
     if not ok then
         WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.AnnotateRollEntry", error = tostring(err) })
     end
+end
+
+-- Entries we have already seeded a note onto, keyed by entry → the
+-- item table it was seeded for. Weak keys so a recycled entry can't
+-- pin the table. One seed per (entry, item): once the player edits or
+-- clears our text, we never write it again for that item.
+local seededNotes = setmetatable({}, { __mode = "k" })
+
+--- Seed RCLC's OWN candidate note with the player's wish, so the
+--- council sees it even when nobody there runs GuildHall.
+---
+--- The voting column is installed locally (vf:AddColumn on OUR client)
+--- — there is no way to render into another player's RCLC frame, so a
+--- council member without GuildHall sees nothing there. The note is
+--- the one field that travels: RCLC sends the candidate's note with
+--- their response (lootFrame.lua `addon:SendResponse("group", session,
+--- button, nil, nil, item.note)`) and renders it in its native "note"
+--- column for every council member. The raider running GuildHall is
+--- enough for the whole council to read "GH: BiS +4.2%".
+---
+--- Never overwrites: seeds only into an empty note, and only once per
+--- (entry, item) — clearing or rewriting our text sticks. Roll entries
+--- have no note button (RCLC hides it), so they're skipped. The
+--- editbox and the note-button texture are updated to match, so what
+--- the player sends is what the player can see and edit.
+local function SeedRollEntryNote(rc, entry)
+    local ok, err = pcall(function()
+        local item = entry and entry.item
+        if not item or item.isRoll then return end
+        if seededNotes[entry] == item then return end
+        local note = item.note
+        if type(note) == "string" and note ~= "" then return end
+        local itemID = RollEntryItemID(rc, entry)
+        if not itemID then return end
+        local wish = WGS:_RCLC_WishForPlayer(itemID, WGS:GetPlayerKey())
+        if not wish then return end
+        local text = "GH: " .. (WGS:FormatWishPlainLabel(wish) or "")
+        -- RCLC's editbox caps at 64; keep the wire value inside it.
+        if #text > 64 then text = text:sub(1, 64) end
+        seededNotes[entry] = item
+        item.note = text
+        if entry.noteEditbox and entry.noteEditbox.SetText then
+            entry.noteEditbox:SetText(text)
+        end
+        if entry.noteButton and entry.noteButton.SetNormalTexture then
+            entry.noteButton:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+        end
+    end)
+    if not ok then
+        WGS:FireEvent("WGS_INTERNAL_ERROR", { source = "RCLC.SeedRollEntryNote", error = tostring(err) })
+    end
+end
+
+--- Both roll-window surfaces for one entry: our own itemLvl append
+--- (GuildHall-only, ours to draw) and the seeded RCLC note (what a
+--- GuildHall-less council reads).
+local function DecorateRollEntry(rc, entry)
+    AnnotateRollEntry(rc, entry)
+    SeedRollEntryNote(rc, entry)
 end
 
 --- Hook the roll window's EntryManager (the wowaudit pattern, via
@@ -722,8 +801,8 @@ function WGS:_RCLC_HookLootFrame(rc)
             local entry = item and mgr.entries and mgr.entries[item]
             if not entry or hookedEntries[entry] then return end
             hookedEntries[entry] = true
-            hooksecurefunc(entry, "Update", function(e) AnnotateRollEntry(rc, e) end)
-            AnnotateRollEntry(rc, entry)
+            hooksecurefunc(entry, "Update", function(e) DecorateRollEntry(rc, e) end)
+            DecorateRollEntry(rc, entry)
         end)
     end)
     if ok then lootFrameHooked = true end

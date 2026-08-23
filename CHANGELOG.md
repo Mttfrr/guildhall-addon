@@ -2,6 +2,15 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [0.8.2-beta] — 2026-08-23
+
+Your wishlist now reaches council members who don't run GuildHall.
+
+### Fixed
+
+- **The council can read your wish even without GuildHall installed.** The GuildHall column in RCLootCouncil's voting frame is drawn by GuildHall *on your own client* — there is no way for one addon to add a column to another player's frame, so a loot master or council member without GuildHall saw nothing there and had no idea the information existed. Your own wish is now also written into **RCLootCouncil's own note field**, which RCLC ships with your response and shows to the whole council in its native Notes column: they hover the paperclip and read `GH: BiS +4.2%`, no GuildHall required on their end. It only ever fills an *empty* note — anything you typed yourself is left alone, and if you clear ours it stays cleared. The editbox is pre-filled with the same text, so what gets sent is what you can see and edit before you respond.
+- **The setting said what it does, not what it needs.** "Wishlists in RCLC Frames" promised a column in the voting frame without mentioning that only clients running GuildHall can see it — which reads as a bug the first time an officer looks for it. The description now says so, and `/gh interop` grew an "RCLC wishlist injection" block: whether injection is on, how many players and items your last import carried, and the same one-line caveat about who sees what.
+
 ## [0.8.1-beta] — 2026-08-22
 
 Raid-night fixes: Organize Groups works again, and your wishlist is

@@ -18,6 +18,8 @@ local helpers = require("spec.helpers")
 --   * RCLC-absent → every entry point is a no-op
 --   * voting column install (official Column API args) + cell contract
 --   * gh_wish overlay freshness (peer share wins only when newer)
+--   * roll-window decoration: our itemLvl append + the seeded RCLC
+--     candidate note (the surface a GuildHall-less council reads)
 
 local FAKE_ID = "1754078130-3"
 
@@ -79,10 +81,44 @@ local function makeFakeRCLC(opts)
     return rc
 end
 
+-- Minimal roll-window stand-ins. `Update` rebuilds the itemLvl text
+-- from scratch exactly like RCLC's entryPrototype does, so the
+-- annotation's no-stacking contract is actually exercised.
+local function makeFakeEntry()
+    local entry = {
+        itemLvl     = { text = "", GetText = function(self) return self.text end,
+                                   SetText = function(self, t) self.text = t end },
+        noteEditbox = { text = "", GetText = function(self) return self.text end,
+                                   SetText = function(self, t) self.text = t end },
+        noteButton  = { SetNormalTexture = function(self, t) self.texture = t end },
+    }
+    function entry:Update(item)
+        self.item = item
+        self.itemLvl:SetText("granite 639")
+    end
+    return entry
+end
+
+-- EntryManager.GetEntry memoizes into .entries[item] and Updates before
+-- returning — the shape Modules/RCLC.lua post-hooks.
+local function makeFakeLootFrame()
+    local mgr = { entries = {} }
+    function mgr:GetEntry(item)
+        local entry = self.entries[item]
+        if not entry then
+            entry = makeFakeEntry()
+            self.entries[item] = entry
+        end
+        entry:Update(item)
+        return entry
+    end
+    return { EntryManager = mgr }
+end
+
 describe("Modules/RCLC.lua", function()
     local WGS, rc
 
-    local origGetNormalizedRealmName, origC_Item
+    local origGetNormalizedRealmName, origC_Item, origHookSecureFunc
 
     -- Point the AceAddon stub's GetAddon at the fake (or nil) and drop
     -- the probe cache so WGS:GetRCLC re-resolves.
@@ -110,7 +146,17 @@ describe("Modules/RCLC.lua", function()
 
         origGetNormalizedRealmName = _G.GetNormalizedRealmName
         origC_Item                 = _G.C_Item
+        origHookSecureFunc         = _G.hooksecurefunc
         _G.GetNormalizedRealmName  = function() return "TestRealm" end
+        -- WoW's post-hook: original runs first, hook after, same args.
+        _G.hooksecurefunc = function(tbl, name, post)
+            local orig = tbl[name]
+            tbl[name] = function(...)
+                local out = { orig(...) }
+                post(...)
+                return unpack(out)
+            end
+        end
 
         function WGS:GetTimestamp() return 1754078130 end
         function WGS:GetPlayerKey() return "Recorder-TestRealm" end
@@ -124,6 +170,7 @@ describe("Modules/RCLC.lua", function()
     after_each(function()
         _G.GetNormalizedRealmName = origGetNormalizedRealmName
         _G.C_Item                 = origC_Item
+        _G.hooksecurefunc         = origHookSecureFunc
         WGS:_ResetAddonCache()
     end)
 
@@ -734,6 +781,85 @@ describe("Modules/RCLC.lua", function()
         captured.spec.DoCellUpdate(nil, frame, data, nil, 1, 1, 6, true)
         assert.are.equal("-", frame.text.last, "drift degrades to the empty cell")
         assert.are.equal(0, data[1].cols[6].value, "sortable value still written")
+    end)
+
+    ------------------------------------------------------------------
+    -- Roll window: our annotation + the seeded RCLC candidate note
+    ------------------------------------------------------------------
+
+    -- The council members who DON'T run GuildHall are the whole point
+    -- of the note: the voting column is drawn by our code on our own
+    -- client, so it cannot reach their frame. RCLC ships the
+    -- candidate's note with their response and renders it natively.
+    local function hookedRollFrame(WGSref, wish)
+        WGSref.db.global.wishlists = { {
+            playerName = "Recorder",
+            items = { wish or { itemID = 212425, priority = "BiS", simPct = 4.2 } },
+        } }
+        local lf = makeFakeLootFrame()
+        local fake = makeFakeRCLC({ modules = { lootframe = lf },
+                                    lootTable = { { itemID = 212425 } } })
+        installFakeRCLC(fake)
+        assert.is_true(WGSref:_RCLC_HookLootFrame(fake))
+        return lf
+    end
+
+    it("seeds the player's wish into RCLC's own note field (plain text)", function()
+        local lf = hookedRollFrame(WGS)
+        local item = { sessions = { 1 } }
+        local entry = lf.EntryManager:GetEntry(item)
+
+        assert.are.equal("GH: BiS +4.2%", item.note,
+            "the note is what a GuildHall-less council reads")
+        assert.is_nil(item.note:find("|c", 1, true),
+            "colour escapes must not cross RCLC's comms")
+        assert.are.equal("GH: BiS +4.2%", entry.noteEditbox.text,
+            "the editbox shows what will be sent, so the player can edit it")
+        assert.are.equal("Interface\\Buttons\\UI-GuildButton-PublicNote-Up",
+            entry.noteButton.texture, "note button reads as 'has note'")
+        -- Our own itemLvl append is unaffected and doesn't stack.
+        assert.is_truthy(entry.itemLvl.text:find("BiS", 1, true))
+        entry:Update(item)
+        local _, count = entry.itemLvl.text:gsub("GH:", "")
+        assert.are.equal(1, count, "re-Update rebuilds the line, it can't stack")
+    end)
+
+    it("never overwrites a note the player typed", function()
+        local lf = hookedRollFrame(WGS)
+        local item = { sessions = { 1 }, note = "offspec, low prio" }
+        lf.EntryManager:GetEntry(item)
+        assert.are.equal("offspec, low prio", item.note)
+    end)
+
+    it("does not re-seed a note the player cleared", function()
+        local lf = hookedRollFrame(WGS)
+        local item = { sessions = { 1 } }
+        local entry = lf.EntryManager:GetEntry(item)
+        assert.are.equal("GH: BiS +4.2%", item.note)
+
+        item.note = nil            -- player wiped it in the editbox
+        entry:Update(item)
+        assert.is_nil(item.note, "one seed per item — clearing it sticks")
+    end)
+
+    it("skips roll entries (RCLC hides the note button there) and unwished items", function()
+        local lf = hookedRollFrame(WGS)
+        local roll = { sessions = { 1 }, isRoll = true }
+        lf.EntryManager:GetEntry(roll)
+        assert.is_nil(roll.note)
+
+        local unwished = { sessions = { 2 } }
+        lf.EntryManager:GetEntry(unwished)
+        assert.is_nil(unwished.note, "no wish → no note")
+    end)
+
+    it("keeps the seeded note inside RCLC's 64-character editbox cap", function()
+        local lf = hookedRollFrame(WGS, {
+            itemID = 212425, priority = string.rep("Legendary", 12), simPct = 4.2,
+        })
+        local item = { sessions = { 1 } }
+        lf.EntryManager:GetEntry(item)
+        assert.are.equal(64, #item.note)
     end)
 
     ------------------------------------------------------------------
