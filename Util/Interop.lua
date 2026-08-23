@@ -173,6 +173,14 @@ function WGS:InteropStatus()
         noteText, noteAPIUsed = vmrt.Note.Text1, "VMRT.Note.Text1 (raw)"
     end
 
+    -- Imported wishlist size — the RCLC wishlist surfaces render from
+    -- this, so "no column" is usually "nothing imported yet".
+    local wishlistPlayers, wishlistItems = 0, 0
+    for _, entry in ipairs((self.db and self.db.global and self.db.global.wishlists) or {}) do
+        wishlistPlayers = wishlistPlayers + 1
+        wishlistItems = wishlistItems + #(entry.items or {})
+    end
+
     return {
         mrtLoaded       = mrtLoaded,
         nsrtLoaded      = nsrtLoaded,
@@ -193,6 +201,9 @@ function WGS:InteropStatus()
         -- ~= false so a fresh test db (no AceDB defaults) reads the
         -- same as the runtime default (on).
         rclcCaptureOn   = (self.db and self.db.profile and self.db.profile.rclcCapture) ~= false,
+        rclcWishlistOn  = (self.db and self.db.profile and self.db.profile.rclcWishlistColumn) ~= false,
+        wishlistPlayers = wishlistPlayers,
+        wishlistItems   = wishlistItems,
         rclcLootCount   = rclcLootCount,
         rclcLootLast    = rclcLootLast,
         rclcVersion     = rclcVersion,
@@ -250,5 +261,11 @@ function WGS:PrintInteropStatus()
             s.rclcCaptureOn and "|cff00ff00on|r" or "|cff888888off|r",
             s.rclcLootCount, s.mrtLootTotal, ago(s.rclcLootLast)))
         self:Print("    |cff888888/gh rclc import pulls RCLC's saved history into the loot log|r")
+        self:Print("|cffffd100  RCLC wishlist injection|r")
+        self:Print(string.format("    injection: %s   imported wishlists: %d players / %d items",
+            s.rclcWishlistOn and "|cff00ff00on|r" or "|cff888888off|r",
+            s.wishlistPlayers, s.wishlistItems))
+        self:Print("    |cff888888The GuildHall column is drawn on this client only — council members")
+        self:Print("    without GuildHall read your wish from RCLC's own note column instead.|r")
     end
 end
