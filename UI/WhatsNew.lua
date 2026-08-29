@@ -26,6 +26,7 @@ local RELEASE_NOTES = {
         title = "Wishlists the whole council can see",
         sections = {
             { heading = "Fixed", items = {
+                "Tier tokens now match the people who want them. You wishlist the piece you'll equip; the raid drops the token — a different item id and a different name, so it used to match nobody in the tooltip, the loot helper or the RCLootCouncil column. The token now resolves to everyone whose wishlist it can satisfy",
                 "Council members without GuildHall can now see your wish. The GuildHall column is drawn by GuildHall on your own screen, so a loot master who doesn't run it never saw one — your wish is now also written into RCLootCouncil's own note field, which the whole council reads in its native Notes column",
                 "It only fills an empty note — anything you typed is left alone, and the editbox is pre-filled so you can see and edit what gets sent",
                 "/gh interop now reports the wishlist injection: whether it's on, how big your last import was, and who can see what",
