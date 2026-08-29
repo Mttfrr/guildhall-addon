@@ -75,6 +75,13 @@ local PRELOAD_BATCH = 50
 local function importWishlists(self, data)
     if not data.wishlists then return 0 end
     self.db.global.wishlists = data.wishlists
+    -- Tier set tokens: the raid drops one item that several classes turn
+    -- into different pieces. Wishlists carry the PIECE, the loot event
+    -- carries the TOKEN — neither the id index nor the name index below can
+    -- bridge that, so the platform ships the mapping and
+    -- GetWishlistForItem resolves through it. Absent (older platform) is
+    -- simply no token matching, which is the previous behaviour.
+    self.db.global.tierTokens = data.tierTokens or {}
     -- Freshness stamp for the RCLC gh_wish share (Modules/RCLC.lua):
     -- lets a peer with an older import defer to ours per item.
     self.db.global.wishlistImportedAt = self:GetTimestamp()
@@ -358,6 +365,10 @@ end
 -- bumps the stamp), clears reset the stamp to 0, and specs that poke
 -- db.global.wishlists directly get a rebuild from the identity change.
 local wishIndex, wishNameIndex, wishIndexSource, wishIndexStamp
+-- Token → resolved wishes, filled lazily and cleared whenever the wish
+-- index rebuilds. A token drop is rare but its RCLC cell redraws per row
+-- per frame, and resolving walks every wishlist — memoize or it hitches.
+local wishTokenCache
 
 -- Two indexes over the same wishes: by item id, and by NAME.
 --
@@ -415,6 +426,68 @@ local function buildWishIndex(wishlists)
     return index, byName
 end
 
+-- The configured token entry for a dropped item id, or nil. The map ships
+-- with the platform export (services/tierTokens.js); an addon running
+-- against an older platform simply has none.
+local function tokenForItem(self, itemID)
+    local tokens = self.db.global.tierTokens
+    if type(tokens) ~= "table" or not itemID then return nil end
+    for i = 1, #tokens do
+        if tokens[i] and tonumber(tokens[i].itemID) == itemID then return tokens[i] end
+    end
+    return nil
+end
+
+-- Does this token serve that class, and does the config name the exact
+-- piece it becomes? Returns (covered, pieceID) — pieceID nil means "covered
+-- but unspecified", which is enough to show demand and not enough to claim
+-- a specific item.
+local function tokenClass(token, class)
+    if type(class) ~= "string" or class == "" then return false, nil end
+    local wanted = class:lower():gsub("[^%a]", "")
+    for _, entry in ipairs(token.classes or {}) do
+        local name = type(entry) == "table" and entry.name or entry
+        if type(name) == "string" and name:lower():gsub("[^%a]", "") == wanted then
+            return true, type(entry) == "table" and tonumber(entry.itemId) or nil
+        end
+    end
+    return false, nil
+end
+
+-- Everyone whose wishlist this token can satisfy.
+--
+-- With an exact piece id configured for the class, match THAT item — the
+-- precise answer. Without one, fall back to the token's slot: a Chest token
+-- surfaces the chest wishes of the classes it covers. That is deliberately
+-- approximate, and correct for what this feeds (a tooltip, the loot helper,
+-- an RCLC column) — a human reads the list and decides. Nothing here writes.
+local function resolveTokenWishes(self, token)
+    local out = {}
+    local slot = type(token.slot) == "string" and token.slot:lower() or ""
+    for _, entry in ipairs(self.db.global.wishlists or {}) do
+        local covered, pieceID = tokenClass(token, entry.class)
+        if covered and entry.items then
+            for _, item in ipairs(entry.items) do
+                local match
+                if pieceID then
+                    match = (item.itemID == pieceID)
+                else
+                    match = slot ~= "" and type(item.slot) == "string" and item.slot:lower() == slot
+                end
+                if match then
+                    out[#out + 1] = {
+                        playerName = entry.playerName,
+                        priority = item.priority,
+                        note = item.note,
+                        simPct = tonumber(item.simPct),
+                    }
+                end
+            end
+        end
+    end
+    return out
+end
+
 -- Get wishlist entries for an item. `itemName` is optional but worth
 -- passing: it's what lets a Heroic drop match a Myth-track wish (same
 -- item, different id). Returns a fresh list
@@ -429,6 +502,7 @@ function WGS:GetWishlistForItem(itemID, itemName)
         wishIndex, wishNameIndex = buildWishIndex(wishlists)
         wishIndexSource = wishlists
         wishIndexStamp = stamp
+        wishTokenCache = {}
     end
     local bucket = wishIndex[itemID]
     -- Fall back to the name only when the id found nothing: a different
@@ -436,6 +510,19 @@ function WGS:GetWishlistForItem(itemID, itemName)
     if not bucket and type(itemName) == "string" then
         local key = itemName:lower():match("^%s*(.-)%s*$")
         if key and key ~= "" then bucket = wishNameIndex[key] end
+    end
+    -- Last: the tier token. What dropped is the token; what people wished
+    -- for is the piece it becomes for their class — a different id AND a
+    -- different name, so this is the only clause that can see it.
+    if not bucket and itemID then
+        wishTokenCache = wishTokenCache or {}
+        local cached = wishTokenCache[itemID]
+        if cached == nil then
+            local token = tokenForItem(self, itemID)
+            cached = token and resolveTokenWishes(self, token) or false
+            wishTokenCache[itemID] = cached
+        end
+        if cached then bucket = cached end
     end
     if not bucket then return {} end
     local out = {}
