@@ -11,8 +11,9 @@ _G["GuildHall"] = WGS
 -- reads WGS.version (minimap tooltip, "What's new" gate, server's
 -- minAddonVersion check); the TOC field drives the packager + Wago
 -- listing. Diverging the two was a real bug in past releases — the
--- TOC said 0.7.3 while runtime reported 0.7.0-beta.
-WGS.version = "0.8.2-beta"
+-- TOC said 0.7.3 while runtime reported 0.7.0-beta. Both are now
+-- bumped together by release-please via the annotation below.
+WGS.version = "0.8.2-beta" -- x-release-please-version
 
 local dbDefaults = {
     profile = {
