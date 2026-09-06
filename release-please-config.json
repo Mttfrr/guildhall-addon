@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": false,
+  "bootstrap-sha": "e5a6d1814f6d0c75eb4dd83236993fc807f38d71",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "guildhall-addon",
+      "versioning": "prerelease",
+      "prerelease": true,
+      "prerelease-type": "beta",
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        "GuildHall.toc",
+        "Core.lua"
+      ]
+    }
+  }
+}

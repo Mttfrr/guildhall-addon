@@ -1,0 +1,31 @@
+name: Release Please
+
+# Maintains a rolling release PR from Conventional Commits on main:
+# it bumps GuildHall.toc + Core.lua (kept in lockstep via
+# x-release-please annotations — the same pair check_toc.sh guards),
+# prepends CHANGELOG.md, and — when the release PR is merged — tags
+# vX.Y.Z-beta. That tag is what fires release.yml, so the BigWigs
+# packager builds and uploads to CurseForge + Wago automatically.
+# The "-beta" suffix is preserved on purpose: the packager derives
+# the release CHANNEL from the tag name, and dropping it would
+# silently promote a build to the stable channel on both stores.
+#
+# Requires the repo setting "Allow GitHub Actions to create and
+# approve pull requests" (Settings → Actions → General → Workflow
+# permissions).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

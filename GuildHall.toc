@@ -2,7 +2,9 @@
 ## Title: GuildHall
 ## Notes: Guild management companion — sync loot, attendance, bank gold, and more with guildhall.run.
 ## Author: Mttfrr
+# x-release-please-start-version
 ## Version: 0.8.2-beta
+# x-release-please-end
 ## SavedVariables: GuildHallDB
 ## IconTexture: Interface\Icons\INV_Misc_Gear_01
 ## AddonCompartmentFunc: GuildHall_OnAddonCompartmentClick
