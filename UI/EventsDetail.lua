@@ -910,7 +910,7 @@ local function PopulateActionsFooter(footer, ev, roster, comp)
         local menu = {
             { text = "More invite options",
               isTitle = true, notCheckable = true },
-            { text = "Invite signups + bench",
+            { text = "Invite signups + standby",
               notCheckable = true,
               func = function()
                   if WGS.AutoInvite then WGS:AutoInvite(ev, { includeBench = true }) end
