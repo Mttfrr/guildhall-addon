@@ -52,6 +52,15 @@ local options = {
                     get = function() return WGS.db.profile.autoSortGroups end,
                     set = function(_, val) WGS.db.profile.autoSortGroups = val end,
                 },
+                standbyToBackGroups = {
+                    order = 11.8,
+                    type = "toggle",
+                    name = "Move Standby To The Back Groups",
+                    desc = "When groups are sorted for a boss, raiders that boss's comp has on standby move to the groups after the playing ones (5-8 in a 20-man), so the front groups are exactly who's pulling. Off: standby raiders stay where they are.",
+                    width = "full",
+                    get = function() return WGS.db.profile.standbyToBackGroups end,
+                    set = function(_, val) WGS.db.profile.standbyToBackGroups = val end,
+                },
                 autoTrackLoot = {
                     order = 12,
                     type = "toggle",

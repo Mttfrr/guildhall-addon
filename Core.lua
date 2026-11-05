@@ -12,7 +12,7 @@ _G["GuildHall"] = WGS
 -- minAddonVersion check); the TOC field drives the packager + Wago
 -- listing. Diverging the two was a real bug in past releases — the
 -- TOC said 0.7.3 while runtime reported 0.7.0-beta.
-WGS.version = "0.8.2-beta"
+WGS.version = "0.9.0-beta"
 
 local dbDefaults = {
     profile = {
@@ -32,6 +32,11 @@ local dbDefaults = {
         -- no-ops when the event has no comp with group assignments. The
         -- "Organize Groups" button is the manual, sort-everyone counterpart.
         autoSortGroups = true,
+        -- When sorting, a raider the comp has on standby for this boss
+        -- moves out to the groups after the playing ones (5-8 in a 20-man),
+        -- so groups 1-4 are exactly who's pulling. Off = standby raiders
+        -- stay wherever they are.
+        standbyToBackGroups = true,
         guildGroupsOnly = true,
         guildWebId = "",
         showLootDistHelper = true,
@@ -82,6 +87,12 @@ local dbDefaults = {
         wishlistImportedAt = 0, -- stamped by importWishlists; drives the RCLC gh_wish freshness share
         bossNotes = {},
         raidComps = {},
+        -- Tonight's boss lineup per event, each boss with its own comp
+        -- (Modules/Import.lua#importRaidPlans).
+        raidPlans = {},
+        -- eventId → the lineup boss whose comp the raid is on (nil = the
+        -- night default). Advanced on each kill; see WGS:GetCompBoss.
+        compBossByEvent = {},
         events = {},
         characters = {},        -- { [playerId] = { displayName, main, alts } }
         characterIds = {},      -- { [characterName] = guild_members.id } from platform export
@@ -419,7 +430,7 @@ WGS.EXPORTED_DATA_KEYS = {
 -- listed here reset to {}; the scalar companions (wishlistImportedAt,
 -- targetIlvl) are handled by ClearImportedData.
 WGS.IMPORTED_DATA_KEYS = {
-    "teams", "wishlists", "bossNotes", "raidComps", "events",
+    "teams", "wishlists", "bossNotes", "raidComps", "raidPlans", "events",
     "gearAudit", "characters", "characterLookup",
 }
 
@@ -598,7 +609,7 @@ function WGS:PrintDiagSummary()
     self:Print("|cffaaaaaa-- imported --|r")
     local IMPORTED = {
         "events", "teams", "signups", "wishlists", "bossNotes",
-        "raidComps", "characters", "characterIds", "gearAudit",
+        "raidComps", "raidPlans", "characters", "characterIds", "gearAudit",
         "characterDetails",
     }
     for _, name in ipairs(IMPORTED) do

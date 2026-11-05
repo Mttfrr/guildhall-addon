@@ -166,6 +166,8 @@ local function normalizeRaidComp(comp)
                 or parseSlotGroup(slot.slot_group),
             spec = slot.spec or nil,
             note = slot.note or nil,
+            -- A pug seat the roster doesn't know: never matched to a raider.
+            placeholder = slot.placeholder and true or nil,
         }
     end
     return {
@@ -183,6 +185,46 @@ local function importRaidComps(self, data)
     end
     self.db.global.raidComps = normalized
     return #normalized
+end
+
+-- raidPlans: tonight's boss lineup per event, each boss with its own comp.
+--
+--   { eventId, teamId, defaultComp = [slots], bosses = [
+--       { name, order, encounterID, inherits, slots } ] }
+--
+-- A boss that `inherits` raids with the night default, so it carries no
+-- comp of its own here and GetRaidComp falls through to the default. A
+-- server that predates per-boss comps sends raidComps without raidPlans;
+-- that clears the plans rather than leaving last week's lineup behind,
+-- because raidComps and raidPlans always ship together from a current one.
+local function importRaidPlans(self, data)
+    if not data.raidPlans and not data.raidComps then return 0 end
+    local plans = {}
+    for _, p in ipairs(data.raidPlans or {}) do
+        local bosses = {}
+        for i, b in ipairs(p.bosses or {}) do
+            if b.name and b.name ~= "" then
+                bosses[#bosses + 1] = {
+                    name = b.name,
+                    order = tonumber(b.order) or (i - 1),
+                    encounterID = tonumber(b.encounterID),
+                    inherits = b.inherits and true or false,
+                    comp = (not b.inherits)
+                        and normalizeRaidComp({ eventId = p.eventId, slots = b.slots or {} })
+                        or nil,
+                }
+            end
+        end
+        table.sort(bosses, function(a, b) return a.order < b.order end)
+        plans[#plans + 1] = {
+            eventId = p.eventId,
+            teamId = p.teamId,
+            defaultComp = normalizeRaidComp({ eventId = p.eventId, slots = p.defaultComp or {} }),
+            bosses = bosses,
+        }
+    end
+    self.db.global.raidPlans = plans
+    return #plans
 end
 
 -- Each of these is a "trivial-replace" section: take the server's
@@ -261,6 +303,7 @@ local IMPORTERS = {
     importWishlists,
     importBossNotes,
     importRaidComps,
+    importRaidPlans,
     importEvents,
     importGearAudit,
     importCharacterDetails,
@@ -543,15 +586,117 @@ function WGS:GetBossNotes(encounterName)
     return nil
 end
 
--- Get raid comp for an event
-function WGS:GetRaidComp(eventId)
-    local comps = self.db.global.raidComps
-    if not comps then return nil end
+-- Boss names compared loosely: case, spaces and punctuation ignored, and
+-- one may prefix the other ("Plexus Sentinel" vs "Plexus Sentinel, the
+-- Warden"). Same rule as the server's wcl.js#sameBoss, so a kill the
+-- server would tie to a lineup boss ties to the same one here.
+local function normBossName(s)
+    return (tostring(s or ""):lower():gsub("[^%w]", ""))
+end
 
-    for _, comp in ipairs(comps) do
+function WGS:SameBoss(a, b)
+    local na, nb = normBossName(a), normBossName(b)
+    if na == "" or nb == "" then return false end
+    return na == nb or na:sub(1, #nb) == nb or nb:sub(1, #na) == na
+end
+
+--- Tonight's raid plan for an event (the lineup + per-boss comps), or nil.
+function WGS:GetRaidPlan(eventId)
+    if eventId == nil then return nil end
+    for _, plan in ipairs(self.db.global.raidPlans or {}) do
+        if plan.eventId == eventId then return plan end
+    end
+    return nil
+end
+
+--- Index + entry of a lineup boss. `boss` is a name or an encounter id;
+--- an id is matched first (it can't be misspelled), then the name.
+function WGS:FindPlanBoss(plan, boss, encounterID)
+    if not plan or not plan.bosses then return nil end
+    local id = tonumber(encounterID) or (type(boss) == "number" and boss or nil)
+    if id then
+        for i, b in ipairs(plan.bosses) do
+            if b.encounterID and b.encounterID == id then return i, b end
+        end
+    end
+    if type(boss) == "string" then
+        for i, b in ipairs(plan.bosses) do
+            if self:SameBoss(b.name, boss) then return i, b end
+        end
+    end
+    return nil
+end
+
+-- Get raid comp for an event. With `boss` (a lineup boss's name or
+-- encounter id), that boss's own comp — or the night default when the
+-- boss inherits it or isn't on the lineup. Without it, the night default.
+function WGS:GetRaidComp(eventId, boss)
+    if boss ~= nil then
+        local _, entry = self:FindPlanBoss(self:GetRaidPlan(eventId), boss)
+        if entry and entry.comp then return entry.comp end
+    end
+
+    for _, comp in ipairs(self.db.global.raidComps or {}) do
         if comp.eventId == eventId then
             return comp
         end
     end
+    local plan = self:GetRaidPlan(eventId)
+    if plan and plan.defaultComp and #(plan.defaultComp.assignments or {}) > 0 then
+        return plan.defaultComp
+    end
     return nil
+end
+
+--- Which comp the raid is on right now for this event: a lineup boss's
+--- name, or nil for the night default. Persisted (db.global) so a /reload
+--- mid-raid doesn't drop the raid back to the default comp.
+function WGS:GetCompBoss(eventId)
+    if eventId == nil then return nil end
+    local map = self.db.global.compBossByEvent
+    local name = type(map) == "table" and map[tostring(eventId)] or nil
+    -- A boss that has since left the lineup falls back to the default.
+    if name and not self:FindPlanBoss(self:GetRaidPlan(eventId), name) then return nil end
+    return name
+end
+
+function WGS:SetCompBoss(eventId, bossName)
+    if eventId == nil then return end
+    if bossName == "" then bossName = nil end
+    self.db.global.compBossByEvent = self.db.global.compBossByEvent or {}
+    local key = tostring(eventId)
+    if self.db.global.compBossByEvent[key] == bossName then return end
+    self.db.global.compBossByEvent[key] = bossName
+    self:FireEvent("WGS_COMP_BOSS_CHANGED", { eventId = eventId, boss = bossName })
+end
+
+-- Who plays (has a group) in a comp, keyed by lowercased short name.
+local function playingSet(comp)
+    local out = {}
+    for _, a in ipairs((comp and comp.assignments) or {}) do
+        if a.name and tonumber(a.group) then
+            out[(WGS:ShortName(a.name)):lower()] = { name = WGS:ShortName(a.name), group = tonumber(a.group) }
+        end
+    end
+    return out
+end
+
+--- What changes between two comps: who comes in, who goes to standby,
+--- and whether anyone who stays changes group. Names are short names in
+--- comp order so the chat line reads like the web's "Swaps per boss".
+function WGS:CompSwaps(fromComp, toComp)
+    local from, to = playingSet(fromComp), playingSet(toComp)
+    local res = { incoming = {}, standby = {}, regroup = false }
+    for _, a in ipairs((toComp and toComp.assignments) or {}) do
+        local k = a.name and (WGS:ShortName(a.name)):lower()
+        if k and to[k] and not from[k] then res.incoming[#res.incoming + 1] = to[k].name end
+    end
+    for _, a in ipairs((fromComp and fromComp.assignments) or {}) do
+        local k = a.name and (WGS:ShortName(a.name)):lower()
+        if k and from[k] and not to[k] then res.standby[#res.standby + 1] = from[k].name end
+    end
+    for k, v in pairs(to) do
+        if from[k] and from[k].group ~= v.group then res.regroup = true; break end
+    end
+    return res
 end

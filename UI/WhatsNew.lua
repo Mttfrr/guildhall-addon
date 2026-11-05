@@ -22,6 +22,25 @@ local WGS = GuildHall
 -- them stacked in one dialog (newest version on top).
 local RELEASE_NOTES = {
     {
+        version = "0.9.0-beta",
+        title = "A comp for every boss",
+        sections = {
+            { heading = "Added", items = {
+                "Each boss on tonight's lineup can have its own comp. The Events tab's \"Sort for\" picker shows each boss's groups, and Organize Groups sorts for the boss you pick",
+                "The raid follows the lineup: pulling a lineup boss switches to its comp, and a kill moves to the next boss and prints who comes in and who goes to standby — then sorts the groups once combat ends, if Auto-Sort is on",
+                "Standby raiders move to the back groups (5-8 in a 20-man) so the front groups are exactly who's pulling. Turn it off in the options",
+            } },
+            { heading = "Fixed", items = {
+                "Sorting into a full group no longer silently fails — it swaps with someone who doesn't belong there",
+                "The sort after Invite uses the event you invited for",
+                "Multi-team guilds get every team's comp, not just one",
+            } },
+            { heading = "Changed", items = {
+                "\"Bench\" is now \"Standby\", matching the platform",
+            } },
+        },
+    },
+    {
         version = "0.8.2-beta",
         title = "Wishlists the whole council can see",
         sections = {

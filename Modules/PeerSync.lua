@@ -55,7 +55,7 @@ local CATCHUP_TABLES = {
 -- so the snapshot exchange covers it. db.profile.guildWebId (inviteCode)
 -- is intentionally omitted: each officer joins their own guild scope.
 local SNAPSHOT_FIELDS = {
-    "characters", "teams", "wishlists", "bossNotes", "raidComps",
+    "characters", "teams", "wishlists", "bossNotes", "raidComps", "raidPlans",
     "events", "gearAudit", "characterDetails", "signups", "targetIlvl",
     "serverMinAddonVersion",
 }

@@ -2,6 +2,29 @@
 
 All notable changes to GuildHall will be documented in this file.
 
+## [0.9.0-beta] — 2026-11-05
+
+A raid plan per boss: the platform's Raid Plan now holds tonight's lineup
+of bosses, each with its own comp, and the addon follows the raid through
+it.
+
+### Added
+
+- **Each boss has its own comp.** The platform export now carries every upcoming night's boss lineup, each boss with its own groups (or "uses the night default"). The Events tab's comp section has a **Sort for:** picker — the night default plus each lineup boss in order — and shows that boss's comp; **Organize Groups** sorts for whichever boss is picked.
+- **The raid follows the lineup.** Pulling a lineup boss puts the raid on its comp. Killing one moves to the next boss and prints what changes for it — `Next: Boss B — in: Alice · standby: Bob` — and, with *Auto-Sort Into Comp Groups* on and lead or assist, sorts the groups for it as soon as combat ends (never mid-pull). A kill that isn't on the lineup changes nothing. Your place in the lineup survives a /reload.
+- **Standby goes to the back groups.** A raider a boss's comp has on standby moves to the groups after the playing ones — 5 to 8 in a 20-man — so groups 1–4 are exactly who's pulling. A new setting, *Move Standby To The Back Groups*, turns it off. Pug seats on the platform's comp never move anyone, and raiders the comp doesn't mention are only ever moved to make room.
+
+### Fixed
+
+- **Sorting into a full group no longer silently fails.** WoW ignores a move into a group that already has five people, so Organize Groups lost every move into a group that hadn't emptied yet and left raiders behind. Sorting now plans the moves against its own picture of the groups and swaps with someone who doesn't belong when the destination is full.
+- **The sort after Invite now uses the event you invited for**, not whichever event "today" resolved to.
+- **Multi-team guilds get every team's comp.** The platform used to export one upcoming comp, so a second team's raid night had nothing to sort against.
+
+### Changed
+
+- **"Bench" is now "Standby"** everywhere in the addon, to match the platform. The stored status code is unchanged.
+- **The platform keeps what you actually played separately.** The raid groups the addon snapshots at each kill used to overwrite the night's planned comp on import; they're now stored as the night's actuals and the plan is never touched.
+
 ## [0.8.2-beta] — 2026-08-23
 
 Your wishlist now reaches council members who don't run GuildHall — and tier

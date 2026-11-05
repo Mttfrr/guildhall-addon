@@ -307,3 +307,18 @@ use; it's a thin wrapper around `self.callbacks:Fire(...)` that's
 tolerant of being called before `OnInitialize` has wired the registry
 up (rare during early bootstrap). External subscribers should not call
 it — use `RegisterCallback`.
+
+### `WGS_COMP_BOSS_CHANGED`
+
+Fires when the raid moves onto a different comp for an event: an officer
+picks a boss in the Events tab's "Sort for" picker, a lineup boss is
+pulled, or a kill advances the lineup to the next boss
+(`WGS:SetCompBoss`). Only fires on an actual change.
+
+| Field | Type | Notes |
+|---|---|---|
+| `eventId` | integer | the event whose lineup this is |
+| `boss` | string or nil | the lineup boss now in effect; nil = the night default comp |
+
+Read the current value with `WGS:GetCompBoss(eventId)` and that boss's
+comp with `WGS:GetRaidComp(eventId, boss)`.

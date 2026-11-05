@@ -18,6 +18,7 @@ GuildHall handles the parts of raiding that don't belong in a spreadsheet: track
 ### Imported from the web platform
 - **Teams** — with player-character mappings, so a Resto Druid main and their Warlock alt are recognized as the same player.
 - **Raid comps** — the planned composition for each event, used by `/gh invite` and `/gh sortgroups`.
+- **Raid plans** — tonight's boss lineup per event, each boss with its own comp (or the night default). The raid follows it: a kill moves to the next boss's comp.
 - **Events** — calendar with date/time, used for auto-attendance and late tracking.
 - **Wishlists** — per-player item priorities (BiS / High / Medium / Low), shown on tooltips and in the Wishlists tab.
 - **Boss notes** — strategy, assignments, video URLs. Auto-shown on encounter pull.
@@ -58,7 +59,7 @@ GuildHall handles the parts of raiding that don't belong in a spreadsheet: track
 | `/gh sync` | Manual officer-to-officer peer-sync catch-up |
 | `/gh team <name\|all>` | Set / clear the global current-team filter |
 | `/gh invite` | Auto-invite online team members for today's event (officer/leader only) |
-| `/gh sortgroups` | Move players into the subgroups defined by today's raid comp |
+| `/gh sortgroups` | Move players into the subgroups of the comp the raid is on (tonight's current lineup boss, else the night default); standby raiders go to the back groups |
 | `/gh search <name>` | Cross-context character lookup (loot / attendance / signups / teams / wishlists) |
 | `/gh diag` | One-screen data health summary (row counts, last import/export age) |
 | `/gh clear` | Clear already-exported telemetry data (confirmed; undo within 24h via `/gh restore`) |
@@ -76,7 +77,8 @@ Found at `/gh config` (or Blizzard's AddOns options panel).
 - **Guild ID** — links the addon to your guild on guildhall.run
 - **Auto-Track Attendance** — start tracking automatically on raid entry (default on)
 - **Prompt to Track Scheduled Raids** — pop a one-click "start tracking?" window when you form a raid matching a scheduled event (default on)
-- **Auto-Sort Into Comp Groups** — drop fresh joiners into their planned comp subgroup as they accept (default on)
+- **Auto-Sort Into Comp Groups** — drop fresh joiners into their planned comp subgroup as they accept, and re-sort for the next lineup boss after each kill once combat ends (default on)
+- **Move Standby To The Back Groups** — raiders a boss's comp has on standby sit in the groups after the playing ones, 5-8 in a 20-man (default on)
 - **Auto-Track Loot** — record Epic+ drops automatically (default on)
 - **Guild Groups Only** — only track when ≥80% of the group are guildmates (default on, prevents pug logging)
 - **Loot Distribution Helper** — popup when wishlisted loot drops with announce/assign options
