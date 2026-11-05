@@ -31,6 +31,19 @@ L["INVITE_SUMMARY"]    = "|cffffd100Inviting %d member(s) for %s (from %s)|r"
 L["INVITE_ALL_IN"]     = "All members are already in group or offline."
 L["SORT_SUMMARY"]      = "|cffffd100Sorted %d player(s) into raid groups.|r"
 L["SORT_NONE"]         = "All players already in correct groups."
+L["SORT_SUMMARY_FOR"]  = "|cffffd100Sorted %d player(s) into raid groups for %s.|r"
+L["SORT_NONE_FOR"]     = "All players already in the right groups for %s."
+L["COMP_NIGHT_DEFAULT"] = "the night default"
+
+-- Boss lineup (Modules/EventScheduler.lua#OnLineupBossKilled). LINEUP_NEXT
+-- takes the next boss and the joined swap parts.
+L["LINEUP_NEXT"]    = "|cffffd100Next: %s|r \226\128\148 %s"
+L["LINEUP_IN"]      = "in: %s"
+L["LINEUP_STANDBY"] = "standby: %s"
+L["LINEUP_SAME"]    = "same comp"
+L["LINEUP_REGROUP"] = "same players, new groups"
+L["LINEUP_DONE"]    = "|cffffd100Lineup done|r \226\128\148 that was tonight's last planned boss."
+L["SORT_FOR"]       = "Sort for: %s"
 
 -- Attendance status read-out (/gh attendance).
 L["ATTENDANCE_NOT_RECORDING"] = "Attendance: not recording."

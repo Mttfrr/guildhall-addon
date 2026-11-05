@@ -111,6 +111,10 @@ end
 
 -- ENCOUNTER_START fires with: encounterID, encounterName, difficultyID, groupSize
 function module:OnEncounterStart(_, encounterID, encounterName, difficultyID, groupSize)
+    -- Put the raid on this boss's comp if it's on tonight's lineup.
+    if WGS.OnLineupBossPulled then
+        pcall(WGS.OnLineupBossPulled, WGS, encounterID, encounterName)
+    end
     -- Auto-show boss notes if we have them imported and feature is enabled
     if encounterName and WGS.db.profile.showBossNotes then
         local notes = WGS:GetBossNotes(encounterName)
@@ -156,6 +160,12 @@ function module:OnEncounterEnd(_, encounterID, encounterName, difficultyID, grou
             difficultyID = difficultyID,
             difficultyName = difficultyName,
         })
+
+        -- Next boss on tonight's lineup: print the swaps, sort when safe.
+        -- pcall'd — a plan problem must never cost the loot capture below.
+        if WGS.OnLineupBossKilled then
+            pcall(WGS.OnLineupBossKilled, WGS, encounterID, encounterName)
+        end
 
         -- MRT loot reconciliation: 5s after ENCOUNTER_END (gives the
         -- last CHAT_MSG_LOOT messages time to land in laggy raids) we

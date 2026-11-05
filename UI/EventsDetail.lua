@@ -81,17 +81,41 @@ local function BuildEventRoster(eventId)
     return out
 end
 
--- Pulls the raid comp for `eventId` from db.global.raidComps. The comp
--- shape is normalised on import to { eventId, name, assignments } (see
--- Modules/Import.lua). Returns nil if no comp exists for this event.
+-- The comp the raid is on for `eventId`: the current lineup boss's
+-- (WGS:GetCompBoss — picked below, or advanced on each kill), else the
+-- night default. Shape is normalised on import to { eventId, name,
+-- assignments } (see Modules/Import.lua). nil when no comp is planned.
 local function FindRaidCompForEvent(eventId)
     if not eventId then return nil end
-    local comps = WGS.db.global.raidComps
-    if type(comps) ~= "table" then return nil end
-    for _, c in ipairs(comps) do
-        if c.eventId == eventId then return c end
-    end
-    return nil
+    return WGS:GetRaidComp(eventId, WGS:GetCompBoss(eventId))
+end
+
+-- "Sort for: <boss>" picker — the night default plus each lineup boss in
+-- order. Picking one moves the raid onto that comp (WGS:SetCompBoss),
+-- which re-renders this panel and is what Organize Groups sorts for.
+-- Renders nothing when the event has no lineup.
+local function BuildCompBossPicker(content, anchor, ev, xOff)
+    local plan = WGS:GetRaidPlan(ev.id)
+    if not plan or #(plan.bosses or {}) == 0 then return nil end
+    local current = WGS:GetCompBoss(ev.id)
+    local label = current or "Night default"
+    local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    btn:SetSize(190, 22)
+    btn:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xOff or 0, -6)
+    btn:SetText(string.format(L["SORT_FOR"], label) .. " \226\150\190")
+    btn:SetScript("OnClick", function()
+        local function item(text, boss)
+            local mark = (boss == current) and "|cff55dd55\226\156\147|r " or "    "
+            return { text = mark .. text, notCheckable = true, func = function() WGS:SetCompBoss(ev.id, boss) end }
+        end
+        local menu = { { text = "Comp for", isTitle = true }, item("Night default", nil) }
+        for i, b in ipairs(plan.bosses) do
+            menu[#menu + 1] = item(string.format("%d. %s%s", i, b.name,
+                b.inherits and " |cff888888(night default)|r" or ""), b.name)
+        end
+        ui.OpenContextMenu(menu)
+    end)
+    return btn
 end
 
 -- A horizontal divider with a section label. Used to separate the
@@ -409,14 +433,20 @@ local function PopulateRaidStatusSection(content, anchor, ev, width)
     -- there's nothing to organize and people stay where they landed.
     local hasComp = FindRaidCompForEvent(ev.id) ~= nil
     if IsInRaid() and hasComp then
+        local xOff = (last == header) and 0 or -12
+        local picker = BuildCompBossPicker(content, last, ev, xOff)
         local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
         btn:SetSize(150, 22)
-        btn:SetPoint("TOPLEFT", last, "BOTTOMLEFT", (last == header) and 0 or -12, -8)
+        if picker then
+            btn:SetPoint("LEFT", picker, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("TOPLEFT", last, "BOTTOMLEFT", xOff, -8)
+        end
         btn:SetText(L["ORGANIZE_GROUPS"])
         btn:SetScript("OnClick", function()
             if WGS.SortRaidGroups then WGS:SortRaidGroups(ev) end
         end)
-        last = btn
+        last = picker or btn
     end
 
     return last
@@ -569,8 +599,16 @@ local function buildCompDiff(assignments, sessionMembers)
 end
 WGS._BuildCompDiff = buildCompDiff   -- exposed for tests
 
-local function PopulateRaidCompSection(content, anchor, comp, width)
-    local header = BuildSectionHeader(content, anchor, "Raid Comp", width)
+local function PopulateRaidCompSection(content, anchor, comp, width, ev)
+    local bossName = ev and WGS:GetCompBoss(ev.id)
+    local header = BuildSectionHeader(content, anchor,
+        bossName and ("Raid Comp \226\128\148 " .. bossName) or "Raid Comp", width)
+    -- Out of a raid the picker lives here, so officers can read each
+    -- boss's comp before the night; in a raid it sits by Organize Groups.
+    if ev and not IsInRaid() then
+        local picker = BuildCompBossPicker(content, header, ev, 0)
+        if picker then header = picker end
+    end
 
     if not comp then
         local empty = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -693,7 +731,7 @@ local function PopulateRaidCompSection(content, anchor, comp, width)
         end
     end
     if #unassigned > 0 then
-        renderBucket("Unassigned", "ff888888", unassigned)
+        renderBucket("Standby", "ff888888", unassigned)
     end
 
     -- Planned vs actual diff strip. Renders only when there's an
@@ -1105,7 +1143,7 @@ local function PopulateDetail(frame, ev)
     lastAnchor = PopulateRaidStatusSection(content, lastAnchor, ev, sectionW)
 
     local comp = FindRaidCompForEvent(ev.id)
-    lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW)
+    lastAnchor = PopulateRaidCompSection(content, lastAnchor, comp, sectionW, ev)
 
     -- Boss Notes is the last scrolling section — Actions used to be
     -- here too but moved to the sticky footer, so we don't keep the

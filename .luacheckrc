@@ -94,7 +94,7 @@ read_globals = {
     "TooltipDataProcessor", "Enum", "ItemRefTooltip",
 
     -- Globals provided by Blizzard's UI frame XML templates
-    "InCombatLockdown", "InterfaceOptionsFrame_OpenToCategory",
+    "InCombatLockdown", "IsEncounterInProgress", "InterfaceOptionsFrame_OpenToCategory",
     "Settings", "SettingsPanel",
 
     -- AddOns
