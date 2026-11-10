@@ -93,6 +93,9 @@ local dbDefaults = {
         -- eventId → the lineup boss whose comp the raid is on (nil = the
         -- night default). Advanced on each kill; see WGS:GetCompBoss.
         compBossByEvent = {},
+        -- eventId → { normalised boss name → true }: lineup bosses killed
+        -- tonight, so a re-kill never moves the plan backwards.
+        compBossKills = {},
         events = {},
         characters = {},        -- { [playerId] = { displayName, main, alts } }
         characterIds = {},      -- { [characterName] = guild_members.id } from platform export

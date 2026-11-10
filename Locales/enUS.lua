@@ -44,6 +44,13 @@ L["LINEUP_SAME"]    = "same comp"
 L["LINEUP_REGROUP"] = "same players, new groups"
 L["LINEUP_DONE"]    = "|cffffd100Lineup done|r \226\128\148 that was tonight's last planned boss."
 L["SORT_FOR"]       = "Sort for: %s"
+L["ERR_SORT_IN_COMBAT"] = "|cffff4444Can't sort groups mid-pull \226\128\148 try again once combat ends.|r"
+L["COMP_NIGHT_DEFAULT_LABEL"] = "Night default"
+L["COMP_FOR_TITLE"]  = "Comp for"
+L["COMP_INHERITS"]   = "(night default)"
+L["RAID_COMP_HEADER"] = "Raid Comp"
+L["RAID_COMP_HEADER_FOR"] = "Raid Comp \226\128\148 %s"
+L["COMP_STANDBY_BUCKET"] = "Standby"
 
 -- Attendance status read-out (/gh attendance).
 L["ATTENDANCE_NOT_RECORDING"] = "Attendance: not recording."

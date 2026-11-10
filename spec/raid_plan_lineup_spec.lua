@@ -61,6 +61,33 @@ describe("raidPlans import", function()
         assert.is_not_nil(WGS:GetRaidComp(7))
     end)
 
+    it("survives its own output: a peer snapshot replays stored plans through ProcessImport", function()
+        local stored = WGS.db.global.raidPlans
+        WGS:ProcessImport({ raidPlans = stored, raidComps = WGS.db.global.raidComps })
+        local plan = WGS:GetRaidPlan(7)
+        assert.are.equal(5, #plan.bosses[1].comp.assignments)
+        assert.are.equal(5, #plan.defaultComp.assignments)
+        assert.is_nil(plan.bosses[2].comp)
+    end)
+
+    it("prunes raid progress for events that are no longer exported", function()
+        WGS:SetCompBoss(7, "First Boss")
+        WGS.db.global.compBossByEvent["99"] = "Old Boss"
+        WGS.db.global.compBossKills = { ["99"] = { oldboss = true } }
+        WGS:ProcessImport(planPayload())
+        assert.is_nil(WGS.db.global.compBossByEvent["99"])
+        assert.is_nil(WGS.db.global.compBossKills["99"])
+        assert.are.equal("First Boss", WGS.db.global.compBossByEvent["7"])
+    end)
+
+    it("matches non-English boss names, not just ASCII ones", function()
+        assert.is_true(WGS:SameBoss("Dimensius, der Allesverschlinger", "dimensius der allesverschlinger"))
+        -- These used to normalise to the same "ra" (every non-ASCII byte
+        -- stripped), so two different bosses matched each other.
+        assert.is_false(WGS:SameBoss("Ära", "Öra"))
+        assert.is_true(WGS:SameBoss("Ächzender Koloss", "Ächzender-Koloss"))
+    end)
+
     it("keeps the pug flag so a placeholder never matches a raider", function()
         local comp = WGS:GetRaidComp(7, "Third Boss")
         local pug
@@ -295,8 +322,65 @@ describe("following the lineup through the night", function()
     end)
 
     it("the last boss says the lineup is done", function()
+        WGS:OnLineupBossKilled(201, "First Boss")
+        WGS:OnLineupBossKilled(202, "Second Boss")
+        printed = {}
         WGS:OnLineupBossKilled(203, "Third Boss")
         assert.truthy(table.concat(printed, "\n"):find("Lineup done", 1, true))
+    end)
+
+    it("a skipped boss comes back after the last one", function()
+        WGS:OnLineupBossKilled(202, "Second Boss")
+        WGS:OnLineupBossKilled(203, "Third Boss")
+        assert.are.equal("First Boss", WGS:GetCompBoss(7))
+    end)
+
+    it("killing an earlier boss again never walks the plan backwards", function()
+        WGS:OnLineupBossKilled(201, "First Boss")
+        WGS:OnLineupBossKilled(202, "Second Boss")
+        assert.are.equal("Third Boss", WGS:GetCompBoss(7))
+        assert.is_nil(WGS:OnLineupBossKilled(201, "First Boss"))   -- another difficulty
+        WGS:OnLineupBossPulled(201, "First Boss")
+        assert.are.equal("Third Boss", WGS:GetCompBoss(7))
+    end)
+
+    it("without a tracked session, follows today's lineup only when there's exactly one", function()
+        WGS.GetCurrentAttendanceContext = function() return nil end
+        WGS.GetTodayEvents = function() return { { id = 7 } } end
+        assert.are.equal(7, WGS._PlanEventId(WGS))
+        WGS.db.global.raidPlans[2] = { eventId = 8, bosses = { { name = "First Boss" } } }
+        WGS.GetTodayEvents = function() return { { id = 7 }, { id = 8 } } end
+        assert.is_nil(WGS._PlanEventId(WGS), "two teams tonight: don't guess")
+    end)
+
+    it("a planned raider takes a seat from someone the comp doesn't mention", function()
+        -- Group 1 is full of trials; Tank is planned for group 1.
+        members = { { "Tank", 5 } }
+        for i = 1, 5 do members[#members + 1] = { "Trial" .. i, 1 } end
+        WGS:SortRaidGroups({ id = 7 })
+        assert.are.equal(1, groupOf("Tank"))
+    end)
+
+    it("a comp with roles only places a joiner by role, never in a back group", function()
+        WGS.db.global.raidComps = { { eventId = 7, assignments = {
+            { name = "Bravo", role = "DPS" }, { name = "Tank", role = "TANK" },
+        } } }
+        WGS.db.global.raidPlans = {}
+        members[4][2] = 1
+        WGS:PlaceRaiderInCompGroup("Bravo", 7)
+        assert.are.equal(3, groupOf("Bravo"))
+    end)
+
+    it("doesn't sort mid-pull", function()
+        _G.InCombatLockdown = function() return true end
+        WGS:SortRaidGroups({ id = 7 }, "First Boss")
+        assert.are.equal(0, #moves)
+    end)
+
+    it("stops instead of re-issuing a move the raid never shows", function()
+        _G.SetRaidSubgroup = function(i, g) moves[#moves + 1] = { i = i, g = g } end   -- never lands
+        WGS:SortRaidGroups({ id = 7 }, "First Boss")
+        assert.are.equal(1, #moves)
     end)
 
     it("pulling a lineup boss puts the raid on its comp", function()

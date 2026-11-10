@@ -197,9 +197,22 @@ end
 -- server that predates per-boss comps sends raidComps without raidPlans;
 -- that clears the plans rather than leaving last week's lineup behind,
 -- because raidComps and raidPlans always ship together from a current one.
+--
+-- The importer must also accept its OWN output: a peer snapshot sync
+-- (Modules/PeerSync.lua#mergeSnapshot) replays the stored db.global
+-- tables through ProcessImport, so a plan can arrive already normalised
+-- (bosses carry `comp`, defaultComp carries `assignments`). Rebuilding
+-- those from the absent `slots` emptied every comp on the receiving
+-- officer's client.
+local function compFrom(eventId, comp, slots)
+    if type(comp) == "table" and type(comp.assignments) == "table" then return comp end
+    return normalizeRaidComp({ eventId = eventId, slots = slots or {} })
+end
+
 local function importRaidPlans(self, data)
     if not data.raidPlans and not data.raidComps then return 0 end
     local plans = {}
+    local live = {}
     for _, p in ipairs(data.raidPlans or {}) do
         local bosses = {}
         for i, b in ipairs(p.bosses or {}) do
@@ -209,21 +222,34 @@ local function importRaidPlans(self, data)
                     order = tonumber(b.order) or (i - 1),
                     encounterID = tonumber(b.encounterID),
                     inherits = b.inherits and true or false,
-                    comp = (not b.inherits)
-                        and normalizeRaidComp({ eventId = p.eventId, slots = b.slots or {} })
-                        or nil,
+                    comp = (not b.inherits) and compFrom(p.eventId, b.comp, b.slots) or nil,
                 }
             end
         end
         table.sort(bosses, function(a, b) return a.order < b.order end)
+        -- Wire shape: defaultComp is the slot list. Stored shape: a comp.
+        local def = p.defaultComp
+        local isComp = type(def) == "table" and type(def.assignments) == "table"
         plans[#plans + 1] = {
             eventId = p.eventId,
             teamId = p.teamId,
-            defaultComp = normalizeRaidComp({ eventId = p.eventId, slots = p.defaultComp or {} }),
+            defaultComp = compFrom(p.eventId, isComp and def or nil, (not isComp) and def or nil),
             bosses = bosses,
         }
+        if p.eventId ~= nil then live[tostring(p.eventId)] = true end
     end
     self.db.global.raidPlans = plans
+    -- Per-event raid progress (which boss the raid is on, which it has
+    -- killed) only matters while the event is exported; drop the rest so
+    -- SavedVariables don't grow by one entry per raid night forever.
+    for _, key in ipairs({ "compBossByEvent", "compBossKills" }) do
+        local map = self.db.global[key]
+        if type(map) == "table" then
+            for id in pairs(map) do
+                if not live[id] then map[id] = nil end
+            end
+        end
+    end
     return #plans
 end
 
@@ -590,8 +616,12 @@ end
 -- one may prefix the other ("Plexus Sentinel" vs "Plexus Sentinel, the
 -- Warden"). Same rule as the server's wcl.js#sameBoss, so a kill the
 -- server would tie to a lineup boss ties to the same one here.
+--
+-- Only ASCII spaces and punctuation are dropped: `%w` is ASCII-only in
+-- Lua, so "[^%w]" also stripped every byte of a non-English name and a
+-- German or French client could never match a boss by name.
 local function normBossName(s)
-    return (tostring(s or ""):lower():gsub("[^%w]", ""))
+    return (tostring(s or ""):lower():gsub("[%s%p]", ""))
 end
 
 function WGS:SameBoss(a, b)
@@ -668,6 +698,24 @@ function WGS:SetCompBoss(eventId, bossName)
     if self.db.global.compBossByEvent[key] == bossName then return end
     self.db.global.compBossByEvent[key] = bossName
     self:FireEvent("WGS_COMP_BOSS_CHANGED", { eventId = eventId, boss = bossName })
+end
+
+--- Lineup bosses the raid has killed tonight, per event — so a re-kill
+--- (another difficulty) or a re-pull never walks the plan backwards.
+--- Persisted with compBossByEvent and pruned with it on import.
+function WGS:MarkBossKilled(eventId, bossName)
+    if eventId == nil or not bossName then return end
+    self.db.global.compBossKills = self.db.global.compBossKills or {}
+    local key = tostring(eventId)
+    self.db.global.compBossKills[key] = self.db.global.compBossKills[key] or {}
+    self.db.global.compBossKills[key][normBossName(bossName)] = true
+end
+
+function WGS:IsBossKilled(eventId, bossName)
+    if eventId == nil or not bossName then return false end
+    local map = self.db.global.compBossKills
+    local kills = type(map) == "table" and map[tostring(eventId)] or nil
+    return kills ~= nil and kills[normBossName(bossName)] == true
 end
 
 -- Who plays (has a group) in a comp, keyed by lowercased short name.

@@ -98,7 +98,7 @@ local function BuildCompBossPicker(content, anchor, ev, xOff)
     local plan = WGS:GetRaidPlan(ev.id)
     if not plan or #(plan.bosses or {}) == 0 then return nil end
     local current = WGS:GetCompBoss(ev.id)
-    local label = current or "Night default"
+    local label = current or L["COMP_NIGHT_DEFAULT_LABEL"]
     local btn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     btn:SetSize(190, 22)
     btn:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xOff or 0, -6)
@@ -108,10 +108,10 @@ local function BuildCompBossPicker(content, anchor, ev, xOff)
             local mark = (boss == current) and "|cff55dd55\226\156\147|r " or "    "
             return { text = mark .. text, notCheckable = true, func = function() WGS:SetCompBoss(ev.id, boss) end }
         end
-        local menu = { { text = "Comp for", isTitle = true }, item("Night default", nil) }
+        local menu = { { text = L["COMP_FOR_TITLE"], isTitle = true }, item(L["COMP_NIGHT_DEFAULT_LABEL"], nil) }
         for i, b in ipairs(plan.bosses) do
             menu[#menu + 1] = item(string.format("%d. %s%s", i, b.name,
-                b.inherits and " |cff888888(night default)|r" or ""), b.name)
+                b.inherits and (" |cff888888" .. L["COMP_INHERITS"] .. "|r") or ""), b.name)
         end
         ui.OpenContextMenu(menu)
     end)
@@ -431,7 +431,10 @@ local function PopulateRaidStatusSection(content, anchor, ev, width)
     -- planned comp subgroups. Only in a raid (party has no subgroups) and
     -- only when the event actually has a comp to sort against — otherwise
     -- there's nothing to organize and people stay where they landed.
-    local hasComp = FindRaidCompForEvent(ev.id) ~= nil
+    -- A lineup counts even when the current boss has no comp to show:
+    -- otherwise the picker vanishes and the officer can't switch away.
+    local plan = WGS:GetRaidPlan(ev.id)
+    local hasComp = FindRaidCompForEvent(ev.id) ~= nil or (plan and #(plan.bosses or {}) > 0)
     if IsInRaid() and hasComp then
         local xOff = (last == header) and 0 or -12
         local picker = BuildCompBossPicker(content, last, ev, xOff)
@@ -602,7 +605,7 @@ WGS._BuildCompDiff = buildCompDiff   -- exposed for tests
 local function PopulateRaidCompSection(content, anchor, comp, width, ev)
     local bossName = ev and WGS:GetCompBoss(ev.id)
     local header = BuildSectionHeader(content, anchor,
-        bossName and ("Raid Comp \226\128\148 " .. bossName) or "Raid Comp", width)
+        bossName and string.format(L["RAID_COMP_HEADER_FOR"], bossName) or L["RAID_COMP_HEADER"], width)
     -- Out of a raid the picker lives here, so officers can read each
     -- boss's comp before the night; in a raid it sits by Organize Groups.
     if ev and not IsInRaid() then
@@ -731,7 +734,7 @@ local function PopulateRaidCompSection(content, anchor, comp, width, ev)
         end
     end
     if #unassigned > 0 then
-        renderBucket("Standby", "ff888888", unassigned)
+        renderBucket(L["COMP_STANDBY_BUCKET"], "ff888888", unassigned)
     end
 
     -- Planned vs actual diff strip. Renders only when there's an
