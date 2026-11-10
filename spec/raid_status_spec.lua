@@ -105,12 +105,18 @@ describe("WGS:SortRaidGroups event override", function()
         moves = {}
         _G.IsInRaid = function() return true end
         _G.GetNumGroupMembers = function() return 2 end
+        -- Both currently in group 1; comp wants Foo→2, Bar→3. Moves land
+        -- in the roster, as they do in game: the sorter checks each one
+        -- shows up before planning the next.
+        local roster = { { "Foo", 1 }, { "Bar", 1 } }
         _G.GetRaidRosterInfo = function(i)
-            -- Both currently in group 1; comp wants Foo→2, Bar→3.
-            if i == 1 then return "Foo", nil, 1 end
-            if i == 2 then return "Bar", nil, 1 end
+            local r = roster[i]
+            if r then return r[1], nil, r[2] end
         end
-        _G.SetRaidSubgroup = function(i, g) moves[#moves + 1] = { i = i, g = g } end
+        _G.SetRaidSubgroup = function(i, g)
+            moves[#moves + 1] = { i = i, g = g }
+            roster[i][2] = g
+        end
         WGS.HasGroupLeadOrAssist = function() return true, nil end
         WGS.GetRaidComp = function(_, id)
             if id == 99 then

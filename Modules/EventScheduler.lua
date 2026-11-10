@@ -94,12 +94,12 @@ end
 -- Find today's event + matching raid comp
 ---------------------------------------------------------------------------
 
-function WGS:FindTodayEventForTeam(teamId)
+--- Every event on today's local date for `teamId` (nil = all teams).
+function WGS:GetTodayEvents(teamId)
+    local out = {}
     local events = self.db.global.events
-    if not events or #events == 0 then return nil end
+    if not events then return out end
     local today = date("%Y-%m-%d")
-    local now = time()
-    local best, bestDelta = nil, math.huge
     for _, ev in ipairs(events) do
         if not teamId or ev.team_id == teamId or ev.teamId == teamId then
             local t = ParseEventTime(ev)
@@ -110,16 +110,24 @@ function WGS:FindTodayEventForTeam(teamId)
             -- yesterday. Falls back to the raw ev.date string for
             -- legacy events where ParseEventTime used local-time math.
             local evDay = (t and date("%Y-%m-%d", t)) or ev.date
-            if evDay == today and t then
-                local d = math.abs(t - now)
-                if d < bestDelta then best, bestDelta = ev, d end
-            end
+            if evDay == today and t then out[#out + 1] = ev end
         end
+    end
+    return out
+end
+
+--- Today's event for `teamId` (nil = all teams) closest to now.
+function WGS:FindTodayEventForTeam(teamId)
+    local now = time()
+    local best, bestDelta = nil, math.huge
+    for _, ev in ipairs(self:GetTodayEvents(teamId)) do
+        local d = math.abs(ParseEventTime(ev) - now)
+        if d < bestDelta then best, bestDelta = ev, d end
     end
     return best
 end
 
---- Return the character names that committed to attending an event.
+-- Return the character names that committed to attending an event.
 --- Status filter matches COMMITTED_SIGNUP_STATUSES (P/L/B/LT) by
 --- default. Pass includeBench=false to drop B (Bench) — the
 --- split-button's primary action uses this to match the semantic of
@@ -363,12 +371,13 @@ local GROUP_SIZE = 5
 local function compTargets(self, comp)
     local target, standby, hasGroups = {}, {}, false
     for _, a in ipairs(comp.assignments or {}) do
+        -- Any group value at all means the comp carries group data; a
+        -- corrupt one (0, 99) places nobody rather than dropping the whole
+        -- comp to the role fallback.
+        if a.group ~= nil then hasGroups = true end
         if a.group and a.name and not a.placeholder then
             local g = validSubgroup(a.group)
-            if g then
-                target[(WGS:ShortName(a.name)):lower()] = g
-                hasGroups = true
-            end
+            if g then target[(WGS:ShortName(a.name)):lower()] = g end
         end
     end
     if not hasGroups then
@@ -384,7 +393,7 @@ local function compTargets(self, comp)
         local k = a.name and (WGS:ShortName(a.name)):lower()
         -- Pug placeholders aren't characters: nobody in the raid is named
         -- "+ Pug", so they never match and never move anyone.
-        if k and not a.group and not a.placeholder and target[k] == nil then standby[k] = true end
+        if k and a.group == nil and not a.placeholder and target[k] == nil then standby[k] = true end
     end
     return target, standby
 end
@@ -404,7 +413,8 @@ end
 ---
 --- Standby raiders move to the groups after the last playing one (5-8
 --- for a 4-group comp) when `opts.standbyToBack`; raiders the comp
---- doesn't mention at all are only ever moved to make room, never chased.
+--- doesn't place are never chased, only swapped out when a planned
+--- raider needs their seat and nobody misplaced is left to trade with.
 function WGS:PlanGroupMoves(roster, target, standby, opts)
     opts = opts or {}
     local ops, cur, count, short = {}, {}, {}, {}
@@ -464,15 +474,22 @@ function WGS:PlanGroupMoves(roster, target, standby, opts)
                 else
                     -- Full: trade places with someone who doesn't belong
                     -- there — ideally someone who belongs where i is now.
-                    local pick, fallback
+                    -- Last resort, someone the comp doesn't place at all
+                    -- (a trial, an alt, a name spelled differently): a
+                    -- planned raider plays before an unplanned one sits.
+                    local pick, fallback, lastResort
                     for _, o in ipairs(roster) do
                         local j = o.index
-                        if j ~= i and cur[j] == d and not belongs(j, d) then
-                            if belongs(j, cur[i]) then pick = j; break end
-                            fallback = fallback or j
+                        if j ~= i and cur[j] == d then
+                            if not belongs(j, d) then
+                                if belongs(j, cur[i]) then pick = j; break end
+                                fallback = fallback or j
+                            elseif not wants(j) then
+                                lastResort = lastResort or j
+                            end
                         end
                     end
-                    pick = pick or fallback
+                    pick = pick or fallback or lastResort
                     if pick then swap(i, pick) end
                 end
             end
@@ -493,18 +510,110 @@ local function rosterSnapshot()
     return roster
 end
 
-local function applyMoves(ops)
-    local moved = 0
-    for _, o in ipairs(ops) do
-        if o.op == "set" then
-            local g = validSubgroup(o.group)
-            if g then SetRaidSubgroup(o.index, g); moved = moved + 1 end
-        elseif o.op == "swap" and SwapRaidSubgroup then
-            SwapRaidSubgroup(o.a, o.b)
-            moved = moved + 2
-        end
+-- Group changes are asked of the server and land on the client's roster
+-- a moment later. Firing a whole plan at once means every move after the
+-- first was planned against a roster that is already out of date — and a
+-- move into a group the client still thinks is full can be dropped. So a
+-- sort runs one move at a time: issue it, wait until the roster shows it
+-- (or give up waiting), re-read the roster, re-plan, repeat.
+local SORT_STEP_DELAY = 0.25   -- seconds between roster checks
+local SORT_STEP_WAIT  = 8      -- checks to wait for one move to land
+local SORT_MAX_STEPS  = 40     -- a 30-man raid needs far fewer
+local sortGeneration = 0       -- a newer sort supersedes a running one
+local sortRunning = false
+
+local function combatBusy()
+    return (InCombatLockdown and InCombatLockdown())
+        or (IsEncounterInProgress and IsEncounterInProgress()) or false
+end
+
+-- name → subgroup on the live roster.
+local function groupsByName()
+    local out = {}
+    for _, r in ipairs(rosterSnapshot()) do out[r.short:lower()] = r.subgroup end
+    return out
+end
+
+-- Issue one planned op; returns what the roster should then show
+-- ({ name → group }) and the names it moves.
+local function issueOp(op, roster)
+    local byIndex = {}
+    for _, r in ipairs(roster) do byIndex[r.index] = r end
+    if op.op == "set" then
+        local r, g = byIndex[op.index], validSubgroup(op.group)
+        if not r or not g then return nil end
+        SetRaidSubgroup(op.index, g)
+        return { [r.short:lower()] = g }, { r.short }
+    elseif op.op == "swap" and SwapRaidSubgroup then
+        local a, b = byIndex[op.a], byIndex[op.b]
+        if not a or not b then return nil end
+        SwapRaidSubgroup(op.a, op.b)
+        return { [a.short:lower()] = b.subgroup, [b.short:lower()] = a.subgroup }, { a.short, b.short }
     end
-    return moved
+    return nil
+end
+
+--- Run a sort to completion, one move at a time. `plan()` returns the
+--- moves for the CURRENT roster; `done(movedNames)` is called once at the
+--- end. Without C_Timer (tests) every step runs immediately.
+local function runSort(plan, done)
+    sortGeneration = sortGeneration + 1
+    local gen = sortGeneration
+    sortRunning = true
+    local moved, movedList, steps = {}, {}, 0
+    local expect, waited
+
+    local function finish()
+        if gen ~= sortGeneration then return end
+        sortRunning = false
+        done(movedList)
+    end
+
+    local step
+    local function later()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(SORT_STEP_DELAY, step)
+            return true
+        end
+        return false
+    end
+
+    step = function()
+        if gen ~= sortGeneration then return end          -- superseded
+        if not IsInRaid() or combatBusy() then return finish() end
+        if expect then
+            -- Wait for the last move to show before planning the next,
+            -- or a swap would be re-issued and undo itself.
+            local now = groupsByName()
+            local landed = true
+            for name, g in pairs(expect) do
+                if now[name] ~= nil and now[name] ~= g then landed = false end
+            end
+            if not landed then
+                if waited < SORT_STEP_WAIT and later() then
+                    waited = waited + 1
+                    return
+                end
+                -- The move never showed up — refused, or the raid changed
+                -- under us. Stop rather than re-issue it forever.
+                return finish()
+            end
+            expect = nil
+        end
+        if steps >= SORT_MAX_STEPS then return finish() end
+        local roster = rosterSnapshot()
+        local op = plan(roster)[1]
+        if not op then return finish() end
+        local e, names = issueOp(op, roster)
+        steps = steps + 1
+        if not e then return finish() end
+        for _, n in ipairs(names) do
+            if not moved[n] then moved[n] = true; movedList[#movedList + 1] = n end
+        end
+        expect, waited = e, 0
+        if not later() then return step() end
+    end
+    step()
 end
 
 -- /gh sortgroups — assign raid subgroups from comp
@@ -526,6 +635,10 @@ function WGS:SortRaidGroups(eventOverride, bossOverride)
     local ok = self:HasGroupLeadOrAssist()
     if not ok then
         self:Print(L["ERR_RAID_LEAD_FOR_SORT"])
+        return
+    end
+    if combatBusy() then
+        self:Print(L["ERR_SORT_IN_COMBAT"])
         return
     end
 
@@ -551,54 +664,48 @@ function WGS:SortRaidGroups(eventOverride, bossOverride)
     end
 
     local target, standby = compTargets(self, comp)
-    local ops = self:PlanGroupMoves(rosterSnapshot(), target, standby, {
-        standbyToBack = self.db.profile.standbyToBackGroups ~= false,
-    })
-    local moved = applyMoves(ops)
-
+    local opts = { standbyToBack = self.db.profile.standbyToBackGroups ~= false }
     local label = boss or L["COMP_NIGHT_DEFAULT"]
-    if moved > 0 then
-        self:Print(string.format(L["SORT_SUMMARY_FOR"], moved, label))
-    else
-        self:Print(string.format(L["SORT_NONE_FOR"], label))
-    end
+    runSort(function(roster)
+        return self:PlanGroupMoves(roster, target, standby, opts)
+    end, function(movedList)
+        if #movedList > 0 then
+            self:Print(string.format(L["SORT_SUMMARY_FOR"], #movedList, label))
+        else
+            self:Print(string.format(L["SORT_NONE_FOR"], label))
+        end
+    end)
 end
 
 --- Place a single raider into their planned comp subgroup, if the comp
 --- for `eventId` assigns them one and they aren't already in it. Returns
 --- true when a move happened. No-op (false) when there's no comp, the
---- raider has no group assignment, we lack raid lead/assist, or they're
---- already in the right group. Powers the auto-place-on-accept flow so a
---- raider lands in their group the moment they join, WITHOUT reshuffling
---- anyone already placed (that's what SortRaidGroups is for) — so a full
---- group is skipped, never swapped into. Uses the comp of the boss the
---- raid is on; a raider that comp has on standby goes to a back group.
+--- raider has no group assignment, we lack raid lead/assist, a full sort
+--- is already running, it's mid-pull, or they're already in place.
+--- Powers the auto-place-on-accept flow so a raider lands in their group
+--- the moment they join, WITHOUT reshuffling anyone already placed (that's
+--- what SortRaidGroups is for) — so a full group is skipped, never swapped
+--- into. Same rule as a full sort (compTargets): the comp of the boss the
+--- raid is on, role groups for a comp with no group data, and a raider the
+--- comp has on standby goes to a back group.
 function WGS:PlaceRaiderInCompGroup(shortName, eventId)
     if not shortName or not eventId then return false end
     if not IsInRaid() then return false end
+    if sortRunning or combatBusy() then return false end
     if not self:HasGroupLeadOrAssist() then return false end
 
     local comp = self:GetRaidComp(eventId, self:GetCompBoss(eventId))
     if not comp or not comp.assignments then return false end
 
     local wanted = shortName:lower()
-    local target
-    local onStandby = false
-    for _, a in ipairs(comp.assignments) do
-        if a.name and not a.placeholder and (WGS:ShortName(a.name)):lower() == wanted then
-            if a.group then target = validSubgroup(a.group) else onStandby = true end
-            break
-        end
-    end
+    local targets, standby = compTargets(self, comp)
+    local target = targets[wanted]
 
     local roster = rosterSnapshot()
     local count, mine = {}, nil
     for g = 1, MAX_RAID_SUBGROUP do count[g] = 0 end
     local lastPlaying = 4
-    for _, a in ipairs(comp.assignments) do
-        local g = validSubgroup(a.group)
-        if g and g > lastPlaying then lastPlaying = g end
-    end
+    for _, g in pairs(targets) do if g > lastPlaying then lastPlaying = g end end
     for _, r in ipairs(roster) do
         local g = validSubgroup(r.subgroup)
         if g then count[g] = count[g] + 1 end
@@ -606,7 +713,7 @@ function WGS:PlaceRaiderInCompGroup(shortName, eventId)
     end
     if not mine then return false end
 
-    if not target and onStandby and self.db.profile.standbyToBackGroups ~= false
+    if not target and standby[wanted] and self.db.profile.standbyToBackGroups ~= false
         and (validSubgroup(mine.subgroup) or 1) <= lastPlaying then
         for g = lastPlaying + 1, MAX_RAID_SUBGROUP do
             if count[g] < GROUP_SIZE then target = g; break end
@@ -622,44 +729,70 @@ end
 -- Boss lineup: follow the raid through tonight's bosses
 ---------------------------------------------------------------------------
 
--- The event a kill belongs to: the tracked session's, else today's.
+-- The event a pull or kill belongs to: the tracked attendance session's.
+-- Without one, today's event — but only when exactly ONE of today's
+-- events has a lineup: two teams raiding the same tier the same night
+-- share boss names, and guessing would follow (and sort for) the other
+-- team's plan.
 local function planEventId(self)
     local ctx = self.GetCurrentAttendanceContext and self:GetCurrentAttendanceContext()
     if ctx and ctx.eventId then return ctx.eventId end
-    local ev = self:FindTodayEventForTeam(nil)
-    return ev and (ev.id or ev.eventId) or nil
+    local found
+    for _, ev in ipairs(self:GetTodayEvents(nil)) do
+        local id = ev.id or ev.eventId
+        local plan = id and self:GetRaidPlan(id)
+        if plan and #(plan.bosses or {}) > 0 then
+            if found then return nil end
+            found = id
+        end
+    end
+    return found
 end
 WGS._PlanEventId = planEventId
 
-local pendingSort   -- { event = {id}, boss } waiting for combat to end
+local PENDING_SORT_TIMEOUT = 300   -- seconds; a sort waits at most one pull
+local pendingSort   -- { event = {id}, boss, deadline } waiting for combat to end
 
---- Sort now, or as soon as combat ends. Raid groups can't be reshuffled
+local function pollPendingSort()
+    if not pendingSort then return end
+    if time() > pendingSort.deadline then pendingSort = nil; return end
+    if combatBusy() then
+        if C_Timer and C_Timer.After then C_Timer.After(1, pollPendingSort) end
+        return
+    end
+    WGS:RunPendingSort()
+end
+
+--- Sort now, or as soon as it's safe. Raid groups can't be reshuffled
 --- mid-pull, and ENCOUNTER_END usually fires a beat before combat drops.
+--- Waits on both signals: PLAYER_REGEN_ENABLED covers the common case, and
+--- a short poll covers an officer who was already out of combat (dead,
+--- say) while the encounter itself was still running.
 function WGS:SortWhenSafe(event, boss)
-    local busy = (InCombatLockdown and InCombatLockdown())
-        or (IsEncounterInProgress and IsEncounterInProgress())
-    if not busy then
+    if not combatBusy() then
         self:SortRaidGroups(event, boss or "")
         return true
     end
-    pendingSort = { event = event, boss = boss or "" }
+    pendingSort = { event = event, boss = boss or "", deadline = time() + PENDING_SORT_TIMEOUT }
     module:RegisterEvent("PLAYER_REGEN_ENABLED", "OnRegenEnabled")
+    if C_Timer and C_Timer.After then C_Timer.After(1, pollPendingSort) end
     return false
 end
 
---- Run the sort SortWhenSafe deferred (combat just ended). Returns true
---- when there was one to run.
+--- Run the sort SortWhenSafe deferred. Returns true when it ran; false
+--- when there was none, or it still isn't safe (it stays pending).
 function WGS:RunPendingSort()
     local p = pendingSort
-    pendingSort = nil
     if not p then return false end
+    if combatBusy() then return false end
+    pendingSort = nil
     if IsInRaid() then self:SortRaidGroups(p.event, p.boss) end
     return true
 end
 
 function module:OnRegenEnabled()
     module:UnregisterEvent("PLAYER_REGEN_ENABLED")
-    WGS:RunPendingSort()
+    pollPendingSort()
 end
 
 local function joinNames(list)
@@ -667,28 +800,46 @@ local function joinNames(list)
     return table.concat(list, ", ")
 end
 
+-- The next boss to plan for after `idx`: the first one after it the raid
+-- hasn't killed tonight, else the first skipped one before it. nil when
+-- everything on the lineup is dead.
+local function nextUnkilled(self, eventId, plan, idx)
+    for i = idx + 1, #plan.bosses do
+        if not self:IsBossKilled(eventId, plan.bosses[i].name) then return plan.bosses[i] end
+    end
+    for i = 1, idx - 1 do
+        if not self:IsBossKilled(eventId, plan.bosses[i].name) then return plan.bosses[i] end
+    end
+    return nil
+end
+
 --- A pull on a lineup boss puts the raid on that boss's comp (so skipping
---- one in the order doesn't leave the plan a boss behind). Silent.
+--- one in the order doesn't leave the plan a boss behind). A boss already
+--- killed tonight — a re-pull on another difficulty — changes nothing.
 function WGS:OnLineupBossPulled(encounterID, encounterName)
     local eventId = planEventId(self)
     local plan = self:GetRaidPlan(eventId)
     local _, entry = self:FindPlanBoss(plan, encounterName, encounterID)
-    if entry and self:GetCompBoss(eventId) ~= entry.name then
+    if not entry or self:IsBossKilled(eventId, entry.name) then return end
+    if self:GetCompBoss(eventId) ~= entry.name then
         self:SetCompBoss(eventId, entry.name)
     end
 end
 
---- A kill moves the raid to the next boss on the lineup: prints who comes
---- in and who goes to standby, and — with auto-sort on and lead/assist —
---- sorts the groups for it as soon as combat ends. A kill of a boss that
---- isn't on the lineup changes nothing. Returns the next boss's entry.
+--- A kill moves the raid to the next boss it hasn't killed tonight:
+--- prints who comes in and who goes to standby, and — with auto-sort on
+--- and lead/assist — sorts the groups for it as soon as it's safe. A kill
+--- of a boss that isn't on the lineup, or one already killed tonight,
+--- changes nothing: the plan never walks backwards. Returns the next
+--- boss's entry.
 function WGS:OnLineupBossKilled(encounterID, encounterName)
     local eventId = planEventId(self)
     local plan = self:GetRaidPlan(eventId)
     local idx, killed = self:FindPlanBoss(plan, encounterName, encounterID)
-    if not idx then return nil end
+    if not idx or self:IsBossKilled(eventId, killed.name) then return nil end
+    self:MarkBossKilled(eventId, killed.name)
 
-    local nextBoss = plan.bosses[idx + 1]
+    local nextBoss = nextUnkilled(self, eventId, plan, idx)
     local isLead = self:HasGroupLeadOrAssist()
     if not nextBoss then
         if isLead then self:Print(L["LINEUP_DONE"]) end
